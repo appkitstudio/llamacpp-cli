@@ -1,0 +1,259 @@
+import * as https from 'https';
+import * as fs from 'fs';
+import * as path from 'path';
+import chalk from 'chalk';
+import { getModelsDir } from '../utils/file-utils';
+import { formatBytes } from '../utils/format-utils';
+
+export interface DownloadProgress {
+  filename: string;
+  downloaded: number;
+  total: number;
+  percentage: number;
+  speed: string;
+}
+
+export class ModelDownloader {
+  private modelsDir: string;
+
+  constructor(modelsDir?: string) {
+    this.modelsDir = modelsDir || getModelsDir();
+  }
+
+  /**
+   * Parse Hugging Face identifier
+   * Examples:
+   *   "bartowski/Llama-3.2-3B-Instruct-GGUF" → { repo: "...", file: undefined }
+   *   "bartowski/Llama-3.2-3B-Instruct-GGUF/file.gguf" → { repo: "...", file: "file.gguf" }
+   */
+  parseHFIdentifier(identifier: string): { repo: string; file?: string } {
+    const parts = identifier.split('/');
+    if (parts.length === 2) {
+      return { repo: identifier };
+    } else if (parts.length === 3) {
+      return {
+        repo: `${parts[0]}/${parts[1]}`,
+        file: parts[2],
+      };
+    } else {
+      throw new Error(`Invalid Hugging Face identifier: ${identifier}`);
+    }
+  }
+
+  /**
+   * Build Hugging Face download URL
+   */
+  buildDownloadUrl(repoId: string, filename: string, branch = 'main'): string {
+    return `https://huggingface.co/${repoId}/resolve/${branch}/${filename}`;
+  }
+
+  /**
+   * Download a file via HTTPS with progress tracking
+   */
+  private downloadFile(
+    url: string,
+    destPath: string,
+    onProgress?: (downloaded: number, total: number) => void
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const file = fs.createWriteStream(destPath);
+      let downloadedBytes = 0;
+      let totalBytes = 0;
+      let lastUpdateTime = Date.now();
+      let lastDownloadedBytes = 0;
+      let completed = false;
+
+      const cleanup = (sigintHandler?: () => void) => {
+        if (sigintHandler) {
+          process.removeListener('SIGINT', sigintHandler);
+        }
+      };
+
+      const handleError = (err: Error, sigintHandler?: () => void) => {
+        if (completed) return;
+        completed = true;
+        cleanup(sigintHandler);
+        file.close(() => {
+          fs.unlink(destPath, () => {});
+        });
+        reject(err);
+      };
+
+      const sigintHandler = () => {
+        request.destroy();
+        handleError(new Error('Download interrupted by user'), sigintHandler);
+      };
+
+      const request = https.get(url, { agent: new https.Agent({ keepAlive: false }) }, (response) => {
+        // Handle redirects (301, 302, 307, 308)
+        if (response.statusCode === 301 || response.statusCode === 302 ||
+            response.statusCode === 307 || response.statusCode === 308) {
+          const redirectUrl = response.headers.location;
+          if (redirectUrl) {
+            cleanup(sigintHandler);
+            // Wait for file to close before starting new download
+            file.close(() => {
+              fs.unlink(destPath, () => {
+                // Start recursive download only after cleanup is complete
+                this.downloadFile(redirectUrl, destPath, onProgress)
+                  .then(resolve)
+                  .catch(reject);
+              });
+            });
+            return;
+          }
+        }
+
+        if (response.statusCode !== 200) {
+          return handleError(
+            new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`),
+            sigintHandler
+          );
+        }
+
+        totalBytes = parseInt(response.headers['content-length'] || '0', 10);
+
+        response.on('data', (chunk: Buffer) => {
+          downloadedBytes += chunk.length;
+
+          // Update progress every 500ms
+          const now = Date.now();
+          if (onProgress && now - lastUpdateTime >= 500) {
+            onProgress(downloadedBytes, totalBytes);
+            lastUpdateTime = now;
+            lastDownloadedBytes = downloadedBytes;
+          }
+        });
+
+        response.pipe(file);
+
+        file.on('finish', () => {
+          if (completed) return;
+          completed = true;
+
+          // Final progress update
+          if (onProgress) {
+            onProgress(downloadedBytes, totalBytes);
+          }
+
+          // Use callback to ensure close completes before resolving
+          file.close((err) => {
+            cleanup(sigintHandler);
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+      });
+
+      request.on('error', (err) => {
+        handleError(err, sigintHandler);
+      });
+
+      file.on('error', (err) => {
+        handleError(err, sigintHandler);
+      });
+
+      // Handle Ctrl+C gracefully
+      process.on('SIGINT', sigintHandler);
+    });
+  }
+
+  /**
+   * Display progress bar
+   */
+  private displayProgress(downloaded: number, total: number, filename: string): void {
+    const percentage = total > 0 ? (downloaded / total) * 100 : 0;
+    const barLength = 40;
+    const filledLength = Math.round((barLength * downloaded) / total);
+    const bar = '█'.repeat(filledLength) + '░'.repeat(barLength - filledLength);
+
+    const downloadedFormatted = formatBytes(downloaded);
+    const totalFormatted = formatBytes(total);
+    const percentFormatted = percentage.toFixed(1);
+
+    // Clear line and print progress
+    process.stdout.write('\r\x1b[K');
+    process.stdout.write(
+      chalk.blue(`[${bar}] ${percentFormatted}% | ${downloadedFormatted} / ${totalFormatted}`)
+    );
+  }
+
+  /**
+   * Download a model from Hugging Face
+   */
+  async downloadModel(
+    repoId: string,
+    filename: string,
+    onProgress?: (progress: DownloadProgress) => void
+  ): Promise<string> {
+    console.log(chalk.blue(`📥 Downloading ${filename} from Hugging Face...`));
+    console.log(chalk.dim(`Repository: ${repoId}`));
+    console.log(chalk.dim(`Destination: ${this.modelsDir}`));
+    console.log();
+
+    // Build download URL
+    const url = this.buildDownloadUrl(repoId, filename);
+    const destPath = path.join(this.modelsDir, filename);
+
+    // Check if file already exists
+    if (fs.existsSync(destPath)) {
+      console.log(chalk.yellow(`⚠️  File already exists: ${filename}`));
+      console.log(chalk.dim('   Remove it first or choose a different filename'));
+      throw new Error('File already exists');
+    }
+
+    // Download with progress
+    const startTime = Date.now();
+    let lastDownloaded = 0;
+    let lastTime = startTime;
+
+    await this.downloadFile(url, destPath, (downloaded, total) => {
+      // Calculate speed
+      const now = Date.now();
+      const timeDiff = (now - lastTime) / 1000; // seconds
+      const bytesDiff = downloaded - lastDownloaded;
+      const speed = timeDiff > 0 ? bytesDiff / timeDiff : 0;
+
+      // Update for next calculation
+      lastTime = now;
+      lastDownloaded = downloaded;
+
+      // Display progress bar
+      this.displayProgress(downloaded, total, filename);
+
+      // Call user progress callback if provided
+      if (onProgress) {
+        onProgress({
+          filename,
+          downloaded,
+          total,
+          percentage: total > 0 ? (downloaded / total) * 100 : 0,
+          speed: `${formatBytes(speed)}/s`,
+        });
+      }
+    });
+
+    // Clear progress line and show completion
+    process.stdout.write('\r\x1b[K');
+    console.log(chalk.green('✅ Download complete!'));
+
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    console.log(chalk.dim(`   Time: ${totalTime}s`));
+    console.log(chalk.dim(`   Location: ${destPath}`));
+
+    return destPath;
+  }
+
+  /**
+   * List GGUF files in a Hugging Face repository
+   * (This would require calling the HF API - simplified for now)
+   */
+  async listGGUFFiles(repoId: string): Promise<string[]> {
+    console.log(chalk.yellow('Listing files is not yet implemented.'));
+    console.log(chalk.dim('Please specify the file with --file <filename>'));
+    return [];
+  }
+}
+
+// Export singleton instance
+export const modelDownloader = new ModelDownloader();

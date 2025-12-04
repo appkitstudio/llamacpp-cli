@@ -1,0 +1,38 @@
+{
+  "name": "llamacpp-cli",
+  "version": "1.0.0",
+  "description": "CLI tool to manage local llama.cpp servers on macOS",
+  "main": "dist/cli.js",
+  "bin": {
+    "llamacpp": "./bin/llamacpp"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts",
+    "build": "tsc",
+    "start": "node dist/cli.js",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "llama",
+    "llama.cpp",
+    "llm",
+    "cli",
+    "server-management"
+  ],
+  "author": "Dave Weaver",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "cli-table3": "^0.6.5",
+    "commander": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "tsx": "^4.7.2",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
