@@ -5,9 +5,11 @@ import chalk from 'chalk';
 import { listCommand } from './commands/list';
 import { psCommand } from './commands/ps';
 import { startCommand } from './commands/start';
+import { runCommand } from './commands/run';
 import { stopCommand } from './commands/stop';
 import { deleteCommand } from './commands/delete';
 import { pullCommand } from './commands/pull';
+import { rmCommand } from './commands/rm';
 import { logsCommand } from './commands/logs';
 import { searchCommand } from './commands/search';
 import { showCommand } from './commands/show';
@@ -39,52 +41,6 @@ program
   .action(async () => {
     try {
       await psCommand();
-    } catch (error) {
-      console.error(chalk.red('❌ Error:'), (error as Error).message);
-      process.exit(1);
-    }
-  });
-
-// Start a server
-program
-  .command('start')
-  .description('Start a llama-server instance')
-  .argument('<model>', 'Model filename or path')
-  .option('-p, --port <number>', 'Port number (default: auto-assign)', parseInt)
-  .option('-t, --threads <number>', 'Thread count (default: auto)', parseInt)
-  .option('-c, --ctx-size <number>', 'Context size (default: auto)', parseInt)
-  .option('-g, --gpu-layers <number>', 'GPU layers (default: 60)', parseInt)
-  .action(async (model: string, options) => {
-    try {
-      await startCommand(model, options);
-    } catch (error) {
-      console.error(chalk.red('❌ Error:'), (error as Error).message);
-      process.exit(1);
-    }
-  });
-
-// Stop a server
-program
-  .command('stop')
-  .description('Stop a running server')
-  .argument('<identifier>', 'Server identifier (model name, ID, or port)')
-  .action(async (identifier: string) => {
-    try {
-      await stopCommand(identifier);
-    } catch (error) {
-      console.error(chalk.red('❌ Error:'), (error as Error).message);
-      process.exit(1);
-    }
-  });
-
-// Delete a server
-program
-  .command('delete')
-  .description('Delete a server configuration and launchctl service')
-  .argument('<identifier>', 'Server identifier (model name, ID, or port)')
-  .action(async (identifier: string) => {
-    try {
-      await deleteCommand(identifier);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);
@@ -139,11 +95,90 @@ program
     }
   });
 
-// View logs
+// Delete a model
 program
+  .command('rm')
+  .description('Delete a model file (and any associated servers)')
+  .argument('<model>', 'Model filename or partial name')
+  .action(async (model: string) => {
+    try {
+      await rmCommand(model);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Server management commands
+const server = program
+  .command('server')
+  .description('Manage llama-server instances');
+
+// Start a server
+server
+  .command('start')
+  .description('Start a llama-server instance')
+  .argument('<model>', 'Model filename or path')
+  .option('-p, --port <number>', 'Port number (default: auto-assign)', parseInt)
+  .option('-t, --threads <number>', 'Thread count (default: auto)', parseInt)
+  .option('-c, --ctx-size <number>', 'Context size (default: auto)', parseInt)
+  .option('-g, --gpu-layers <number>', 'GPU layers (default: 60)', parseInt)
+  .action(async (model: string, options) => {
+    try {
+      await startCommand(model, options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Run interactive chat with a model
+server
+  .command('run')
+  .description('Run an interactive chat session with a model')
+  .argument('<model>', 'Model identifier: port (9000), server ID (llama-3-2-3b), partial name, or model filename')
+  .action(async (model: string) => {
+    try {
+      await runCommand(model);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Stop a server
+server
+  .command('stop')
+  .description('Stop a running server')
+  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .action(async (identifier: string) => {
+    try {
+      await stopCommand(identifier);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Delete a server
+server
+  .command('rm')
+  .description('Remove a server configuration and launchctl service (preserves model file)')
+  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .action(async (identifier: string) => {
+    try {
+      await deleteCommand(identifier);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// View logs
+server
   .command('logs')
   .description('View server logs')
-  .argument('<identifier>', 'Server identifier (model name, ID, or port)')
+  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
   .option('-f, --follow', 'Follow log output in real-time')
   .option('-n, --lines <number>', 'Number of lines to show (default: 50)', parseInt)
   .option('--errors', 'Show stderr instead of stdout')

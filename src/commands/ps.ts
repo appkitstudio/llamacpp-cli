@@ -2,14 +2,14 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import { stateManager } from '../lib/state-manager';
 import { statusChecker } from '../lib/status-checker';
-import { truncate, formatUptime } from '../utils/format-utils';
+import { formatUptime } from '../utils/format-utils';
 
 export async function psCommand(): Promise<void> {
   const servers = await stateManager.getAllServers();
 
   if (servers.length === 0) {
     console.log(chalk.yellow('No servers configured.'));
-    console.log(chalk.dim('\nStart a server: llamacpp start <model-filename>'));
+    console.log(chalk.dim('\nStart a server: llamacpp server start <model-filename>'));
     return;
   }
 
@@ -18,8 +18,7 @@ export async function psCommand(): Promise<void> {
   const updated = await statusChecker.updateAllServerStatuses();
 
   const table = new Table({
-    head: ['MODEL', 'PORT', 'STATUS', 'PID', 'UPTIME'],
-    colWidths: [30, 8, 12, 10, 12],
+    head: ['SERVER ID', 'MODEL', 'PORT', 'STATUS', 'PID', 'UPTIME'],
   });
 
   let runningCount = 0;
@@ -53,7 +52,8 @@ export async function psCommand(): Promise<void> {
         : '-';
 
     table.push([
-      truncate(server.modelName, 28),
+      server.id,
+      server.modelName,
       server.port.toString(),
       statusColor(statusText),
       server.pid?.toString() || '-',
@@ -74,6 +74,6 @@ export async function psCommand(): Promise<void> {
   console.log(chalk.dim(`\nTotal: ${servers.length} servers (${summary.join(', ')})`));
 
   if (crashedCount > 0) {
-    console.log(chalk.red('\n⚠️  Some servers have crashed. Check logs with: llamacpp logs <id> --errors'));
+    console.log(chalk.red('\n⚠️  Some servers have crashed. Check logs with: llamacpp server logs <id> --errors'));
   }
 }

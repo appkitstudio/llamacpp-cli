@@ -1,0 +1,9 @@
+{
+  "disabledMcpjsonServers": [
+    "playwright",
+    "macos-mail",
+    "nocodb",
+    "n8n-mcp",
+    "atlassian"
+  ]
+}
