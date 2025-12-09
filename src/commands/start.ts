@@ -127,7 +127,7 @@ export async function startCommand(model: string, options: StartOptions): Promis
     await launchctlManager.stopService(config.label);
     await launchctlManager.unloadService(config.plistPath);
     await launchctlManager.deletePlist(config.plistPath);
-    throw new Error('Server failed to start. Check logs with: llamacpp logs --errors');
+    throw new Error('Server failed to start. Check logs with: llamacpp server logs --errors');
   }
 
   // 12. Update config with running status
@@ -141,6 +141,6 @@ export async function startCommand(model: string, options: StartOptions): Promis
   console.log(chalk.green('✅ Server started successfully!'));
   console.log();
   console.log(chalk.dim(`Connect: http://localhost:${config.port}`));
-  console.log(chalk.dim(`View logs: llamacpp logs ${config.id}`));
-  console.log(chalk.dim(`Stop: llamacpp stop ${config.id}`));
+  console.log(chalk.dim(`View logs: llamacpp server logs ${config.id}`));
+  console.log(chalk.dim(`Stop: llamacpp server stop ${config.id}`));
 }

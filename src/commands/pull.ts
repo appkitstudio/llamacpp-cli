@@ -30,7 +30,7 @@ export async function pullCommand(identifier: string, options: PullOptions): Pro
     const modelPath = await modelDownloader.downloadModel(parsed.repo, filename);
 
     console.log();
-    console.log(chalk.dim(`Start server: llamacpp start ${filename}`));
+    console.log(chalk.dim(`Start server: llamacpp server start ${filename}`));
   } catch (error) {
     if ((error as Error).message.includes('interrupted')) {
       console.log(chalk.dim('\nDownload was interrupted. Run the same command again to retry.'));

@@ -49,7 +49,7 @@ export async function runCommand(modelIdentifier: string): Promise<void> {
   // 2. Verify server is running
   const status = await statusChecker.checkServer(server);
   if (!status.isRunning) {
-    throw new Error(`Server exists but is not running. Start it with: llamacpp start ${server.id}`);
+    throw new Error(`Server exists but is not running. Start it with: llamacpp server start ${server.id}`);
   }
 
   // 3. Start REPL
