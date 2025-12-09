@@ -168,9 +168,10 @@ server
   .command('run')
   .description('Run an interactive chat session with a model')
   .argument('<model>', 'Model identifier: port (9000), server ID (llama-3-2-3b), partial name, or model filename')
-  .action(async (model: string) => {
+  .option('-m, --message <text>', 'Send a single message and exit (non-interactive mode)')
+  .action(async (model: string, options) => {
     try {
-      await runCommand(model);
+      await runCommand(model, options);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);

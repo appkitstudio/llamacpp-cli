@@ -25,7 +25,11 @@ interface ChatCompletionChunk {
   }>;
 }
 
-export async function runCommand(modelIdentifier: string): Promise<void> {
+interface RunOptions {
+  message?: string;
+}
+
+export async function runCommand(modelIdentifier: string, options: RunOptions = {}): Promise<void> {
   await stateManager.initialize();
 
   // 1. Find or start server
@@ -52,7 +56,27 @@ export async function runCommand(modelIdentifier: string): Promise<void> {
     throw new Error(`Server exists but is not running. Start it with: llamacpp server start ${server.id}`);
   }
 
-  // 3. Start REPL
+  // 3. If message provided, do one-shot mode
+  if (options.message) {
+    const conversationHistory: ChatMessage[] = [
+      {
+        role: 'user',
+        content: options.message,
+      },
+    ];
+
+    try {
+      await streamChatCompletion(server, conversationHistory);
+      console.log(); // Blank line after response
+      process.exit(0);
+    } catch (error) {
+      console.error(chalk.red(`\n❌ Error: ${(error as Error).message}\n`));
+      process.exit(1);
+    }
+    return;
+  }
+
+  // 4. Start REPL
   console.log(chalk.green(`💬 Connected to ${server.modelName} (port ${server.port})`));
   console.log(chalk.dim(`Type your message and press Enter. Use /exit to quit, /clear to reset history, /help for commands.\n`));
 

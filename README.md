@@ -79,6 +79,9 @@ llamacpp ps
 # Chat with your model interactively
 llamacpp server run llama-3.2-3b
 
+# Or send a single message (non-interactive)
+llamacpp server run llama-3.2-3b -m "What is the capital of France?"
+
 # Stop a server
 llamacpp server stop llama-3.2-3b
 
@@ -166,6 +169,12 @@ You: What is the capital of France?
 Assistant: The capital of France is Paris...
 
 You: exit
+```
+
+One-shot message:
+```
+$ llamacpp server run llama-3.2-3b -m "What is the capital of France?"
+Assistant: The capital of France is Paris...
 ```
 
 ## Commands
@@ -302,18 +311,26 @@ llamacpp server start llama-3-2-3b       # By server ID
 
 **Identifiers:** Port number, server ID, partial model name, or model filename
 
-### `llamacpp server run <identifier>`
-Run an interactive chat session with a model.
+### `llamacpp server run <identifier> [options]`
+Run an interactive chat session with a model, or send a single message.
 
 ```bash
+# Interactive mode (REPL)
 llamacpp server run llama-3.2-3b       # By partial name
 llamacpp server run 9000               # By port
 llamacpp server run llama-3-2-3b       # By server ID
+
+# One-shot mode (single message and exit)
+llamacpp server run llama-3.2-3b -m "What is the capital of France?"
+llamacpp server run 9000 --message "Explain quantum computing in simple terms"
 ```
+
+**Options:**
+- `-m, --message <text>` - Send a single message and exit (non-interactive mode)
 
 **Identifiers:** Port number, server ID, partial model name, or model filename
 
-Type `exit` or press Ctrl+C to end the session.
+In interactive mode, type `exit` or press Ctrl+C to end the session.
 
 ### `llamacpp server stop <identifier>`
 Stop a running server by model name, port, or ID.
