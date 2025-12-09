@@ -58,3 +58,41 @@ export async function isPortInUse(port: number): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Get memory usage for a process in bytes
+ * Uses 'top' on macOS which includes GPU/Metal memory (more accurate for llama-server)
+ * Returns null if process not found or error occurs
+ */
+export async function getProcessMemory(pid: number): Promise<number | null> {
+  try {
+    // Use top with -l 1 (one sample) to get memory stats
+    // MEM column shows resident memory including GPU memory on macOS
+    const output = await execCommand(`top -l 1 -pid ${pid} -stats mem`);
+
+    // Get the last non-empty line which contains the memory value
+    const lines = output.split('\n').filter((line) => line.trim().length > 0);
+    if (lines.length === 0) return null;
+
+    const memStr = lines[lines.length - 1].trim();
+
+    // Parse memory string (e.g., "10.5G", "512M", "1024K", "10G")
+    const match = memStr.match(/^([\d.]+)([KMGT])$/);
+    if (!match) return null;
+
+    const value = parseFloat(match[1]);
+    const unit = match[2];
+
+    // Convert to bytes
+    const multipliers: { [key: string]: number } = {
+      K: 1024,
+      M: 1024 * 1024,
+      G: 1024 * 1024 * 1024,
+      T: 1024 * 1024 * 1024 * 1024,
+    };
+
+    return Math.round(value * multipliers[unit]);
+  } catch {
+    return null;
+  }
+}

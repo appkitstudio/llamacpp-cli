@@ -2,7 +2,8 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import { stateManager } from '../lib/state-manager';
 import { statusChecker } from '../lib/status-checker';
-import { formatUptime } from '../utils/format-utils';
+import { formatUptime, formatBytes } from '../utils/format-utils';
+import { getProcessMemory } from '../utils/process-utils';
 
 export async function psCommand(): Promise<void> {
   const servers = await stateManager.getAllServers();
@@ -18,7 +19,7 @@ export async function psCommand(): Promise<void> {
   const updated = await statusChecker.updateAllServerStatuses();
 
   const table = new Table({
-    head: ['SERVER ID', 'MODEL', 'PORT', 'STATUS', 'PID', 'UPTIME'],
+    head: ['SERVER ID', 'MODEL', 'PORT', 'STATUS', 'PID', 'MEMORY', 'UPTIME'],
   });
 
   let runningCount = 0;
@@ -51,12 +52,22 @@ export async function psCommand(): Promise<void> {
         ? formatUptime(server.lastStarted)
         : '-';
 
+    // Get memory usage for running servers
+    let memoryText = '-';
+    if (server.status === 'running' && server.pid) {
+      const memoryBytes = await getProcessMemory(server.pid);
+      if (memoryBytes !== null) {
+        memoryText = formatBytes(memoryBytes);
+      }
+    }
+
     table.push([
       server.id,
       server.modelName,
       server.port.toString(),
       statusColor(statusText),
       server.pid?.toString() || '-',
+      memoryText,
       uptime,
     ]);
   }

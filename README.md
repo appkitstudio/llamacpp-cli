@@ -15,8 +15,8 @@ CLI tool to manage local llama.cpp servers on macOS. Provides an Ollama-like exp
 - 🤖 **Model downloads** - Pull GGUF models from Hugging Face
 - ⚙️ **Smart defaults** - Auto-configure threads, context size, and GPU layers based on model size
 - 🔌 **Auto port assignment** - Automatically find available ports (9000-9999)
-- 📊 **Status monitoring** - Real-time server status with launchctl integration
-- 🪵 **Log access** - View and tail server logs
+- 📊 **Status monitoring** - Real-time server status with memory usage and uptime tracking
+- 🪵 **Smart logging** - Compact one-line request format with optional full JSON details
 
 ## Why llamacpp-cli?
 
@@ -143,12 +143,14 @@ Viewing running servers:
 ```
 $ llamacpp ps
 
-┌────────────────────────┬────────┬─────────┬──────┬──────────┬─────────┐
-│ Model                  │ Port   │ Status  │ PID  │ Threads  │ Ctx Size│
-├────────────────────────┼────────┼─────────┼──────┼──────────┼─────────┤
-│ llama-3.2-3b-instruct  │ 9000   │ Running │ 1234 │ 8        │ 4096    │
-│ qwen2-7b-instruct      │ 9001   │ Running │ 5678 │ 8        │ 8192    │
-└────────────────────────┴────────┴─────────┴──────┴──────────┴─────────┘
+┌─────────────────────────┬──────┬────────────┬──────┬──────────┬────────┐
+│ SERVER ID               │ PORT │ STATUS     │ PID  │ MEMORY   │ UPTIME │
+├─────────────────────────┼──────┼────────────┼──────┼──────────┼────────┤
+│ llama-3-2-3b-instruct   │ 9000 │ ✅ RUNNING │ 1234 │ 594.0 MB │ 15m    │
+│ qwen2-7b-instruct-q4-k  │ 9001 │ ✅ RUNNING │ 5678 │ 1.2 GB   │ 2h     │
+└─────────────────────────┴──────┴────────────┴──────┴──────────┴────────┘
+
+Total: 2 servers (2 running, 0 stopped)
 ```
 
 Running interactive chat:
@@ -234,11 +236,19 @@ llamacpp rm llama-3.2  # Partial name matching
 ```
 
 ### `llamacpp ps`
-List all servers with status.
+List all servers with status, memory usage, and uptime.
 
 ```bash
 llamacpp ps
 ```
+
+Shows:
+- Server ID and model name
+- Port number
+- Status (running/stopped/crashed)
+- Process ID (PID)
+- Memory usage (RAM consumption)
+- Uptime (how long server has been running)
 
 ## Server Management
 
@@ -286,19 +296,47 @@ llamacpp server rm 9000
 ```
 
 ### `llamacpp server logs <identifier> [options]`
-View server logs.
+View server logs with smart filtering.
 
 ```bash
+# Compact one-liner format (default)
 llamacpp server logs llama-3.2-3b
-llamacpp server logs llama-3.2-3b -f          # Follow logs
-llamacpp server logs llama-3.2-3b -n 100      # Last 100 lines
-llamacpp server logs llama-3.2-3b --errors    # Errors only
+# Output: 2025-12-09 18:02:23 POST /v1/chat/completions 127.0.0.1 200 "What is..." 305 22 1036
+
+# Full HTTP JSON request/response
+llamacpp server logs llama-3.2-3b --http
+
+# Follow logs in real-time
+llamacpp server logs llama-3.2-3b --follow
+
+# Last 100 requests
+llamacpp server logs llama-3.2-3b --lines 100
+
+# Show only errors
+llamacpp server logs llama-3.2-3b --errors
+
+# Show all messages (including debug internals)
+llamacpp server logs llama-3.2-3b --verbose
+
+# Custom filter pattern
+llamacpp server logs llama-3.2-3b --filter "error|warning"
 ```
 
 **Options:**
 - `-f, --follow` - Follow log output in real-time
 - `-n, --lines <number>` - Number of lines to show (default: 50)
-- `--errors` - Show stderr instead of stdout
+- `--http` - Show full HTTP JSON request/response logs
+- `--errors` - Show only error messages
+- `--verbose` - Show all messages including debug internals
+- `--filter <pattern>` - Custom grep pattern for filtering
+- `--stdout` - Show stdout instead of stderr (rarely needed)
+
+**Default Output Format:**
+```
+TIMESTAMP METHOD ENDPOINT IP STATUS "MESSAGE..." TOKENS_IN TOKENS_OUT TIME_MS
+```
+
+The compact format shows one line per request with key metrics. Use `--http` when you need to see the full request/response JSON for debugging.
 
 ## Configuration
 

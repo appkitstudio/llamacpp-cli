@@ -123,6 +123,8 @@ server
   .option('-t, --threads <number>', 'Thread count (default: auto)', parseInt)
   .option('-c, --ctx-size <number>', 'Context size (default: auto)', parseInt)
   .option('-g, --gpu-layers <number>', 'GPU layers (default: 60)', parseInt)
+  .option('-v, --log-verbosity <level>', 'Log verbosity: 0=errors, 1=warnings, 2=info (default), 9=debug, omit for all', parseInt)
+  .option('--no-log-timestamps', 'Disable timestamps in log messages')
   .action(async (model: string, options) => {
     try {
       await startCommand(model, options);
@@ -177,11 +179,15 @@ server
 // View logs
 server
   .command('logs')
-  .description('View server logs')
+  .description('View server logs (default: compact one-line per request)')
   .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
   .option('-f, --follow', 'Follow log output in real-time')
   .option('-n, --lines <number>', 'Number of lines to show (default: 50)', parseInt)
-  .option('--errors', 'Show stderr instead of stdout')
+  .option('--http', 'Show full HTTP JSON request/response logs')
+  .option('--errors', 'Show only error messages')
+  .option('--verbose', 'Show all messages including debug internals')
+  .option('--filter <pattern>', 'Custom grep pattern for filtering')
+  .option('--stdout', 'Show stdout instead of stderr (rarely needed)')
   .action(async (identifier: string, options) => {
     try {
       await logsCommand(identifier, options);

@@ -15,6 +15,8 @@ interface StartOptions {
   threads?: number;
   ctxSize?: number;
   gpuLayers?: number;
+  logVerbosity?: number;
+  logTimestamps?: boolean;
 }
 
 export async function startCommand(model: string, options: StartOptions): Promise<void> {
@@ -67,6 +69,8 @@ export async function startCommand(model: string, options: StartOptions): Promis
     threads: options.threads,
     ctxSize: options.ctxSize,
     gpuLayers: options.gpuLayers,
+    logVerbosity: options.logVerbosity,
+    logTimestamps: options.logTimestamps,
   };
 
   const config = await configGenerator.generateConfig(
@@ -84,6 +88,8 @@ export async function startCommand(model: string, options: StartOptions): Promis
   console.log(chalk.dim(`Threads: ${config.threads}`));
   console.log(chalk.dim(`Context Size: ${config.ctxSize}`));
   console.log(chalk.dim(`GPU Layers: ${config.gpuLayers}`));
+  console.log(chalk.dim(`Log Verbosity: ${config.logVerbosity !== undefined ? config.logVerbosity : 'all'}`));
+  console.log(chalk.dim(`Log Timestamps: ${config.logTimestamps ? 'enabled' : 'disabled'}`));
   console.log();
 
   // 7. Ensure log directory exists

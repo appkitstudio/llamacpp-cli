@@ -16,6 +16,27 @@ export class LaunchctlManager {
    * Generate plist XML content for a server
    */
   generatePlist(config: ServerConfig): string {
+    // Build program arguments array
+    const args = [
+      '/opt/homebrew/bin/llama-server',
+      '--model', config.modelPath,
+      '--port', config.port.toString(),
+      '--threads', config.threads.toString(),
+      '--ctx-size', config.ctxSize.toString(),
+      '--gpu-layers', config.gpuLayers.toString(),
+    ];
+
+    // Add flags
+    if (config.embeddings) args.push('--embeddings');
+    if (config.jinja) args.push('--jinja');
+    if (config.logVerbosity !== undefined) {
+      args.push('--log-verbosity', config.logVerbosity.toString());
+    }
+    if (config.logTimestamps) args.push('--log-timestamps');
+
+    // Generate XML array elements
+    const argsXml = args.map(arg => `      <string>${arg}</string>`).join('\n');
+
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -26,19 +47,7 @@ export class LaunchctlManager {
 
     <key>ProgramArguments</key>
     <array>
-      <string>/opt/homebrew/bin/llama-server</string>
-      <string>--model</string>
-      <string>${config.modelPath}</string>
-      <string>--port</string>
-      <string>${config.port}</string>
-      <string>--threads</string>
-      <string>${config.threads}</string>
-      <string>--ctx-size</string>
-      <string>${config.ctxSize}</string>
-      <string>--gpu-layers</string>
-      <string>${config.gpuLayers}</string>
-      <string>--embeddings</string>
-      <string>--jinja</string>
+${argsXml}
     </array>
 
     <key>RunAtLoad</key>

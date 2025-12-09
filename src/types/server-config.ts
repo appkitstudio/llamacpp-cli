@@ -12,6 +12,8 @@ export interface ServerConfig {
   gpuLayers: number;
   embeddings: boolean;     // Always true
   jinja: boolean;          // Always true
+  logVerbosity?: number;   // Log verbosity level (0=errors only, 1=warnings, 2=info/HTTP, 9=debug, undefined=all)
+  logTimestamps: boolean;  // Add timestamps to log messages
 
   // State tracking
   status: ServerStatus;
