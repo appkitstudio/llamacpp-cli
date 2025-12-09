@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.2.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.1.1...v1.2.0) (2025-12-09)
+
+
+### Features
+
+* add 'show' command to display server configuration and status details ([1f615eb](https://github.com/appkitstudio/llamacpp-cli/commit/1f615ebe369ae9d61b087a79fc17787e4a56d3b5))
+* add support for one-shot message mode in 'run' command ([853d62a](https://github.com/appkitstudio/llamacpp-cli/commit/853d62ab9ef9ec8c4e45213f00453d7b28648124))
+* implement 'create' command for server management and update related documentation ([39996e2](https://github.com/appkitstudio/llamacpp-cli/commit/39996e26f412dd593d9c253322a90d17907dfff4))
+
 ## [1.1.1](https://github.com/appkitstudio/llamacpp-cli/compare/v1.1.0...v1.1.1) (2025-12-09)
 
 
