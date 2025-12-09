@@ -270,6 +270,27 @@ llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --port 8080 --ctx-size 
 - `-g, --gpu-layers <number>` - GPU layers (default: 60)
 - `-v, --verbose` - Enable verbose HTTP logging (detailed request/response info)
 
+### `llamacpp server show <identifier>`
+Show detailed configuration and status information for a server.
+
+```bash
+llamacpp server show llama-3.2-3b       # By partial name
+llamacpp server show 9000               # By port
+llamacpp server show llama-3-2-3b       # By server ID
+```
+
+**Displays:**
+- Server ID, model name, and path
+- Current status (running/stopped/crashed)
+- Port and PID
+- Runtime info (uptime, memory usage)
+- Configuration (threads, context size, GPU layers, verbose logging)
+- Timestamps (created, last started/stopped)
+- System paths (plist file, log files)
+- Quick commands for common next actions
+
+**Identifiers:** Port number, server ID, partial model name
+
 ### `llamacpp server start <identifier>`
 Start an existing stopped server.
 

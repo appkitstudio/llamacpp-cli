@@ -14,6 +14,7 @@ import { rmCommand } from './commands/rm';
 import { logsCommand } from './commands/logs';
 import { searchCommand } from './commands/search';
 import { showCommand } from './commands/show';
+import { serverShowCommand } from './commands/server-show';
 
 const program = new Command();
 
@@ -128,6 +129,20 @@ server
   .action(async (model: string, options) => {
     try {
       await createCommand(model, options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Show server details
+server
+  .command('show')
+  .description('Show server configuration details')
+  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .action(async (identifier: string) => {
+    try {
+      await serverShowCommand(identifier);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);
