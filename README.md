@@ -70,8 +70,8 @@ llamacpp pull bartowski/Llama-3.2-3B-Instruct-GGUF/llama-3.2-3b-instruct-q4_k_m.
 # List local models
 llamacpp ls
 
-# Start a server (auto-assigns port, uses smart defaults)
-llamacpp server start llama-3.2-3b-instruct-q4_k_m.gguf
+# Create and start a server (auto-assigns port, uses smart defaults)
+llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf
 
 # View running servers
 llamacpp ps
@@ -81,6 +81,9 @@ llamacpp server run llama-3.2-3b
 
 # Stop a server
 llamacpp server stop llama-3.2-3b
+
+# Start a stopped server
+llamacpp server start llama-3.2-3b
 
 # View logs
 llamacpp server logs llama-3.2-3b -f
@@ -126,11 +129,11 @@ The server is fully compatible with OpenAI's API format, so you can use it with 
 
 ### Example Output
 
-Starting a server:
+Creating a server:
 ```
-$ llamacpp server start llama-3.2-3b-instruct-q4_k_m.gguf
+$ llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf
 
-✓ Server started successfully!
+✓ Server created and started successfully!
 
   Model:  llama-3.2-3b-instruct-q4_k_m.gguf
   Port:   9000
@@ -252,12 +255,12 @@ Shows:
 
 ## Server Management
 
-### `llamacpp server start <model> [options]`
-Start a llama-server instance.
+### `llamacpp server create <model> [options]`
+Create and start a new llama-server instance.
 
 ```bash
-llamacpp server start llama-3.2-3b-instruct-q4_k_m.gguf
-llamacpp server start llama-3.2-3b-instruct-q4_k_m.gguf --port 8080 --ctx-size 16384
+llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf
+llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --port 8080 --ctx-size 16384 --verbose
 ```
 
 **Options:**
@@ -265,6 +268,18 @@ llamacpp server start llama-3.2-3b-instruct-q4_k_m.gguf --port 8080 --ctx-size 1
 - `-t, --threads <number>` - Thread count (default: half of CPU cores)
 - `-c, --ctx-size <number>` - Context size (default: based on model size)
 - `-g, --gpu-layers <number>` - GPU layers (default: 60)
+- `-v, --verbose` - Enable verbose HTTP logging (detailed request/response info)
+
+### `llamacpp server start <identifier>`
+Start an existing stopped server.
+
+```bash
+llamacpp server start llama-3.2-3b       # By partial name
+llamacpp server start 9000               # By port
+llamacpp server start llama-3-2-3b       # By server ID
+```
+
+**Identifiers:** Port number, server ID, partial model name, or model filename
 
 ### `llamacpp server run <identifier>`
 Run an interactive chat session with a model.
@@ -298,10 +313,19 @@ llamacpp server rm 9000
 ### `llamacpp server logs <identifier> [options]`
 View server logs with smart filtering.
 
+**Without `--verbose` (default):**
 ```bash
-# Compact one-liner format (default)
+llamacpp server logs llama-3.2-3b
+# Output: 2025-12-09 18:02:23 POST /v1/chat/completions 127.0.0.1 200
+```
+
+**With `--verbose` enabled on server:**
+```bash
 llamacpp server logs llama-3.2-3b
 # Output: 2025-12-09 18:02:23 POST /v1/chat/completions 127.0.0.1 200 "What is..." 305 22 1036
+```
+
+**More examples:**
 
 # Full HTTP JSON request/response
 llamacpp server logs llama-3.2-3b --http
@@ -331,12 +355,29 @@ llamacpp server logs llama-3.2-3b --filter "error|warning"
 - `--filter <pattern>` - Custom grep pattern for filtering
 - `--stdout` - Show stdout instead of stderr (rarely needed)
 
-**Default Output Format:**
+**Output Formats:**
+
+Non-verbose servers (default):
+```
+TIMESTAMP METHOD ENDPOINT IP STATUS
+```
+
+Verbose servers (`--verbose` flag on create):
 ```
 TIMESTAMP METHOD ENDPOINT IP STATUS "MESSAGE..." TOKENS_IN TOKENS_OUT TIME_MS
 ```
 
-The compact format shows one line per request with key metrics. Use `--http` when you need to see the full request/response JSON for debugging.
+The compact format shows one line per HTTP request. Verbose servers include:
+- User's message (first 50 characters)
+- Token counts (prompt tokens in, completion tokens out)
+- Total response time in milliseconds
+
+**Note:** To get detailed logs, create your server with the `--verbose` flag:
+```bash
+llamacpp server create model.gguf --verbose
+```
+
+Use `--http` to see full request/response JSON, or `--verbose` option to see all internal server logs.
 
 ## Configuration
 
@@ -401,7 +442,7 @@ brew install llama.cpp
 ### Port already in use
 llamacpp-cli will automatically find the next available port. Or specify a custom port:
 ```bash
-llamacpp server start model.gguf --port 8080
+llamacpp server create model.gguf --port 8080
 ```
 
 ### Server won't start

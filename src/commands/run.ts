@@ -35,7 +35,7 @@ export async function runCommand(modelIdentifier: string): Promise<void> {
     // Try to resolve as a model name and start it
     console.log(chalk.blue(`🚀 No running server found. Starting ${modelIdentifier}...\n`));
     try {
-      await startCommand(modelIdentifier, {});
+      await startCommand(modelIdentifier);
       server = await stateManager.findServer(modelIdentifier);
       if (!server) {
         throw new Error('Failed to start server');

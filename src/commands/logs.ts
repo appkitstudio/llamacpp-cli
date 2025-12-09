@@ -63,7 +63,13 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
   }
 
   console.log(chalk.blue(`📋 Logs for ${server.modelName} (${logType}${filterDesc})`));
-  console.log(chalk.dim(`   ${logPath}\n`));
+  console.log(chalk.dim(`   ${logPath}`));
+
+  // Show subtle note if verbose logging is not enabled
+  if (!server.verbose && !options.verbose && !options.errors && !options.http && !options.filter) {
+    console.log(chalk.dim(`   verbosity is disabled`));
+  }
+  console.log();
 
   if (options.follow) {
     // Follow logs in real-time with optional filtering
@@ -133,15 +139,26 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     if (useCompactMode) {
       // Compact mode: read file and parse
       try {
-        const command = `tail -n ${lines * 3} "${logPath}" | grep -E "log_server_r"`;
+        // Use large multiplier to account for verbose debug output between requests
+        const command = `tail -n ${lines * 100} "${logPath}" | grep -E "log_server_r"`;
         const output = await execCommand(command);
         const logLines = output.split('\n').filter((l) => l.trim());
 
+        const compactLines: string[] = [];
         for (const line of logLines) {
           logParser.processLine(line, (compactLine) => {
-            console.log(compactLine);
+            compactLines.push(compactLine);
           });
         }
+
+        // Flush any remaining buffered logs (handles simple format)
+        logParser.flush((compactLine) => {
+          compactLines.push(compactLine);
+        });
+
+        // Show only the last N compact lines
+        const limitedLines = compactLines.slice(-lines);
+        limitedLines.forEach((line) => console.log(line));
       } catch (error) {
         throw new Error(`Failed to read logs: ${(error as Error).message}`);
       }

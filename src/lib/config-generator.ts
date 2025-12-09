@@ -11,8 +11,7 @@ export interface ServerOptions {
   gpuLayers?: number;
   embeddings?: boolean;
   jinja?: boolean;
-  logVerbosity?: number;
-  logTimestamps?: boolean;
+  verbose?: boolean;
 }
 
 export interface SmartDefaults {
@@ -69,8 +68,7 @@ export class ConfigGenerator {
     const gpuLayers = options?.gpuLayers ?? smartDefaults.gpuLayers;
     const embeddings = options?.embeddings ?? true;
     const jinja = options?.jinja ?? true;
-    const logVerbosity = options?.logVerbosity;  // Default to undefined (log everything), filter at CLI level
-    const logTimestamps = options?.logTimestamps ?? true;  // Enable timestamps by default
+    const verbose = options?.verbose ?? false;  // Default to false (simple logging)
 
     // Generate server ID
     const id = sanitizeModelName(modelName);
@@ -92,8 +90,7 @@ export class ConfigGenerator {
       gpuLayers,
       embeddings,
       jinja,
-      logVerbosity,
-      logTimestamps,
+      verbose,
       status: 'stopped',
       createdAt: new Date().toISOString(),
       plistPath,
@@ -117,8 +114,7 @@ export class ConfigGenerator {
       gpuLayers: options?.gpuLayers ?? globalConfig.defaults.gpuLayers,
       embeddings: options?.embeddings ?? true,
       jinja: options?.jinja ?? true,
-      logVerbosity: options?.logVerbosity,  // undefined = log everything
-      logTimestamps: options?.logTimestamps ?? true,
+      verbose: options?.verbose ?? false,
     };
   }
 }

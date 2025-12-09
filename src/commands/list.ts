@@ -33,5 +33,5 @@ export async function listCommand(): Promise<void> {
 
   const totalSize = models.reduce((sum, m) => sum + m.size, 0);
   console.log(chalk.dim(`\nTotal: ${models.length} models (${formatBytes(totalSize)})`));
-  console.log(chalk.dim(`\nStart a server: llamacpp server start <model-filename>`));
+  console.log(chalk.dim(`\nCreate a server: llamacpp server create <model-filename>`));
 }

@@ -10,7 +10,7 @@ export async function psCommand(): Promise<void> {
 
   if (servers.length === 0) {
     console.log(chalk.yellow('No servers configured.'));
-    console.log(chalk.dim('\nStart a server: llamacpp server start <model-filename>'));
+    console.log(chalk.dim('\nCreate a server: llamacpp server create <model-filename>'));
     return;
   }
 

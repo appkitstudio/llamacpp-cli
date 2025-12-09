@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { listCommand } from './commands/list';
 import { psCommand } from './commands/ps';
+import { createCommand } from './commands/create';
 import { startCommand } from './commands/start';
 import { runCommand } from './commands/run';
 import { stopCommand } from './commands/stop';
@@ -114,20 +115,33 @@ const server = program
   .command('server')
   .description('Manage llama-server instances');
 
-// Start a server
+// Create a new server
 server
-  .command('start')
-  .description('Start a llama-server instance')
+  .command('create')
+  .description('Create and start a new llama-server instance')
   .argument('<model>', 'Model filename or path')
   .option('-p, --port <number>', 'Port number (default: auto-assign)', parseInt)
   .option('-t, --threads <number>', 'Thread count (default: auto)', parseInt)
   .option('-c, --ctx-size <number>', 'Context size (default: auto)', parseInt)
   .option('-g, --gpu-layers <number>', 'GPU layers (default: 60)', parseInt)
-  .option('-v, --log-verbosity <level>', 'Log verbosity: 0=errors, 1=warnings, 2=info (default), 9=debug, omit for all', parseInt)
-  .option('--no-log-timestamps', 'Disable timestamps in log messages')
+  .option('-v, --verbose', 'Enable verbose HTTP logging (detailed request/response info)')
   .action(async (model: string, options) => {
     try {
-      await startCommand(model, options);
+      await createCommand(model, options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Start an existing server
+server
+  .command('start')
+  .description('Start an existing stopped server')
+  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .action(async (identifier: string) => {
+    try {
+      await startCommand(identifier);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);

@@ -29,10 +29,11 @@ export class LaunchctlManager {
     // Add flags
     if (config.embeddings) args.push('--embeddings');
     if (config.jinja) args.push('--jinja');
-    if (config.logVerbosity !== undefined) {
-      args.push('--log-verbosity', config.logVerbosity.toString());
+
+    // Conditionally enable verbose HTTP logging for detailed request/response info
+    if (config.verbose) {
+      args.push('--log-verbose');
     }
-    if (config.logTimestamps) args.push('--log-timestamps');
 
     // Generate XML array elements
     const argsXml = args.map(arg => `      <string>${arg}</string>`).join('\n');

@@ -22,8 +22,22 @@ export class LogParser {
    * Process log lines and output compact format
    */
   processLine(line: string, callback: (compactLine: string) => void): void {
-    // Check if this is the start of an HTTP request log
-    if (line.includes('log_server_r: request: POST')) {
+    // Check if this is a simple single-line format (no JSON, non-verbose mode)
+    // Format: srv  log_server_r: request: POST /v1/chat/completions 127.0.0.1 200
+    if (line.includes('log_server_r: request:') && !line.includes('{')) {
+      // Check if this is the start of verbose format (status line before JSON)
+      // or a simple single-line log
+      if (this.isBuffering) {
+        // We're already buffering, so this is a new request - process previous buffer
+        const compactLine = this.consolidateRequest(this.buffer);
+        if (compactLine) {
+          callback(compactLine);
+        }
+        this.buffer = [];
+        this.isBuffering = false;
+      }
+
+      // Start buffering (might be verbose or simple)
       this.isBuffering = true;
       this.buffer = [line];
       return;
@@ -33,7 +47,7 @@ export class LogParser {
     if (this.isBuffering) {
       this.buffer.push(line);
 
-      // Check if we have a complete request (found response line)
+      // Check if we have a complete request (found response line in verbose mode)
       if (line.includes('log_server_r: response:')) {
         const compactLine = this.consolidateRequest(this.buffer);
         if (compactLine) {
@@ -42,6 +56,43 @@ export class LogParser {
         this.buffer = [];
         this.isBuffering = false;
       }
+    }
+  }
+
+  /**
+   * Flush any buffered simple format logs
+   * Call this at the end of processing to handle simple logs that don't have response lines
+   */
+  flush(callback: (compactLine: string) => void): void {
+    if (this.isBuffering && this.buffer.length > 0) {
+      // If we only have one line, it's a simple format log
+      if (this.buffer.length === 1) {
+        const simpleLine = this.parseSimpleFormat(this.buffer[0]);
+        if (simpleLine) {
+          callback(simpleLine);
+        }
+      }
+      this.buffer = [];
+      this.isBuffering = false;
+    }
+  }
+
+  /**
+   * Parse simple single-line format (non-verbose mode)
+   * Format: srv  log_server_r: request: POST /v1/chat/completions 127.0.0.1 200
+   */
+  private parseSimpleFormat(line: string): string | null {
+    try {
+      const timestamp = this.extractTimestamp(line);
+      const requestMatch = line.match(/request: (POST|GET|PUT|DELETE) ([^\s]+) ([^\s]+) (\d+)/);
+      if (!requestMatch) return null;
+
+      const [, method, endpoint, ip, status] = requestMatch;
+
+      // Simple format doesn't include message/token details
+      return `${timestamp} ${method} ${endpoint} ${ip} ${status}`;
+    } catch (error) {
+      return null;
     }
   }
 
