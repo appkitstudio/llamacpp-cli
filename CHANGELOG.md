@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.1.1](https://github.com/appkitstudio/llamacpp-cli/compare/v1.1.0...v1.1.1) (2025-12-09)
+
+
+### Bug Fixes
+
+* update command syntax to include 'server' prefix for consistency ([22dfdfd](https://github.com/appkitstudio/llamacpp-cli/commit/22dfdfd62026503a19ff0a6d91da88954f71d1ff))
+
 ## [1.1.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.0.0...v1.1.0) (2025-12-09)
 
 
