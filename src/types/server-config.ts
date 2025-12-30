@@ -5,6 +5,7 @@ export interface ServerConfig {
   modelPath: string;       // Full path to GGUF file
   modelName: string;       // Display name (original filename)
   port: number;            // Server port
+  host: string;            // Bind address (default: 127.0.0.1)
 
   // llama-server configuration
   threads: number;

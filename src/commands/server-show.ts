@@ -35,7 +35,8 @@ export async function serverShowCommand(identifier: string): Promise<void> {
   console.log(`${chalk.bold('Server ID:')}      ${updatedServer.id}`);
   console.log(`${chalk.bold('Model Name:')}     ${updatedServer.modelName}`);
   console.log(`${chalk.bold('Model Path:')}     ${chalk.dim(updatedServer.modelPath)}`);
-  console.log(`${chalk.bold('Port:')}           http://localhost:${updatedServer.port}`);
+  console.log(`${chalk.bold('Host:')}           ${updatedServer.host}`);
+  console.log(`${chalk.bold('Port:')}           http://${updatedServer.host}:${updatedServer.port}`);
 
   // Status with color
   let statusText: string;

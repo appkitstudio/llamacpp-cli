@@ -270,14 +270,20 @@ Create and start a new llama-server instance.
 ```bash
 llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf
 llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --port 8080 --ctx-size 16384 --verbose
+
+# Enable remote access (WARNING: security implications)
+llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --host 0.0.0.0
 ```
 
 **Options:**
 - `-p, --port <number>` - Port number (default: auto-assign from 9000)
+- `-h, --host <address>` - Bind address (default: `127.0.0.1` for localhost only, use `0.0.0.0` for remote access)
 - `-t, --threads <number>` - Thread count (default: half of CPU cores)
 - `-c, --ctx-size <number>` - Context size (default: based on model size)
 - `-g, --gpu-layers <number>` - GPU layers (default: 60)
-- `-v, --verbose` - Enable verbose HTTP logging (detailed request/response info)
+- `-v, --verbose` - Enable verbose HTTP logging (default: enabled)
+
+**⚠️ Security Warning:** Using `--host 0.0.0.0` binds the server to all network interfaces, allowing remote access from your local network and potentially the internet. Only use this if you understand the security implications and need remote access. For local development, keep the default `127.0.0.1` (localhost only).
 
 ### `llamacpp server show <identifier>`
 Show detailed configuration and status information for a server.
@@ -291,12 +297,48 @@ llamacpp server show llama-3-2-3b       # By server ID
 **Displays:**
 - Server ID, model name, and path
 - Current status (running/stopped/crashed)
-- Port and PID
+- Host and port
+- PID (process ID)
 - Runtime info (uptime, memory usage)
-- Configuration (threads, context size, GPU layers, verbose logging)
+- Configuration (host, threads, context size, GPU layers, verbose logging)
 - Timestamps (created, last started/stopped)
 - System paths (plist file, log files)
 - Quick commands for common next actions
+
+**Identifiers:** Port number, server ID, partial model name
+
+### `llamacpp server config <identifier> [options]`
+Update server configuration parameters without recreating the server.
+
+```bash
+# Update context size and restart
+llamacpp server config llama-3.2-3b --ctx-size 8192 --restart
+
+# Update threads without restarting
+llamacpp server config 9000 --threads 8
+
+# Enable remote access (WARNING: security implications)
+llamacpp server config llama-3.2-3b --host 0.0.0.0 --restart
+
+# Toggle verbose logging
+llamacpp server config llama-3.2-3b --no-verbose --restart
+
+# Update multiple parameters
+llamacpp server config llama-3.2-3b --threads 8 --ctx-size 16384 --gpu-layers 40 --restart
+```
+
+**Options:**
+- `-h, --host <address>` - Update bind address (`127.0.0.1` for localhost, `0.0.0.0` for remote access)
+- `-t, --threads <number>` - Update thread count
+- `-c, --ctx-size <number>` - Update context size
+- `-g, --gpu-layers <number>` - Update GPU layers
+- `-v, --verbose` - Enable verbose logging
+- `--no-verbose` - Disable verbose logging
+- `-r, --restart` - Automatically restart server if running
+
+**Note:** Changes require a server restart to take effect. Use `--restart` to automatically stop and start the server with the new configuration.
+
+**⚠️ Security Warning:** Using `--host 0.0.0.0` binds the server to all network interfaces, allowing remote access. Only use this if you understand the security implications.
 
 **Identifiers:** Port number, server ID, partial model name
 
@@ -351,16 +393,16 @@ llamacpp server rm 9000
 ### `llamacpp server logs <identifier> [options]`
 View server logs with smart filtering.
 
-**Without `--verbose` (default):**
-```bash
-llamacpp server logs llama-3.2-3b
-# Output: 2025-12-09 18:02:23 POST /v1/chat/completions 127.0.0.1 200
-```
-
-**With `--verbose` enabled on server:**
+**Default (verbose enabled):**
 ```bash
 llamacpp server logs llama-3.2-3b
 # Output: 2025-12-09 18:02:23 POST /v1/chat/completions 127.0.0.1 200 "What is..." 305 22 1036
+```
+
+**Without `--verbose` on server:**
+```bash
+llamacpp server logs llama-3.2-3b
+# Output: Only internal server logs (cache, slots) - no HTTP request logs
 ```
 
 **More examples:**
@@ -395,25 +437,17 @@ llamacpp server logs llama-3.2-3b --filter "error|warning"
 
 **Output Formats:**
 
-Non-verbose servers (default):
-```
-TIMESTAMP METHOD ENDPOINT IP STATUS
-```
-
-Verbose servers (`--verbose` flag on create):
+Default compact format:
 ```
 TIMESTAMP METHOD ENDPOINT IP STATUS "MESSAGE..." TOKENS_IN TOKENS_OUT TIME_MS
 ```
 
-The compact format shows one line per HTTP request. Verbose servers include:
+The compact format shows one line per HTTP request and includes:
 - User's message (first 50 characters)
 - Token counts (prompt tokens in, completion tokens out)
 - Total response time in milliseconds
 
-**Note:** To get detailed logs, create your server with the `--verbose` flag:
-```bash
-llamacpp server create model.gguf --verbose
-```
+**Note:** Verbose logging is now enabled by default. HTTP request logs are available by default.
 
 Use `--http` to see full request/response JSON, or `--verbose` option to see all internal server logs.
 

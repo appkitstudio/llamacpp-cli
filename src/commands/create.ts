@@ -12,6 +12,7 @@ import { ensureDir } from '../utils/file-utils';
 
 interface CreateOptions {
   port?: number;
+  host?: string;
   threads?: number;
   ctxSize?: number;
   gpuLayers?: number;
@@ -65,6 +66,7 @@ export async function createCommand(model: string, options: CreateOptions): Prom
 
   const serverOptions: ServerOptions = {
     port: options.port,
+    host: options.host,
     threads: options.threads,
     ctxSize: options.ctxSize,
     gpuLayers: options.gpuLayers,
@@ -79,9 +81,17 @@ export async function createCommand(model: string, options: CreateOptions): Prom
     serverOptions
   );
 
+  // Security warning for 0.0.0.0
+  if (config.host === '0.0.0.0') {
+    console.log(chalk.yellow('⚠️  WARNING: Binding to 0.0.0.0 allows remote access from any network interface.'));
+    console.log(chalk.yellow('   This exposes your server to your local network and potentially the internet.'));
+    console.log(chalk.yellow('   Use 127.0.0.1 for localhost-only access (recommended for local development).\n'));
+  }
+
   // Display configuration
   console.log(chalk.dim(`Model: ${modelPath}`));
   console.log(chalk.dim(`Size: ${formatBytes(modelSize)}`));
+  console.log(chalk.dim(`Host: ${config.host}`));
   console.log(chalk.dim(`Port: ${config.port}${options.port ? '' : ' (auto-assigned)'}`));
   console.log(chalk.dim(`Threads: ${config.threads}`));
   console.log(chalk.dim(`Context Size: ${config.ctxSize}`));
@@ -137,7 +147,7 @@ export async function createCommand(model: string, options: CreateOptions): Prom
   console.log();
   console.log(chalk.green('✅ Server created and started successfully!'));
   console.log();
-  console.log(chalk.dim(`Connect: http://localhost:${config.port}`));
+  console.log(chalk.dim(`Connect: http://${config.host}:${config.port}`));
   console.log(chalk.dim(`View logs: llamacpp server logs ${config.id}`));
   console.log(chalk.dim(`Stop: llamacpp server stop ${config.id}`));
 }

@@ -82,6 +82,18 @@ export class StateManager {
   }
 
   /**
+   * Update a server configuration with partial changes
+   */
+  async updateServerConfig(id: string, updates: Partial<ServerConfig>): Promise<void> {
+    const existingConfig = await this.loadServerConfig(id);
+    if (!existingConfig) {
+      throw new Error(`Server configuration not found: ${id}`);
+    }
+    const updatedConfig = { ...existingConfig, ...updates };
+    await this.saveServerConfig(updatedConfig);
+  }
+
+  /**
    * Delete a server configuration
    */
   async deleteServerConfig(id: string): Promise<void> {

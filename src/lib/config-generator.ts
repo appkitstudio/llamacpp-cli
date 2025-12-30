@@ -6,6 +6,7 @@ import { stateManager } from './state-manager';
 
 export interface ServerOptions {
   port?: number;
+  host?: string;
   threads?: number;
   ctxSize?: number;
   gpuLayers?: number;
@@ -63,12 +64,13 @@ export class ConfigGenerator {
     const smartDefaults = this.calculateSmartDefaults(modelSize);
 
     // Apply user overrides
+    const host = options?.host ?? '127.0.0.1';  // Default to localhost (secure)
     const threads = options?.threads ?? smartDefaults.threads;
     const ctxSize = options?.ctxSize ?? smartDefaults.ctxSize;
     const gpuLayers = options?.gpuLayers ?? smartDefaults.gpuLayers;
     const embeddings = options?.embeddings ?? true;
     const jinja = options?.jinja ?? true;
-    const verbose = options?.verbose ?? false;  // Default to false (simple logging)
+    const verbose = options?.verbose ?? true;  // Default to true (HTTP request logging)
 
     // Generate server ID
     const id = sanitizeModelName(modelName);
@@ -85,6 +87,7 @@ export class ConfigGenerator {
       modelPath,
       modelName,
       port,
+      host,
       threads,
       ctxSize,
       gpuLayers,
@@ -109,12 +112,13 @@ export class ConfigGenerator {
     const globalConfig = await stateManager.loadGlobalConfig();
 
     return {
+      host: options?.host ?? '127.0.0.1',
       threads: options?.threads ?? globalConfig.defaults.threads,
       ctxSize: options?.ctxSize ?? globalConfig.defaults.ctxSize,
       gpuLayers: options?.gpuLayers ?? globalConfig.defaults.gpuLayers,
       embeddings: options?.embeddings ?? true,
       jinja: options?.jinja ?? true,
-      verbose: options?.verbose ?? false,
+      verbose: options?.verbose ?? true,
     };
   }
 }

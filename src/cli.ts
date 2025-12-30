@@ -15,6 +15,7 @@ import { logsCommand } from './commands/logs';
 import { searchCommand } from './commands/search';
 import { showCommand } from './commands/show';
 import { serverShowCommand } from './commands/server-show';
+import { serverConfigCommand } from './commands/config';
 
 const program = new Command();
 
@@ -122,6 +123,7 @@ server
   .description('Create and start a new llama-server instance')
   .argument('<model>', 'Model filename or path')
   .option('-p, --port <number>', 'Port number (default: auto-assign)', parseInt)
+  .option('-h, --host <address>', 'Bind address (default: 127.0.0.1, use 0.0.0.0 for remote access)')
   .option('-t, --threads <number>', 'Thread count (default: auto)', parseInt)
   .option('-c, --ctx-size <number>', 'Context size (default: auto)', parseInt)
   .option('-g, --gpu-layers <number>', 'GPU layers (default: 60)', parseInt)
@@ -143,6 +145,27 @@ server
   .action(async (identifier: string) => {
     try {
       await serverShowCommand(identifier);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Update server configuration
+server
+  .command('config')
+  .description('Update server configuration parameters')
+  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .option('-h, --host <address>', 'Update bind address (127.0.0.1 for localhost, 0.0.0.0 for remote access)')
+  .option('-t, --threads <number>', 'Update thread count', parseInt)
+  .option('-c, --ctx-size <number>', 'Update context size', parseInt)
+  .option('-g, --gpu-layers <number>', 'Update GPU layers', parseInt)
+  .option('-v, --verbose', 'Enable verbose logging')
+  .option('--no-verbose', 'Disable verbose logging')
+  .option('-r, --restart', 'Automatically restart server if running')
+  .action(async (identifier: string, options) => {
+    try {
+      await serverConfigCommand(identifier, options);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);

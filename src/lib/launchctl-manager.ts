@@ -20,6 +20,7 @@ export class LaunchctlManager {
     const args = [
       '/opt/homebrew/bin/llama-server',
       '--model', config.modelPath,
+      '--host', config.host,
       '--port', config.port.toString(),
       '--threads', config.threads.toString(),
       '--ctx-size', config.ctxSize.toString(),
