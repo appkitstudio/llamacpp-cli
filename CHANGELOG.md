@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.3.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.2.0...v1.3.0) (2025-12-30)
+
+
+### Features
+
+* add server config command with host parameter support ([11faf4c](https://github.com/appkitstudio/llamacpp-cli/commit/11faf4c4031696be8e49efb6dbe73f4c5f5bee50))
+
 ## [1.2.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.1.1...v1.2.0) (2025-12-09)
 
 
