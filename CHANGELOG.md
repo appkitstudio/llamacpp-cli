@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.4.1](https://github.com/appkitstudio/llamacpp-cli/compare/v1.4.0...v1.4.1) (2026-01-09)
+
+
+### Bug Fixes
+
+* downgrade chalk to v4 for CommonJS compatibility ([0fb11d8](https://github.com/appkitstudio/llamacpp-cli/commit/0fb11d886039c3dea4846833f0e2cc5e264c1115))
+
 ## [1.4.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.3.3...v1.4.0) (2026-01-09)
 
 
