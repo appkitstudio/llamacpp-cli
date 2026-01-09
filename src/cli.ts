@@ -16,13 +16,14 @@ import { searchCommand } from './commands/search';
 import { showCommand } from './commands/show';
 import { serverShowCommand } from './commands/server-show';
 import { serverConfigCommand } from './commands/config';
+import packageJson from '../package.json';
 
 const program = new Command();
 
 program
   .name('llamacpp')
   .description('CLI tool to manage local llama.cpp servers on macOS')
-  .version('1.0.0');
+  .version(packageJson.version);
 
 // List models
 program
