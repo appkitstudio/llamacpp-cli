@@ -186,6 +186,12 @@ export class ModelDownloader {
     filename: string,
     onProgress?: (progress: DownloadProgress) => void
   ): Promise<string> {
+    // Ensure models directory exists
+    if (!fs.existsSync(this.modelsDir)) {
+      console.log(chalk.dim(`Creating models directory: ${this.modelsDir}`));
+      fs.mkdirSync(this.modelsDir, { recursive: true, mode: 0o755 });
+    }
+
     console.log(chalk.blue(`📥 Downloading ${filename} from Hugging Face...`));
     console.log(chalk.dim(`Repository: ${repoId}`));
     console.log(chalk.dim(`Destination: ${this.modelsDir}`));
