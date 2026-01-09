@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.4.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.3.3...v1.4.0) (2026-01-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* ** Default models directory changed from ~/models to ~/.llamacpp/models
+
+Changes:
+- New default: ~/.llamacpp/models (keeps all llamacpp data in one place)
+- Interactive prompt when models directory doesn't exist
+- New 'config' command to view/change global settings
+- Users can customize models directory and switch anytime
+
+Commands:
+- `llamacpp config` - View current configuration
+- `llamacpp config --models-dir <path>` - Change models directory
+- All commands (ls, pull, server create) now use configured directory
+
+Interactive Setup:
+- When models directory is missing, user is prompted to:
+  1. Accept default path (press Enter)
+  2. Specify custom path (type path and press Enter)
+- Configuration is saved and persists across sessions
+- Directory is created automatically after confirmation
+
+Benefits:
+- No more errors on fresh installs
+- All llamacpp data in one place (~/.llamacpp/)
+- Flexible for users who want custom locations
+- Better onboarding experience
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
+
+### Features
+
+* add configurable models directory with interactive setup ([975a81b](https://github.com/appkitstudio/llamacpp-cli/commit/975a81b217837b4238c4301f216e18e59f144cbe))
+
 ## [1.3.3](https://github.com/appkitstudio/llamacpp-cli/compare/v1.3.2...v1.3.3) (2026-01-09)
 
 
