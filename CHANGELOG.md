@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.3.3](https://github.com/appkitstudio/llamacpp-cli/compare/v1.3.2...v1.3.3) (2026-01-09)
+
+
+### Bug Fixes
+
+* auto-create ~/models directory when downloading models ([a9f54c1](https://github.com/appkitstudio/llamacpp-cli/commit/a9f54c119a41e29fa42003f3c1af0a732f5db9ea))
+
 ## [1.3.2](https://github.com/appkitstudio/llamacpp-cli/compare/v1.3.1...v1.3.2) (2026-01-09)
 
 
