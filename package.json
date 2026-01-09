@@ -40,7 +40,7 @@
     "url": "https://github.com/appkitstudio/llamacpp-cli/issues"
   },
   "dependencies": {
-    "chalk": "^5.3.0",
+    "chalk": "^4.1.2",
     "cli-table3": "^0.6.5",
     "commander": "^13.0.0"
   },
