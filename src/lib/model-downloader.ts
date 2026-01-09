@@ -14,10 +14,25 @@ export interface DownloadProgress {
 }
 
 export class ModelDownloader {
-  private modelsDir: string;
+  private modelsDir?: string;
+  private getModelsDirFn?: () => Promise<string>;
 
-  constructor(modelsDir?: string) {
-    this.modelsDir = modelsDir || getModelsDir();
+  constructor(modelsDir?: string, getModelsDirFn?: () => Promise<string>) {
+    this.modelsDir = modelsDir;
+    this.getModelsDirFn = getModelsDirFn;
+  }
+
+  /**
+   * Get the models directory (either configured or default)
+   */
+  private async getModelsDirectory(): Promise<string> {
+    if (this.modelsDir) {
+      return this.modelsDir;
+    }
+    if (this.getModelsDirFn) {
+      return await this.getModelsDirFn();
+    }
+    return getModelsDir();
   }
 
   /**
@@ -184,22 +199,20 @@ export class ModelDownloader {
   async downloadModel(
     repoId: string,
     filename: string,
-    onProgress?: (progress: DownloadProgress) => void
+    onProgress?: (progress: DownloadProgress) => void,
+    modelsDir?: string
   ): Promise<string> {
-    // Ensure models directory exists
-    if (!fs.existsSync(this.modelsDir)) {
-      console.log(chalk.dim(`Creating models directory: ${this.modelsDir}`));
-      fs.mkdirSync(this.modelsDir, { recursive: true, mode: 0o755 });
-    }
+    // Use provided models directory or get from config
+    const targetDir = modelsDir || await this.getModelsDirectory();
 
     console.log(chalk.blue(`📥 Downloading ${filename} from Hugging Face...`));
     console.log(chalk.dim(`Repository: ${repoId}`));
-    console.log(chalk.dim(`Destination: ${this.modelsDir}`));
+    console.log(chalk.dim(`Destination: ${targetDir}`));
     console.log();
 
     // Build download URL
     const url = this.buildDownloadUrl(repoId, filename);
-    const destPath = path.join(this.modelsDir, filename);
+    const destPath = path.join(targetDir, filename);
 
     // Check if file already exists
     if (fs.existsSync(destPath)) {
@@ -261,5 +274,18 @@ export class ModelDownloader {
   }
 }
 
-// Export singleton instance
-export const modelDownloader = new ModelDownloader();
+// Create singleton that uses configured models directory
+// Use lazy import to avoid circular dependency
+let _modelDownloader: ModelDownloader | null = null;
+
+export function getModelDownloader(): ModelDownloader {
+  if (!_modelDownloader) {
+    // Import stateManager dynamically to avoid circular dependency
+    const { stateManager } = require('./state-manager');
+    _modelDownloader = new ModelDownloader(undefined, () => stateManager.getModelsDirectory());
+  }
+  return _modelDownloader;
+}
+
+// Export singleton instance for backward compatibility
+export const modelDownloader = getModelDownloader();

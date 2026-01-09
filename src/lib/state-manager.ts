@@ -183,6 +183,23 @@ export class StateManager {
     const servers = await this.getAllServers();
     return new Set(servers.map((s) => s.port));
   }
+
+  /**
+   * Get the configured models directory
+   */
+  async getModelsDirectory(): Promise<string> {
+    const config = await this.loadGlobalConfig();
+    return config.modelsDirectory;
+  }
+
+  /**
+   * Set the models directory
+   */
+  async setModelsDirectory(directory: string): Promise<void> {
+    const config = await this.loadGlobalConfig();
+    config.modelsDirectory = directory;
+    await this.saveGlobalConfig(config);
+  }
 }
 
 // Export singleton instance

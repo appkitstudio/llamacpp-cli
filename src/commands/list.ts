@@ -2,10 +2,10 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import { modelScanner } from '../lib/model-scanner';
 import { formatBytes, formatDateShort } from '../utils/format-utils';
-import { getModelsDir } from '../utils/file-utils';
+import { stateManager } from '../lib/state-manager';
 
 export async function listCommand(): Promise<void> {
-  const modelsDir = getModelsDir();
+  const modelsDir = await stateManager.getModelsDirectory();
   console.log(chalk.blue(`📦 Available models in ${modelsDir}\n`));
 
   const models = await modelScanner.scanModels();

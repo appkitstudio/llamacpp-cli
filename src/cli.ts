@@ -16,6 +16,7 @@ import { searchCommand } from './commands/search';
 import { showCommand } from './commands/show';
 import { serverShowCommand } from './commands/server-show';
 import { serverConfigCommand } from './commands/config';
+import { configGlobalCommand } from './commands/config-global';
 import packageJson from '../package.json';
 
 const program = new Command();
@@ -28,7 +29,7 @@ program
 // List models
 program
   .command('ls')
-  .description('List available GGUF models in ~/models')
+  .description('List available GGUF models')
   .action(async () => {
     try {
       await listCommand();
@@ -107,6 +108,20 @@ program
   .action(async (model: string) => {
     try {
       await rmCommand(model);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Global configuration
+program
+  .command('config')
+  .description('View or change global configuration')
+  .option('--models-dir <path>', 'Set models directory path')
+  .action(async (options) => {
+    try {
+      await configGlobalCommand(options);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);

@@ -82,10 +82,10 @@ export function getGlobalConfigPath(): string {
 }
 
 /**
- * Get the models directory (~/models)
+ * Get the default models directory (~/.llamacpp/models)
  */
 export function getModelsDir(): string {
-  return path.join(os.homedir(), 'models');
+  return path.join(getConfigDir(), 'models');
 }
 
 /**

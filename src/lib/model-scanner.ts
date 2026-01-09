@@ -5,18 +5,34 @@ import { getModelsDir } from '../utils/file-utils';
 import { formatBytes } from '../utils/format-utils';
 
 export class ModelScanner {
-  private modelsDir: string;
+  private modelsDir?: string;
+  private getModelsDirFn?: () => Promise<string>;
 
-  constructor(modelsDir?: string) {
-    this.modelsDir = modelsDir || getModelsDir();
+  constructor(modelsDir?: string, getModelsDirFn?: () => Promise<string>) {
+    this.modelsDir = modelsDir;
+    this.getModelsDirFn = getModelsDirFn;
+  }
+
+  /**
+   * Get the models directory (either configured or default)
+   */
+  private async getModelsDirectory(): Promise<string> {
+    if (this.modelsDir) {
+      return this.modelsDir;
+    }
+    if (this.getModelsDirFn) {
+      return await this.getModelsDirFn();
+    }
+    return getModelsDir();
   }
 
   /**
    * Scan models directory for GGUF files
    */
   async scanModels(): Promise<ModelInfo[]> {
+    const modelsDir = await this.getModelsDirectory();
     try {
-      const files = await fs.readdir(this.modelsDir);
+      const files = await fs.readdir(modelsDir);
       const ggufFiles = files.filter((f) => f.toLowerCase().endsWith('.gguf'));
 
       const models: ModelInfo[] = [];
@@ -41,7 +57,8 @@ export class ModelScanner {
    * Get information about a specific model file
    */
   async getModelInfo(filename: string): Promise<ModelInfo | null> {
-    const modelPath = path.join(this.modelsDir, filename);
+    const modelsDir = await this.getModelsDirectory();
+    const modelPath = path.join(modelsDir, filename);
 
     try {
       const stats = await fs.stat(modelPath);
@@ -84,8 +101,10 @@ export class ModelScanner {
       return filename;
     }
 
+    const modelsDir = await this.getModelsDirectory();
+
     // Try in models directory
-    const modelPath = path.join(this.modelsDir, filename);
+    const modelPath = path.join(modelsDir, filename);
     const modelInfo = await this.getModelInfo(filename);
 
     if (modelInfo && modelInfo.exists) {
@@ -97,7 +116,7 @@ export class ModelScanner {
       const withExtension = `${filename}.gguf`;
       const modelInfoWithExt = await this.getModelInfo(withExtension);
       if (modelInfoWithExt && modelInfoWithExt.exists) {
-        return path.join(this.modelsDir, withExtension);
+        return path.join(modelsDir, withExtension);
       }
     }
 
@@ -121,5 +140,18 @@ export class ModelScanner {
   }
 }
 
-// Export singleton instance
-export const modelScanner = new ModelScanner();
+// Create singleton that uses configured models directory
+// Use lazy import to avoid circular dependency
+let _modelScanner: ModelScanner | null = null;
+
+export function getModelScanner(): ModelScanner {
+  if (!_modelScanner) {
+    // Import stateManager dynamically to avoid circular dependency
+    const { stateManager } = require('./state-manager');
+    _modelScanner = new ModelScanner(undefined, () => stateManager.getModelsDirectory());
+  }
+  return _modelScanner;
+}
+
+// Export singleton instance for backward compatibility
+export const modelScanner = getModelScanner();

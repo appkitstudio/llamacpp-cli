@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { modelDownloader } from '../lib/model-downloader';
+import { ensureModelsDirectory } from '../lib/models-dir-setup';
 
 interface PullOptions {
   file?: string;
@@ -25,9 +26,12 @@ export async function pullCommand(identifier: string, options: PullOptions): Pro
     filename += '.gguf';
   }
 
+  // Ensure models directory exists (prompts user if needed)
+  const modelsDir = await ensureModelsDirectory();
+
   // Download the model
   try {
-    const modelPath = await modelDownloader.downloadModel(parsed.repo, filename);
+    const modelPath = await modelDownloader.downloadModel(parsed.repo, filename, undefined, modelsDir);
 
     console.log();
     console.log(chalk.dim(`Create server: llamacpp server create ${filename}`));

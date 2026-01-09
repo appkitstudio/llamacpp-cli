@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import * as path from 'path';
+import * as fs from 'fs';
 import { modelScanner } from '../lib/model-scanner';
 import { stateManager } from '../lib/state-manager';
 import { configGenerator, ServerOptions } from '../lib/config-generator';
@@ -9,6 +10,7 @@ import { statusChecker } from '../lib/status-checker';
 import { commandExists } from '../utils/process-utils';
 import { formatBytes } from '../utils/format-utils';
 import { ensureDir } from '../utils/file-utils';
+import { ensureModelsDirectory } from '../lib/models-dir-setup';
 
 interface CreateOptions {
   port?: number;
@@ -29,27 +31,35 @@ export async function createCommand(model: string, options: CreateOptions): Prom
     throw new Error('llama-server not found. Install with: brew install llama.cpp');
   }
 
-  // 2. Resolve model path
+  // 2. Ensure models directory exists if model is not an absolute path
+  if (!path.isAbsolute(model)) {
+    const modelsDir = await stateManager.getModelsDirectory();
+    if (!fs.existsSync(modelsDir)) {
+      await ensureModelsDirectory();
+    }
+  }
+
+  // 3. Resolve model path
   const modelPath = await modelScanner.resolveModelPath(model);
   if (!modelPath) {
-    throw new Error(`Model not found: ${model}\n\nRun: llamacpp list`);
+    throw new Error(`Model not found: ${model}\n\nRun: llamacpp ls`);
   }
 
   const modelName = path.basename(modelPath);
 
-  // 3. Check if server already exists for this model
+  // 4. Check if server already exists for this model
   const existingServer = await stateManager.serverExistsForModel(modelPath);
   if (existingServer) {
     throw new Error(`Server already exists for ${modelName}\n\nUse: llamacpp server start ${modelName}`);
   }
 
-  // 4. Get model size
+  // 5. Get model size
   const modelSize = await modelScanner.getModelSize(modelName);
   if (!modelSize) {
     throw new Error(`Failed to read model file: ${modelPath}`);
   }
 
-  // 5. Determine port
+  // 6. Determine port
   let port: number;
   if (options.port) {
     portManager.validatePort(options.port);
@@ -62,7 +72,7 @@ export async function createCommand(model: string, options: CreateOptions): Prom
     port = await portManager.findAvailablePort();
   }
 
-  // 6. Generate server configuration
+  // 7. Generate server configuration
   console.log(chalk.blue(`🚀 Creating server for ${modelName}\n`));
 
   // Parse custom flags if provided
