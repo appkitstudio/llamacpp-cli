@@ -85,6 +85,9 @@ export async function serverShowCommand(identifier: string): Promise<void> {
   console.log(`${chalk.bold('Embeddings:')}     ${updatedServer.embeddings ? 'enabled' : 'disabled'}`);
   console.log(`${chalk.bold('Jinja:')}          ${updatedServer.jinja ? 'enabled' : 'disabled'}`);
   console.log(`${chalk.bold('Verbose Logs:')}   ${updatedServer.verbose ? chalk.green('enabled') : chalk.dim('disabled')}`);
+  if (updatedServer.customFlags && updatedServer.customFlags.length > 0) {
+    console.log(`${chalk.bold('Custom Flags:')}   ${updatedServer.customFlags.join(' ')}`);
+  }
 
   // Timestamps section
   console.log('\n' + '─'.repeat(70));

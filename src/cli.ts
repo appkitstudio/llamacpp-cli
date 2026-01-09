@@ -128,6 +128,7 @@ server
   .option('-c, --ctx-size <number>', 'Context size (default: auto)', parseInt)
   .option('-g, --gpu-layers <number>', 'GPU layers (default: 60)', parseInt)
   .option('-v, --verbose', 'Enable verbose HTTP logging (detailed request/response info)')
+  .option('-f, --flags <flags>', 'Additional llama-server flags (comma-separated, e.g., "--pooling,mean")')
   .action(async (model: string, options) => {
     try {
       await createCommand(model, options);
@@ -162,6 +163,7 @@ server
   .option('-g, --gpu-layers <number>', 'Update GPU layers', parseInt)
   .option('-v, --verbose', 'Enable verbose logging')
   .option('--no-verbose', 'Disable verbose logging')
+  .option('-f, --flags <flags>', 'Update custom llama-server flags (comma-separated, empty string to clear)')
   .option('-r, --restart', 'Automatically restart server if running')
   .action(async (identifier: string, options) => {
     try {

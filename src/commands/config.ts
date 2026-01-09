@@ -10,6 +10,7 @@ export interface ConfigUpdateOptions {
   ctxSize?: number;
   gpuLayers?: number;
   verbose?: boolean;
+  flags?: string;
   restart?: boolean;
 }
 
@@ -40,7 +41,8 @@ export async function serverConfigCommand(
                      options.threads !== undefined ||
                      options.ctxSize !== undefined ||
                      options.gpuLayers !== undefined ||
-                     options.verbose !== undefined;
+                     options.verbose !== undefined ||
+                     options.flags !== undefined;
 
   if (!hasChanges) {
     console.error(chalk.red('❌ No configuration changes specified'));
@@ -51,9 +53,11 @@ export async function serverConfigCommand(
     console.log(chalk.dim('  --gpu-layers <n>    GPU layers'));
     console.log(chalk.dim('  --verbose           Enable verbose logging'));
     console.log(chalk.dim('  --no-verbose        Disable verbose logging'));
+    console.log(chalk.dim('  --flags <flags>     Custom llama-server flags (comma-separated)'));
     console.log(chalk.dim('  --restart           Auto-restart if running'));
     console.log(chalk.dim('\nExample:'));
     console.log(chalk.dim(`  llamacpp server config ${server.id} --ctx-size 8192 --restart`));
+    console.log(chalk.dim(`  llamacpp server config ${server.id} --flags="--pooling,mean" --restart`));
     process.exit(1);
   }
 
@@ -95,15 +99,32 @@ export async function serverConfigCommand(
     const newValue = options.verbose ? 'enabled' : 'disabled';
     console.log(`${chalk.bold('Verbose Logs:')}   ${chalk.dim(oldValue)} → ${chalk.green(newValue)}`);
   }
+  if (options.flags !== undefined) {
+    const oldValue = server.customFlags?.join(' ') || 'none';
+    const newValue = options.flags || 'none';
+    console.log(`${chalk.bold('Custom Flags:')}   ${chalk.dim(oldValue)} → ${chalk.green(newValue)}`);
+  }
   console.log('');
 
-  // Stop server if running and restart flag is set
+  // Unload service if running and restart flag is set (forces plist re-read)
   if (wasRunning && options.restart) {
     console.log(chalk.dim('Stopping server...'));
     await launchctlManager.stopService(server.label);
+    await launchctlManager.unloadService(server.plistPath);
 
     // Wait a moment for clean shutdown
     await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  // Parse custom flags if provided
+  let customFlags: string[] | undefined;
+  if (options.flags !== undefined) {
+    if (options.flags === '') {
+      // Empty string means clear flags
+      customFlags = undefined;
+    } else {
+      customFlags = options.flags.split(',').map(f => f.trim()).filter(f => f.length > 0);
+    }
   }
 
   // Update configuration
@@ -114,6 +135,7 @@ export async function serverConfigCommand(
     ...(options.ctxSize !== undefined && { ctxSize: options.ctxSize }),
     ...(options.gpuLayers !== undefined && { gpuLayers: options.gpuLayers }),
     ...(options.verbose !== undefined && { verbose: options.verbose }),
+    ...(options.flags !== undefined && { customFlags }),
   };
 
   await stateManager.updateServerConfig(server.id, updatedConfig);

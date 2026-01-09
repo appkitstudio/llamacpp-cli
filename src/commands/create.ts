@@ -17,6 +17,7 @@ interface CreateOptions {
   ctxSize?: number;
   gpuLayers?: number;
   verbose?: boolean;
+  flags?: string;
 }
 
 export async function createCommand(model: string, options: CreateOptions): Promise<void> {
@@ -64,6 +65,12 @@ export async function createCommand(model: string, options: CreateOptions): Prom
   // 6. Generate server configuration
   console.log(chalk.blue(`🚀 Creating server for ${modelName}\n`));
 
+  // Parse custom flags if provided
+  let customFlags: string[] | undefined;
+  if (options.flags) {
+    customFlags = options.flags.split(',').map(f => f.trim()).filter(f => f.length > 0);
+  }
+
   const serverOptions: ServerOptions = {
     port: options.port,
     host: options.host,
@@ -71,6 +78,7 @@ export async function createCommand(model: string, options: CreateOptions): Prom
     ctxSize: options.ctxSize,
     gpuLayers: options.gpuLayers,
     verbose: options.verbose,
+    customFlags,
   };
 
   const config = await configGenerator.generateConfig(
@@ -97,6 +105,9 @@ export async function createCommand(model: string, options: CreateOptions): Prom
   console.log(chalk.dim(`Context Size: ${config.ctxSize}`));
   console.log(chalk.dim(`GPU Layers: ${config.gpuLayers}`));
   console.log(chalk.dim(`Verbose Logging: ${config.verbose ? 'enabled' : 'disabled'}`));
+  if (config.customFlags && config.customFlags.length > 0) {
+    console.log(chalk.dim(`Custom Flags: ${config.customFlags.join(' ')}`));
+  }
   console.log();
 
   // 7. Ensure log directory exists

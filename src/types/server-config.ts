@@ -14,6 +14,7 @@ export interface ServerConfig {
   embeddings: boolean;     // Always true
   jinja: boolean;          // Always true
   verbose: boolean;        // Enable verbose HTTP logging (--log-verbose flag)
+  customFlags?: string[];  // Additional llama-server flags (e.g., ["--pooling", "mean"])
 
   // State tracking
   status: ServerStatus;

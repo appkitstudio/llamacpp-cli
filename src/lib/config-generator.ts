@@ -13,6 +13,7 @@ export interface ServerOptions {
   embeddings?: boolean;
   jinja?: boolean;
   verbose?: boolean;
+  customFlags?: string[];
 }
 
 export interface SmartDefaults {
@@ -71,6 +72,7 @@ export class ConfigGenerator {
     const embeddings = options?.embeddings ?? true;
     const jinja = options?.jinja ?? true;
     const verbose = options?.verbose ?? true;  // Default to true (HTTP request logging)
+    const customFlags = options?.customFlags;  // Optional custom flags
 
     // Generate server ID
     const id = sanitizeModelName(modelName);
@@ -94,6 +96,7 @@ export class ConfigGenerator {
       embeddings,
       jinja,
       verbose,
+      customFlags,
       status: 'stopped',
       createdAt: new Date().toISOString(),
       plistPath,

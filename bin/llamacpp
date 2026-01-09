@@ -4,14 +4,19 @@
 // or the compiled JS in production
 
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 
-const isDevelopment = process.env.NODE_ENV !== 'production';
 const projectRoot = path.join(__dirname, '..');
+const tsxPath = path.join(projectRoot, 'node_modules', '.bin', 'tsx');
+const distPath = path.join(projectRoot, 'dist', 'cli.js');
 
-if (isDevelopment) {
+// Check if tsx exists and dist doesn't exist (true development mode)
+const hasTsx = fs.existsSync(tsxPath);
+const hasDist = fs.existsSync(distPath);
+
+if (hasTsx && !hasDist && process.env.NODE_ENV !== 'production') {
   // Development: use tsx to run TypeScript directly
-  const tsxPath = path.join(projectRoot, 'node_modules', '.bin', 'tsx');
   const cliPath = path.join(projectRoot, 'src', 'cli.ts');
 
   const child = spawn(tsxPath, [cliPath, ...process.argv.slice(2)], {
@@ -20,7 +25,12 @@ if (isDevelopment) {
   });
 
   child.on('exit', (code) => process.exit(code || 0));
+} else if (hasDist) {
+  // Production or when compiled JS exists: run compiled JavaScript
+  require(distPath);
 } else {
-  // Production: run compiled JavaScript
-  require(path.join(projectRoot, 'dist', 'cli.js'));
+  // Neither tsx nor compiled JS exists - error
+  console.error('Error: Neither tsx nor compiled JavaScript found.');
+  console.error('Please run "npm run build" to compile the project.');
+  process.exit(1);
 }

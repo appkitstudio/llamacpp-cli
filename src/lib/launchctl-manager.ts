@@ -36,6 +36,11 @@ export class LaunchctlManager {
       args.push('--log-verbose');
     }
 
+    // Add custom flags
+    if (config.customFlags && config.customFlags.length > 0) {
+      args.push(...config.customFlags);
+    }
+
     // Generate XML array elements
     const argsXml = args.map(arg => `      <string>${arg}</string>`).join('\n');
 
