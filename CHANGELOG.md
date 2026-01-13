@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.5.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.4.1...v1.5.0) (2026-01-13)
+
+
+### Features
+
+* add multi-server monitor with optimized metrics collection ([9deaf2b](https://github.com/appkitstudio/llamacpp-cli/commit/9deaf2b12280304a0941b0da82a0838d2a80bf6a))
+* add real-time monitoring TUI with GPU/CPU metrics ([5f762f5](https://github.com/appkitstudio/llamacpp-cli/commit/5f762f542817e405fd05c1fe3282a4621456c068))
+
 ## [1.4.1](https://github.com/appkitstudio/llamacpp-cli/compare/v1.4.0...v1.4.1) (2026-01-09)
 
 
