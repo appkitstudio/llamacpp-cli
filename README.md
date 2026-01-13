@@ -15,8 +15,9 @@ CLI tool to manage local llama.cpp servers on macOS. Provides an Ollama-like exp
 - 🤖 **Model downloads** - Pull GGUF models from Hugging Face
 - ⚙️ **Smart defaults** - Auto-configure threads, context size, and GPU layers based on model size
 - 🔌 **Auto port assignment** - Automatically find available ports (9000-9999)
-- 📊 **Real-time monitoring TUI** - Live server metrics with GPU/CPU usage, token generation speeds, and active slots
+- 📊 **Real-time monitoring TUI** - Multi-server dashboard with drill-down details, live GPU/CPU/memory metrics, token generation speeds, and animated loading states
 - 🪵 **Smart logging** - Compact one-line request format with optional full JSON details
+- ⚡️ **Optimized metrics** - Batch collection and caching prevent CPU spikes (10x fewer processes)
 
 ## Why llamacpp-cli?
 
@@ -459,6 +460,8 @@ Use `--http` to see full request/response JSON, or `--verbose` option to see all
 
 ### `llamacpp server monitor [identifier]`
 Real-time monitoring TUI showing server metrics, GPU/CPU usage, and active inference slots.
+
+![Server Monitoring TUI](https://raw.githubusercontent.com/dweaver/llamacpp-cli/main/docs/images/monitor-detail.png)
 
 **Two Modes:**
 
