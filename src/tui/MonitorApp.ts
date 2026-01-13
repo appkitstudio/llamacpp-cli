@@ -72,7 +72,9 @@ export async function createMonitorUI(
       }
 
       content += `Model:    ${server.modelName}\n`;
-      content += `Endpoint: http://${server.host}:${server.port}\n`;
+      // Handle null host (legacy configs) by defaulting to 127.0.0.1
+      const displayHost = server.host || '127.0.0.1';
+      content += `Endpoint: http://${displayHost}:${server.port}\n`;
       content += `Slots:    ${data.server.activeSlots} active / ${data.server.totalSlots} total\n`;
       content += '\n';
 
@@ -199,7 +201,9 @@ export async function createMonitorUI(
         }
 
         content += `Model:    ${server.modelName}\n`;
-        content += `Endpoint: http://${server.host}:${server.port}\n`;
+        // Handle null host (legacy configs) by defaulting to 127.0.0.1
+        const displayHost = server.host || '127.0.0.1';
+        content += `Endpoint: http://${displayHost}:${server.port}\n`;
         content += `Slots:    ${lastGoodData.server.activeSlots} active / ${lastGoodData.server.totalSlots} total\n\n`;
 
         // Request Metrics
@@ -336,6 +340,12 @@ export async function createMonitorUI(
     startPolling();
   });
 
+  screen.key(['q', 'Q', 'C-c'], () => {
+    if (intervalId) clearInterval(intervalId);
+    screen.destroy();
+    process.exit(0);
+  });
+
   // Initial display
   contentBox.setContent('{cyan-fg}⏳ Connecting to server...{/cyan-fg}');
   screen.render();
@@ -345,5 +355,7 @@ export async function createMonitorUI(
   // Cleanup
   screen.on('destroy', () => {
     if (intervalId) clearInterval(intervalId);
+    // Note: macmon child processes will automatically die when parent exits
+    // since they're spawned with detached: false
   });
 }

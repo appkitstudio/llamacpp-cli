@@ -2,6 +2,7 @@ import { ServerConfig } from '../types/server-config.js';
 import { ServerMetrics, SlotInfo, MonitorData } from '../types/monitor-types.js';
 import { statusChecker } from './status-checker.js';
 import { systemCollector } from './system-collector.js';
+import { getProcessMemory } from '../utils/process-utils.js';
 
 /**
  * Aggregates metrics from llama.cpp server API endpoints
@@ -13,7 +14,9 @@ export class MetricsAggregator {
   private previousSlots: Map<number, { n_decoded: number; timestamp: number }> = new Map();
 
   constructor(server: ServerConfig, timeout: number = 5000) {
-    this.serverUrl = `http://${server.host}:${server.port}`;
+    // Handle null host (legacy configs) by defaulting to 127.0.0.1
+    const host = server.host || '127.0.0.1';
+    this.serverUrl = `http://${host}:${server.port}`;
     this.timeout = timeout;
   }
 
@@ -21,11 +24,13 @@ export class MetricsAggregator {
    * Fetch data from llama.cpp API with timeout
    */
   private async fetchWithTimeout(
-    endpoint: string
+    endpoint: string,
+    customTimeout?: number
   ): Promise<any | null> {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+      const timeoutMs = customTimeout ?? this.timeout;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       const response = await fetch(`${this.serverUrl}${endpoint}`, {
         signal: controller.signal,
@@ -121,8 +126,13 @@ export class MetricsAggregator {
 
   /**
    * Aggregate all server metrics
+   * @param server - Server configuration
+   * @param processMemory - Optional pre-fetched process memory (for batch collection)
    */
-  async collectServerMetrics(server: ServerConfig): Promise<ServerMetrics> {
+  async collectServerMetrics(
+    server: ServerConfig,
+    processMemory?: number | null
+  ): Promise<ServerMetrics> {
     const now = Date.now();
 
     // Check basic server status first
@@ -157,10 +167,14 @@ export class MetricsAggregator {
     }
 
     // Fetch detailed metrics in parallel
-    const [healthy, props, slots] = await Promise.all([
+    // If processMemory was pre-fetched (batch mode), use it; otherwise fetch individually
+    const [healthy, props, slots, fetchedMemory] = await Promise.all([
       this.getHealth(),
       this.getProps(),
       this.getSlots(),
+      processMemory !== undefined
+        ? Promise.resolve(processMemory)
+        : (server.pid ? getProcessMemory(server.pid) : Promise.resolve(null)),
     ]);
 
     // Calculate slot statistics
@@ -200,6 +214,7 @@ export class MetricsAggregator {
       slots,
       avgPromptSpeed,
       avgGenerateSpeed,
+      processMemory: fetchedMemory ?? undefined,
       timestamp: now,
       stale: false,
     };

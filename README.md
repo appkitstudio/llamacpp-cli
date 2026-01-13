@@ -76,7 +76,10 @@ llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf
 # View running servers
 llamacpp ps
 
-# Monitor server in real-time TUI
+# Monitor all servers (multi-server dashboard)
+llamacpp server monitor
+
+# Or monitor a specific server
 llamacpp server monitor llama-3.2-3b
 
 # Chat with your model interactively
@@ -454,9 +457,18 @@ The compact format shows one line per HTTP request and includes:
 
 Use `--http` to see full request/response JSON, or `--verbose` option to see all internal server logs.
 
-### `llamacpp server monitor <identifier>`
+### `llamacpp server monitor [identifier]`
 Real-time monitoring TUI showing server metrics, GPU/CPU usage, and active inference slots.
 
+**Two Modes:**
+
+**1. Multi-Server Dashboard (no identifier):**
+```bash
+llamacpp server monitor
+```
+Shows overview of all servers with system resources. Press 1-9 to drill down into individual server details.
+
+**2. Single-Server Monitor (with identifier):**
 ```bash
 # Monitor by partial name
 llamacpp server monitor llama-3.2-3b
@@ -468,19 +480,42 @@ llamacpp server monitor 9000
 llamacpp server monitor llama-3-2-3b
 ```
 
-**Displays:**
+**Multi-Server Dashboard:**
+```
+┌─────────────────────────────────────────────────────────┐
+│ System Resources                                         │
+│ GPU: [████░░░] 65%  CPU: [███░░░] 38%  Memory: 58%     │
+├─────────────────────────────────────────────────────────┤
+│ Servers (3 running, 0 stopped)                          │
+│ # │ Server ID      │ Port │ Status │ Slots │ tok/s    │
+│───┼────────────────┼──────┼────────┼───────┼──────────┤
+│ 1 │ llama-3-2-3b   │ 9000 │ ● RUN  │ 2/4   │ 245      │
+│ 2 │ qwen2-7b       │ 9001 │ ● RUN  │ 1/4   │ 198      │
+│ 3 │ llama-3-1-8b   │ 9002 │ ○ IDLE │ 0/4   │ -        │
+└─────────────────────────────────────────────────────────┘
+Press 1-9 for details | [Q] Quit
+```
+
+**Single-Server View:**
 - **Server Information** - Status, uptime, model name, endpoint, slot counts
 - **Request Metrics** - Active/idle slots, prompt speed, generation speed
 - **Active Slots** - Per-slot token generation rates and progress
 - **System Resources** - GPU/CPU/ANE utilization, memory usage, temperature
 
 **Keyboard Shortcuts:**
-- `R` - Force refresh now
-- `+` - Speed up updates (decrease interval by 500ms)
-- `-` - Slow down updates (increase interval by 500ms)
-- `Q` - Quit monitoring
+- **Multi-Server Mode:**
+  - `1-9` - View details for server #N
+  - `ESC` - Back to list (from detail view)
+  - `R` - Force refresh now
+  - `+/-` - Adjust update speed
+  - `Q` - Quit
+- **Single-Server Mode:**
+  - `R` - Force refresh now
+  - `+/-` - Adjust update speed
+  - `Q` - Quit
 
 **Features:**
+- **Multi-server dashboard** - Monitor all servers at once
 - **Real-time updates** - Metrics refresh every 2 seconds (adjustable)
 - **Token-per-second calculation** - Shows actual generation speed per slot
 - **Progress bars** - Visual representation of GPU/CPU/memory usage

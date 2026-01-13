@@ -1,4 +1,4 @@
-import { execCommand } from '../utils/process-utils.js';
+import { execCommand, spawnAndReadOneLine } from '../utils/process-utils.js';
 import { SystemMetrics } from '../types/monitor-types.js';
 
 /**
@@ -8,9 +8,48 @@ import { SystemMetrics } from '../types/monitor-types.js';
 export class SystemCollector {
   private macmonPath: string;
   private macmonAvailable: boolean | null = null;
+  private lastSystemMetrics: SystemMetrics | null = null;
+  private lastCollectionTime: number = 0;
+  private readonly CACHE_TTL_MS = 4000; // Cache for 4 seconds (longer than macmon spawn time)
+  private collectingLock: Promise<SystemMetrics> | null = null;
+  private pCoreCount: number = 0;
+  private eCoreCount: number = 0;
+  private totalCores: number = 0;
 
   constructor(macmonPath: string = '/opt/homebrew/bin/macmon') {
     this.macmonPath = macmonPath;
+    this.initializeCoreCount();
+  }
+
+  /**
+   * Get CPU core counts for weighted average calculation
+   */
+  private async initializeCoreCount(): Promise<void> {
+    try {
+      const { execCommand } = await import('../utils/process-utils.js');
+
+      // Try to get P-core and E-core counts separately (Apple Silicon)
+      try {
+        const pCores = await execCommand('sysctl -n hw.perflevel0.physicalcpu 2>/dev/null');
+        const eCores = await execCommand('sysctl -n hw.perflevel1.physicalcpu 2>/dev/null');
+        this.pCoreCount = parseInt(pCores, 10) || 0;
+        this.eCoreCount = parseInt(eCores, 10) || 0;
+      } catch {
+        // Fall back to total core count if perflevel not available
+        const total = await execCommand('sysctl -n hw.ncpu 2>/dev/null');
+        this.totalCores = parseInt(total, 10) || 0;
+        // Assume equal split if we can't get individual counts
+        this.pCoreCount = Math.floor(this.totalCores / 2);
+        this.eCoreCount = this.totalCores - this.pCoreCount;
+      }
+
+      this.totalCores = this.pCoreCount + this.eCoreCount;
+    } catch {
+      // Default to 8 cores if we can't detect
+      this.pCoreCount = 4;
+      this.eCoreCount = 4;
+      this.totalCores = 8;
+    }
   }
 
   /**
@@ -56,10 +95,20 @@ export class SystemCollector {
         ? data.gpu_usage[1] * 100
         : undefined;
 
-      // CPU usage (combine P-cores and E-cores, convert decimal to percentage)
-      const pcpuUsage = data.pcpu_usage?.[1] || 0;
-      const ecpuUsage = data.ecpu_usage?.[1] || 0;
-      const cpuUsage = (pcpuUsage + ecpuUsage) * 100;
+      // CPU usage (weighted average of P-cores and E-cores)
+      // Each core type reports 0.0-1.0 utilization
+      // Calculate weighted average: (P% * Pcount + E% * Ecount) / totalCores
+      const pcpuUsage = data.pcpu_usage?.[1] || 0;  // 0.0-1.0
+      const ecpuUsage = data.ecpu_usage?.[1] || 0;  // 0.0-1.0
+
+      let cpuUsage: number | undefined;
+      if (this.totalCores > 0) {
+        // Weighted average normalized to 0-100%
+        cpuUsage = ((pcpuUsage * this.pCoreCount) + (ecpuUsage * this.eCoreCount)) / this.totalCores * 100;
+      } else {
+        // Fallback: simple average if core counts not available
+        cpuUsage = ((pcpuUsage + ecpuUsage) / 2) * 100;
+      }
 
       // ANE usage (estimate from power draw - macmon doesn't provide usage %)
       // If ANE power > 0.1W, consider it active (rough estimate)
@@ -84,6 +133,7 @@ export class SystemCollector {
   /**
    * Collect macmon metrics (GPU, CPU, ANE)
    * Uses 'macmon pipe' which outputs one JSON line per update
+   * Spawns macmon, reads one line, and kills it to prevent process leaks
    */
   private async getMacmonMetrics(): Promise<{
     gpuUsage?: number;
@@ -97,8 +147,15 @@ export class SystemCollector {
     }
 
     try {
-      // Use head -1 to get just the first JSON line from macmon pipe
-      const output = await execCommand(`${this.macmonPath} pipe 2>/dev/null | head -1`);
+      // Spawn macmon pipe, read one line, and kill it
+      // This prevents orphaned macmon processes
+      // Timeout set to 5s because macmon can take 3-4s to produce first line
+      const output = await spawnAndReadOneLine(this.macmonPath, ['pipe'], 5000);
+
+      if (!output) {
+        return null;
+      }
+
       return this.parseMacmonJson(output);
     } catch {
       return null;
@@ -183,8 +240,39 @@ export class SystemCollector {
   /**
    * Collect all system metrics
    * Attempts macmon first (GPU/CPU/ANE + memory), falls back to vm_stat (memory only)
+   * Caches results for 1.5s to prevent spawning multiple macmon processes
    */
   async collectSystemMetrics(): Promise<SystemMetrics> {
+    const now = Date.now();
+
+    // Return cached data if still fresh
+    if (this.lastSystemMetrics && (now - this.lastCollectionTime) < this.CACHE_TTL_MS) {
+      return this.lastSystemMetrics;
+    }
+
+    // If already collecting, wait for that to finish
+    if (this.collectingLock) {
+      return this.collectingLock;
+    }
+
+    // Start fresh collection
+    this.collectingLock = this.doCollectSystemMetrics();
+
+    try {
+      const metrics = await this.collectingLock;
+      this.lastSystemMetrics = metrics;
+      this.lastCollectionTime = now;
+      return metrics;
+    } finally {
+      this.collectingLock = null;
+    }
+  }
+
+  /**
+   * Internal method to actually collect system metrics
+   * Called by collectSystemMetrics with caching/locking
+   */
+  private async doCollectSystemMetrics(): Promise<SystemMetrics> {
     const warnings: string[] = [];
     const now = Date.now();
 

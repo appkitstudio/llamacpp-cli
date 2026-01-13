@@ -121,6 +121,9 @@ export interface ServerMetrics {
   // Cache metrics (if available from /metrics endpoint)
   cacheHitRate?: number;      // Percentage
 
+  // Process metrics
+  processMemory?: number;     // Bytes (actual RSS from top command)
+
   // Timestamp
   timestamp: number;
   stale: boolean;             // True if data is from last successful fetch
