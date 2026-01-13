@@ -17,6 +17,7 @@ import { showCommand } from './commands/show';
 import { serverShowCommand } from './commands/server-show';
 import { serverConfigCommand } from './commands/config';
 import { configGlobalCommand } from './commands/config-global';
+import { monitorCommand } from './commands/monitor';
 import packageJson from '../package.json';
 
 const program = new Command();
@@ -262,6 +263,19 @@ server
   .action(async (identifier: string, options) => {
     try {
       await logsCommand(identifier, options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Monitor server
+server
+  .command('monitor [identifier]')
+  .description('Monitor server with real-time metrics TUI')
+  .action(async (identifier?: string) => {
+    try {
+      await monitorCommand(identifier);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);

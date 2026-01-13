@@ -15,7 +15,7 @@ CLI tool to manage local llama.cpp servers on macOS. Provides an Ollama-like exp
 - 🤖 **Model downloads** - Pull GGUF models from Hugging Face
 - ⚙️ **Smart defaults** - Auto-configure threads, context size, and GPU layers based on model size
 - 🔌 **Auto port assignment** - Automatically find available ports (9000-9999)
-- 📊 **Status monitoring** - Real-time server status with memory usage and uptime tracking
+- 📊 **Real-time monitoring TUI** - Live server metrics with GPU/CPU usage, token generation speeds, and active slots
 - 🪵 **Smart logging** - Compact one-line request format with optional full JSON details
 
 ## Why llamacpp-cli?
@@ -75,6 +75,9 @@ llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf
 
 # View running servers
 llamacpp ps
+
+# Monitor server in real-time TUI
+llamacpp server monitor llama-3.2-3b
 
 # Chat with your model interactively
 llamacpp server run llama-3.2-3b
@@ -450,6 +453,54 @@ The compact format shows one line per HTTP request and includes:
 **Note:** Verbose logging is now enabled by default. HTTP request logs are available by default.
 
 Use `--http` to see full request/response JSON, or `--verbose` option to see all internal server logs.
+
+### `llamacpp server monitor <identifier>`
+Real-time monitoring TUI showing server metrics, GPU/CPU usage, and active inference slots.
+
+```bash
+# Monitor by partial name
+llamacpp server monitor llama-3.2-3b
+
+# Monitor by port
+llamacpp server monitor 9000
+
+# Monitor by server ID
+llamacpp server monitor llama-3-2-3b
+```
+
+**Displays:**
+- **Server Information** - Status, uptime, model name, endpoint, slot counts
+- **Request Metrics** - Active/idle slots, prompt speed, generation speed
+- **Active Slots** - Per-slot token generation rates and progress
+- **System Resources** - GPU/CPU/ANE utilization, memory usage, temperature
+
+**Keyboard Shortcuts:**
+- `R` - Force refresh now
+- `+` - Speed up updates (decrease interval by 500ms)
+- `-` - Slow down updates (increase interval by 500ms)
+- `Q` - Quit monitoring
+
+**Features:**
+- **Real-time updates** - Metrics refresh every 2 seconds (adjustable)
+- **Token-per-second calculation** - Shows actual generation speed per slot
+- **Progress bars** - Visual representation of GPU/CPU/memory usage
+- **Error recovery** - Shows stale data with warnings if connection lost
+- **Graceful degradation** - Works without GPU metrics (uses memory-only mode)
+
+**Optional: GPU/CPU Metrics**
+
+For GPU and CPU utilization metrics, install macmon:
+```bash
+brew install vladkens/tap/macmon
+```
+
+Without macmon, the monitor still shows:
+- ✅ Server status and uptime
+- ✅ Active slots and token generation speeds
+- ✅ Memory usage (via built-in vm_stat)
+- ❌ GPU/CPU/ANE utilization (requires macmon)
+
+**Identifiers:** Port number, server ID, or partial model name
 
 ## Configuration
 
