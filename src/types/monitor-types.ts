@@ -123,6 +123,7 @@ export interface ServerMetrics {
 
   // Process metrics
   processMemory?: number;     // Bytes (actual RSS from top command)
+  processCpuUsage?: number;   // Percentage (0-100+) from ps command
 
   // Timestamp
   timestamp: number;

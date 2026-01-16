@@ -178,16 +178,12 @@ export class SystemCollector {
    */
   private parseVmStatOutput(output: string): {
     memoryUsed: number;
-    memoryTotal: number;
   } {
     const lines = output.split('\n');
     const pageSize = 16384; // 16KB on Apple Silicon
     let pagesActive = 0;
     let pagesWired = 0;
     let pagesCompressed = 0;
-    let pagesFree = 0;
-    let pagesInactive = 0;
-    let pagesSpeculative = 0;
 
     for (const line of lines) {
       const match = line.match(/Pages (.*?):\s+(\d+)\./);
@@ -198,49 +194,56 @@ export class SystemCollector {
         if (name === 'active') pagesActive = value;
         else if (name === 'wired down') pagesWired = value;
         else if (name === 'compressed') pagesCompressed = value;
-        else if (name === 'free') pagesFree = value;
-        else if (name === 'inactive') pagesInactive = value;
-        else if (name === 'speculative') pagesSpeculative = value;
       }
     }
 
     // Calculate used memory (active + wired + compressed)
+    // This matches what Activity Monitor and macmon report as "used"
     const usedPages = pagesActive + pagesWired + pagesCompressed;
     const memoryUsed = usedPages * pageSize;
 
-    // Calculate total memory (used + free + inactive + speculative)
-    const totalPages =
-      pagesActive +
-      pagesWired +
-      pagesCompressed +
-      pagesFree +
-      pagesInactive +
-      pagesSpeculative;
-    const memoryTotal = totalPages * pageSize;
-
-    return { memoryUsed, memoryTotal };
+    return { memoryUsed };
   }
 
   /**
-   * Collect vm_stat memory metrics
+   * Get total system memory from sysctl
+   * Returns installed RAM size in bytes
    */
-  private async getVmStatMetrics(): Promise<{
+  private async getTotalMemory(): Promise<number> {
+    try {
+      const output = await execCommand('sysctl -n hw.memsize 2>/dev/null');
+      return parseInt(output.trim(), 10) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Collect vm_stat memory metrics + total system memory from sysctl
+   */
+  private async getMemoryMetrics(): Promise<{
     memoryUsed: number;
     memoryTotal: number;
   }> {
     try {
-      const output = await execCommand('vm_stat 2>/dev/null');
-      return this.parseVmStatOutput(output);
+      // Get used memory from vm_stat
+      const vmStatOutput = await execCommand('vm_stat 2>/dev/null');
+      const { memoryUsed } = this.parseVmStatOutput(vmStatOutput);
+
+      // Get total installed RAM from sysctl (this is accurate)
+      const memoryTotal = await this.getTotalMemory();
+
+      return { memoryUsed, memoryTotal };
     } catch {
-      // Fallback to zeros if vm_stat fails
+      // Fallback to zeros if commands fail
       return { memoryUsed: 0, memoryTotal: 0 };
     }
   }
 
   /**
    * Collect all system metrics
-   * Attempts macmon first (GPU/CPU/ANE + memory), falls back to vm_stat (memory only)
-   * Caches results for 1.5s to prevent spawning multiple macmon processes
+   * Attempts macmon first (GPU/CPU/ANE), always gets memory from vm_stat + sysctl
+   * Caches results for 4s to prevent spawning multiple macmon processes
    */
   async collectSystemMetrics(): Promise<SystemMetrics> {
     const now = Date.now();
@@ -276,11 +279,11 @@ export class SystemCollector {
     const warnings: string[] = [];
     const now = Date.now();
 
-    // Try macmon first
+    // Try macmon first for GPU/CPU/ANE
     const macmonMetrics = await this.getMacmonMetrics();
 
-    // Always get memory from vm_stat (more reliable than macmon)
-    const memoryMetrics = await this.getVmStatMetrics();
+    // Always get memory from vm_stat + sysctl (accurate total from sysctl)
+    const memoryMetrics = await this.getMemoryMetrics();
 
     // Determine source and add warnings
     let source: 'macmon' | 'vm_stat' | 'none';

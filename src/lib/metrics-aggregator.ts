@@ -2,7 +2,7 @@ import { ServerConfig } from '../types/server-config.js';
 import { ServerMetrics, SlotInfo, MonitorData } from '../types/monitor-types.js';
 import { statusChecker } from './status-checker.js';
 import { systemCollector } from './system-collector.js';
-import { getProcessMemory } from '../utils/process-utils.js';
+import { getProcessMemory, getProcessCpu } from '../utils/process-utils.js';
 
 /**
  * Aggregates metrics from llama.cpp server API endpoints
@@ -128,10 +128,12 @@ export class MetricsAggregator {
    * Aggregate all server metrics
    * @param server - Server configuration
    * @param processMemory - Optional pre-fetched process memory (for batch collection)
+   * @param processCpuUsage - Optional pre-fetched process CPU usage (for batch collection)
    */
   async collectServerMetrics(
     server: ServerConfig,
-    processMemory?: number | null
+    processMemory?: number | null,
+    processCpuUsage?: number | null
   ): Promise<ServerMetrics> {
     const now = Date.now();
 
@@ -167,14 +169,17 @@ export class MetricsAggregator {
     }
 
     // Fetch detailed metrics in parallel
-    // If processMemory was pre-fetched (batch mode), use it; otherwise fetch individually
-    const [healthy, props, slots, fetchedMemory] = await Promise.all([
+    // If processMemory/CPU were pre-fetched (batch mode), use them; otherwise fetch individually
+    const [healthy, props, slots, fetchedMemory, fetchedCpu] = await Promise.all([
       this.getHealth(),
       this.getProps(),
       this.getSlots(),
       processMemory !== undefined
         ? Promise.resolve(processMemory)
         : (server.pid ? getProcessMemory(server.pid) : Promise.resolve(null)),
+      processCpuUsage !== undefined
+        ? Promise.resolve(processCpuUsage)
+        : (server.pid ? getProcessCpu(server.pid) : Promise.resolve(null)),
     ]);
 
     // Calculate slot statistics
@@ -215,6 +220,7 @@ export class MetricsAggregator {
       avgPromptSpeed,
       avgGenerateSpeed,
       processMemory: fetchedMemory ?? undefined,
+      processCpuUsage: fetchedCpu ?? undefined,
       timestamp: now,
       stale: false,
     };

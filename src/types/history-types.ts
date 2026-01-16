@@ -11,6 +11,7 @@ export interface HistorySnapshot {
     avgPromptSpeed?: number;       // Tokens per second
     avgGenerateSpeed?: number;     // Tokens per second
     processMemory?: number;        // Bytes (RSS)
+    processCpuUsage?: number;      // Percentage (0-100+) from ps
   };
   system?: {
     gpuUsage?: number;             // Percentage (0-100)

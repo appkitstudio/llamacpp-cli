@@ -39,6 +39,7 @@ export class HistoryManager {
           avgPromptSpeed: serverMetrics.avgPromptSpeed,
           avgGenerateSpeed: serverMetrics.avgGenerateSpeed,
           processMemory: serverMetrics.processMemory,
+          processCpuUsage: serverMetrics.processCpuUsage,
         },
         system: systemMetrics ? {
           gpuUsage: systemMetrics.gpuUsage,

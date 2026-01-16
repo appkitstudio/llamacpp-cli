@@ -197,18 +197,21 @@ export async function createHistoricalUI(
         timestamp: snapshot.timestamp,
         value: snapshot.server.avgGenerateSpeed || 0
       });
+      // GPU: Keep system-wide (can't get per-process on macOS)
       rawGpuUsages.push({
         timestamp: snapshot.timestamp,
         value: snapshot.system?.gpuUsage || 0
       });
+      // CPU: Use per-process CPU usage from ps
       rawCpuUsages.push({
         timestamp: snapshot.timestamp,
-        value: snapshot.system?.cpuUsage || 0
+        value: snapshot.server.processCpuUsage || 0
       });
+      // Memory: Use per-process memory in GB
       rawMemoryPercentages.push({
         timestamp: snapshot.timestamp,
-        value: snapshot.system && snapshot.system.memoryTotal > 0
-          ? (snapshot.system.memoryUsed / snapshot.system.memoryTotal) * 100
+        value: snapshot.server.processMemory
+          ? snapshot.server.processMemory / (1024 * 1024 * 1024) // Convert bytes to GB
           : 0
       });
     }
@@ -223,7 +226,7 @@ export async function createHistoricalUI(
     const cpuUsages = viewMode === 'hour'
       ? downsampleMaxTime(rawCpuUsages, maxChartPoints)
       : rawCpuUsages.map(p => p.value);
-    const memoryPercentages = viewMode === 'hour'
+    const memoryUsageGB = viewMode === 'hour'
       ? downsampleMeanTime(rawMemoryPercentages, maxChartPoints)
       : rawMemoryPercentages.map(p => p.value);
 
@@ -298,10 +301,10 @@ export async function createHistoricalUI(
     if (validCpuUsages.length >= 2 && cpuUsages.length > 0) {
       try {
         const cpuLabel = viewMode === 'hour'
-          ? 'CPU Usage - Peak per bucket (%)'
-          : 'CPU Usage (%)';
+          ? 'Process CPU Usage - Peak per bucket (%)'
+          : 'Process CPU Usage (%)';
         content += `{bold}${cpuLabel}{/bold}\n`;
-        const range = getExpandedRange(validCpuUsages, true); // Percentage chart
+        const range = getExpandedRange(validCpuUsages, false); // Not forcing 0-100
 
         const plotData = cpuUsages.map(v => isNaN(v) ? 0 : v);
 
@@ -324,30 +327,30 @@ export async function createHistoricalUI(
     }
 
     // Memory Usage Chart (only show if data exists)
-    const validMemoryPercentages = memoryPercentages.filter(v => !isNaN(v) && v > 0);
-    if (validMemoryPercentages.length >= 2 && memoryPercentages.length > 0) {
+    const validMemoryUsageGB = memoryUsageGB.filter(v => !isNaN(v) && v > 0);
+    if (validMemoryUsageGB.length >= 2 && memoryUsageGB.length > 0) {
       try {
         const memLabel = viewMode === 'hour'
-          ? 'Memory Usage - Average per bucket (%)'
-          : 'Memory Usage (%)';
+          ? 'Process Memory Usage - Average per bucket (GB)'
+          : 'Process Memory Usage (GB)';
         content += `{bold}${memLabel}{/bold}\n`;
-        const range = getExpandedRange(validMemoryPercentages, true); // Percentage chart
+        const range = getExpandedRange(validMemoryUsageGB, false); // Not percentage
 
-        const plotData = memoryPercentages.map(v => isNaN(v) ? 0 : v);
+        const plotData = memoryUsageGB.map(v => isNaN(v) ? 0 : v);
 
         const chart = asciichart.plot(plotData, {
           height: chartHeight,
           colors: [asciichart.magenta],
-          format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
+          format: (x: number) => x.toFixed(2).padStart(6, ' '),
           min: range.min,
           max: range.max,
         });
         content += chart + '\n';
 
-        const stats = calculateStats(validMemoryPercentages);
-        content += `  Avg: ${stats.avg.toFixed(1)}% (±${stats.stddev.toFixed(1)})  `;
-        content += `Max: ${stats.max.toFixed(1)}%  `;
-        content += `Min: ${stats.min.toFixed(1)}%\n\n`;
+        const stats = calculateStats(validMemoryUsageGB);
+        content += `  Avg: ${stats.avg.toFixed(2)} GB (±${stats.stddev.toFixed(2)})  `;
+        content += `Max: ${stats.max.toFixed(2)} GB  `;
+        content += `Min: ${stats.min.toFixed(2)} GB\n\n`;
       } catch (error) {
         content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
       }
@@ -515,12 +518,12 @@ export async function createMultiServerHistoricalUI(
         .map(s => s.system?.gpuUsage || 0)
         .filter(v => v > 0);
       const cpuUsages = snapshots
-        .map(s => s.system?.cpuUsage || 0)
+        .map(s => s.server.processCpuUsage || 0)
         .filter(v => v > 0);
-      const memoryPercentages = snapshots
+      const memoryUsageGB = snapshots
         .map(s => {
-          if (!s.system || s.system.memoryTotal === 0) return 0;
-          return (s.system.memoryUsed / s.system.memoryTotal) * 100;
+          if (!s.server.processMemory) return 0;
+          return s.server.processMemory / (1024 * 1024 * 1024); // Convert to GB
         })
         .filter(v => v > 0);
 
@@ -533,8 +536,8 @@ export async function createMultiServerHistoricalUI(
       const avgCPU = cpuUsages.length > 0
         ? (calculateStats(cpuUsages).avg.toFixed(1) + '%').padStart(8)
         : '   -    ';
-      const avgMem = memoryPercentages.length > 0
-        ? (calculateStats(memoryPercentages).avg.toFixed(1) + '%').padStart(7)
+      const avgMem = memoryUsageGB.length > 0
+        ? (calculateStats(memoryUsageGB).avg.toFixed(2) + 'GB').padStart(7)
         : '   -   ';
 
       content += `${serverId} │ ${sampleCount} │ ${avgTokS} │ ${avgGPU} │ ${avgCPU} │ ${avgMem}\n`;

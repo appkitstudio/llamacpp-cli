@@ -230,3 +230,84 @@ export async function getProcessMemory(pid: number): Promise<number | null> {
   const result = await getBatchProcessMemory([pid]);
   return result.get(pid) ?? null;
 }
+
+// Process CPU cache to prevent spawning too many 'ps' processes
+// Cache per PID with 3-second TTL
+const processCpuCache = new Map<number, { value: number | null; timestamp: number }>();
+const PROCESS_CPU_CACHE_TTL = 3000; // 3 seconds
+
+/**
+ * Batch get CPU usage for multiple processes in one ps call
+ * Much more efficient than calling getProcessCpu() multiple times
+ * Returns Map<pid, percentage> for all requested PIDs
+ */
+export async function getBatchProcessCpu(pids: number[]): Promise<Map<number, number | null>> {
+  const result = new Map<number, number | null>();
+  const now = Date.now();
+
+  // Check cache and collect PIDs that need fetching
+  const pidsToFetch: number[] = [];
+  for (const pid of pids) {
+    const cached = processCpuCache.get(pid);
+    if (cached && (now - cached.timestamp) < PROCESS_CPU_CACHE_TTL) {
+      result.set(pid, cached.value);
+    } else {
+      pidsToFetch.push(pid);
+    }
+  }
+
+  // If all PIDs were cached, return early
+  if (pidsToFetch.length === 0) {
+    return result;
+  }
+
+  try {
+    // Build ps command with all PIDs: ps -p X,Y,Z -o pid=,%cpu=
+    const pidList = pidsToFetch.join(',');
+    const output = await execCommand(`ps -p ${pidList} -o pid=,%cpu= 2>/dev/null`);
+
+    // Parse output: each line is "PID  %CPU" (e.g., "1438  45.2")
+    const lines = output.split('\n');
+    for (const line of lines) {
+      const match = line.trim().match(/^(\d+)\s+([\d.]+)\s*$/);
+      if (!match) continue;
+
+      const pid = parseInt(match[1], 10);
+      const cpuPercent = parseFloat(match[2]);
+
+      // Cache and store result
+      processCpuCache.set(pid, { value: cpuPercent, timestamp: now });
+      result.set(pid, cpuPercent);
+    }
+
+    // For any PIDs that weren't in the output, cache null (process not running)
+    for (const pid of pidsToFetch) {
+      if (!result.has(pid)) {
+        processCpuCache.set(pid, { value: null, timestamp: now });
+        result.set(pid, null);
+      }
+    }
+
+    return result;
+  } catch {
+    // On error, cache null for all requested PIDs
+    for (const pid of pidsToFetch) {
+      processCpuCache.set(pid, { value: null, timestamp: now });
+      result.set(pid, null);
+    }
+    return result;
+  }
+}
+
+/**
+ * Get CPU usage for a single process as percentage (0-100+)
+ * Uses 'ps -o %cpu' on macOS
+ * Returns null if process not found or error occurs
+ * Caches results for 3 seconds to prevent spawning too many ps processes
+ *
+ * Note: For multiple PIDs, use getBatchProcessCpu() instead - much more efficient
+ */
+export async function getProcessCpu(pid: number): Promise<number | null> {
+  const result = await getBatchProcessCpu([pid]);
+  return result.get(pid) ?? null;
+}
