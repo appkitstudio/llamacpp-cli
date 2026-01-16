@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile, access, rename } from 'fs/promises';
 import { join } from 'path';
-import { homedir, tmpdir } from 'os';
+import { homedir } from 'os';
 import { ServerMetrics, SystemMetrics } from '../types/monitor-types.js';
 import { HistoryData, HistorySnapshot, TIME_WINDOW_HOURS, TimeWindow } from '../types/history-types.js';
 
@@ -57,14 +57,16 @@ export class HistoryManager {
       // Prune old snapshots (keep only last 24h)
       historyData.snapshots = this.pruneOldSnapshots(historyData.snapshots, this.MAX_AGE_MS);
 
-      // Atomic write: write to temp file, then rename
+      // Atomic write: write to temp file in same directory, then rename
       // This prevents read collisions during concurrent access
-      const tempPath = join(tmpdir(), `llamacpp-history-${this.serverId}-${Date.now()}.tmp`);
+      // IMPORTANT: temp file MUST be in same directory as destination for rename to work across filesystems
+      const tempPath = join(this.historyDir, `.${this.serverId}-${Date.now()}.tmp`);
       await writeFile(tempPath, JSON.stringify(historyData, null, 2), 'utf-8');
       await rename(tempPath, this.historyPath);
     } catch (error) {
       // Silent failure - don't interrupt monitoring
-      throw error;
+      // Don't throw - just return silently to avoid polluting console
+      return;
     }
   }
 
@@ -130,8 +132,8 @@ export class HistoryManager {
 
     await mkdir(this.historyDir, { recursive: true });
 
-    // Atomic write
-    const tempPath = join(tmpdir(), `llamacpp-history-${this.serverId}-${Date.now()}.tmp`);
+    // Atomic write - temp file in same directory as destination
+    const tempPath = join(this.historyDir, `.${this.serverId}-${Date.now()}.tmp`);
     await writeFile(tempPath, JSON.stringify(emptyHistory, null, 2), 'utf-8');
     await rename(tempPath, this.historyPath);
   }

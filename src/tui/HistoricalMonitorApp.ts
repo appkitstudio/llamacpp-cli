@@ -18,7 +18,6 @@ export async function createHistoricalUI(
   let lastGoodRender: string | null = null; // Cache last successful render
   let consecutiveErrors = 0;
   let viewMode: ViewMode = 'recent'; // Default to recent mode
-  let pulseCounter = 0; // Counter for pulsing indicator (0=gray, 1=white)
 
   // Single scrollable content box
   const contentBox = blessed.box({
@@ -119,17 +118,11 @@ export async function createHistoricalUI(
       const divider = '─'.repeat(termWidth - 2);
       let content = '';
 
-      // Header with server name, port, view mode, and LIVE indicator
+      // Header with server name, port, and view mode
       const modeLabel = viewMode === 'recent' ? 'Minute' : 'Hour';
       const modeColor = viewMode === 'recent' ? 'cyan' : 'magenta';
-      // Show/hide green dot every second
-      const dot = pulseCounter === 0 ? '' : '{green-fg}●{/green-fg}';
       content += `{bold}{blue-fg}═══ ${server.modelName} (${server.port}) {/blue-fg} `;
-      content += `{${modeColor}-fg}[${modeLabel}]{/${modeColor}-fg} `;
-      content += `${dot}{/bold}\n\n`;
-
-      // Cycle pulse counter: 0 → 1 → 0
-      pulseCounter = (pulseCounter + 1) % 2;
+      content += `{${modeColor}-fg}[${modeLabel}]{/${modeColor}-fg}{/bold}\n\n`;
 
       // Load history (1 hour)
       const snapshots = await historyManager.loadHistoryByWindow('1h');
@@ -383,10 +376,9 @@ export async function createHistoricalUI(
     } catch (error) {
       consecutiveErrors++;
 
-      // If we have a cached good render, show it with an error indicator
+      // If we have a cached good render, show it
       if (lastGoodRender && consecutiveErrors < 5) {
-        const errorContent = lastGoodRender.replace('[LIVE]', '[LIVE - ERROR]');
-        contentBox.setContent(errorContent);
+        contentBox.setContent(lastGoodRender);
         screen.render();
       } else {
         // Show error details if no good render or too many errors
@@ -493,9 +485,8 @@ export async function createMultiServerHistoricalUI(
       const divider = '─'.repeat(termWidth - 2);
       let content = '';
 
-      // Header with LIVE indicator
-      content += `{bold}{blue-fg}═══ Multi-Server Historical Monitor - Last Hour {/blue-fg}`;
-      content += `{green-fg}[LIVE]{/green-fg}{/bold}\n\n`;
+      // Header
+      content += `{bold}{blue-fg}═══ Multi-Server Historical Monitor - Last Hour{/blue-fg}{/bold}\n\n`;
 
       // Load history for all servers
       const serverHistories = await Promise.all(
@@ -573,10 +564,9 @@ export async function createMultiServerHistoricalUI(
     } catch (error) {
       consecutiveErrors++;
 
-      // If we have a cached good render, show it with an error indicator
+      // If we have a cached good render, show it
       if (lastGoodRender && consecutiveErrors < 5) {
-        const errorContent = lastGoodRender.replace('[LIVE]', '[LIVE - ERROR]');
-        contentBox.setContent(errorContent);
+        contentBox.setContent(lastGoodRender);
         screen.render();
       } else {
         // Show error details if no good render or too many errors

@@ -55,7 +55,8 @@ export async function createMonitorUI(
       lastGoodData = data;
 
       // Append to history (silent failure)
-      if (!data.server.stale) {
+      // Only save history for servers that are healthy and not stale
+      if (!data.server.stale && data.server.healthy) {
         historyManager.appendSnapshot(data.server, data.system).catch(() => {
           // Don't interrupt monitoring on history write failure
         });
@@ -67,7 +68,7 @@ export async function createMonitorUI(
       let content = '';
 
       // Header
-      content += '{bold}{blue-fg}═══ llama.cpp Server Monitor ═══{/blue-fg}{/bold}\n\n';
+      content += `{bold}{blue-fg}═══ ${server.modelName} (${server.port}){/blue-fg}{/bold}\n\n`;
 
       // Server Info
       content += '{bold}Server Information{/bold}\n';
@@ -132,44 +133,40 @@ export async function createMonitorUI(
         }
       }
 
-      // System Resources
-      content += '{bold}System Resources{/bold}\n';
+      // Model Resources (per-process metrics)
+      content += '{bold}Model Resources{/bold}\n';
       content += divider + '\n';
 
-      if (data.system) {
-        if (data.system.gpuUsage !== undefined) {
-          const bar = createProgressBar(data.system.gpuUsage);
-          content += `GPU:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(data.system.gpuUsage)}%`;
+      // GPU: System-wide (can't get per-process on macOS)
+      if (data.system && data.system.gpuUsage !== undefined) {
+        const bar = createProgressBar(data.system.gpuUsage);
+        content += `GPU:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(data.system.gpuUsage)}% {gray-fg}(system){/gray-fg}`;
 
-          if (data.system.temperature !== undefined) {
-            content += ` - ${Math.round(data.system.temperature)}°C`;
-          }
-
-          content += '\n';
+        if (data.system.temperature !== undefined) {
+          content += ` - ${Math.round(data.system.temperature)}°C`;
         }
 
-        if (data.system.cpuUsage !== undefined) {
-          const bar = createProgressBar(data.system.cpuUsage);
-          content += `CPU:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(data.system.cpuUsage)}%\n`;
-        }
+        content += '\n';
+      }
 
-        if (data.system.aneUsage !== undefined && data.system.aneUsage > 1) {
-          const bar = createProgressBar(data.system.aneUsage);
-          content += `ANE:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(data.system.aneUsage)}%\n`;
-        }
+      // CPU: Per-process
+      if (data.server.processCpuUsage !== undefined) {
+        const bar = createProgressBar(data.server.processCpuUsage);
+        content += `CPU:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(data.server.processCpuUsage)}%\n`;
+      }
 
-        if (data.system.memoryTotal > 0) {
-          const memoryUsedGB = data.system.memoryUsed / (1024 ** 3);
-          const memoryTotalGB = data.system.memoryTotal / (1024 ** 3);
-          const memoryPercentage = (data.system.memoryUsed / data.system.memoryTotal) * 100;
-          const bar = createProgressBar(memoryPercentage);
-          content += `Memory: {cyan-fg}${bar}{/cyan-fg} ${Math.round(memoryPercentage)}% `;
-          content += `(${memoryUsedGB.toFixed(1)} / ${memoryTotalGB.toFixed(1)} GB)\n`;
-        }
+      // Memory: Per-process
+      if (data.server.processMemory !== undefined) {
+        const memoryGB = data.server.processMemory / (1024 ** 3);
+        // For progress bar, estimate against typical model sizes (e.g., 8GB max)
+        const estimatedMax = 8;
+        const memoryPercentage = Math.min((memoryGB / estimatedMax) * 100, 100);
+        const bar = createProgressBar(memoryPercentage);
+        content += `Memory: {cyan-fg}${bar}{/cyan-fg} ${memoryGB.toFixed(2)} GB\n`;
+      }
 
-        if (data.system.warnings && data.system.warnings.length > 0) {
-          content += `\n{yellow-fg}⚠ ${data.system.warnings.join(', ')}{/yellow-fg}\n`;
-        }
+      if (data.system && data.system.warnings && data.system.warnings.length > 0) {
+        content += `\n{yellow-fg}⚠ ${data.system.warnings.join(', ')}{/yellow-fg}\n`;
       }
 
       content += '\n';
@@ -195,7 +192,7 @@ export async function createMonitorUI(
         let content = '';
 
         // Header with stale warning
-        content += '{bold}{blue-fg}═══ llama.cpp Server Monitor ═══{/blue-fg}{/bold}\n';
+        content += `{bold}{blue-fg}═══ ${server.modelName} (${server.port}){/blue-fg}{/bold}\n`;
         content += '{bold}{yellow-fg}⚠ CONNECTION LOST - SHOWING STALE DATA{/yellow-fg}{/bold}\n\n';
 
         // Server Info
@@ -260,44 +257,39 @@ export async function createMonitorUI(
           }
         }
 
-        // System Resources
-        content += '{bold}System Resources{/bold} {yellow-fg}(stale){/yellow-fg}\n';
+        // Model Resources (per-process metrics)
+        content += '{bold}Model Resources{/bold} {yellow-fg}(stale){/yellow-fg}\n';
         content += divider + '\n';
 
-        if (lastGoodData.system) {
-          if (lastGoodData.system.gpuUsage !== undefined) {
-            const bar = createProgressBar(lastGoodData.system.gpuUsage);
-            content += `GPU:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(lastGoodData.system.gpuUsage)}%`;
+        // GPU: System-wide (can't get per-process on macOS)
+        if (lastGoodData.system && lastGoodData.system.gpuUsage !== undefined) {
+          const bar = createProgressBar(lastGoodData.system.gpuUsage);
+          content += `GPU:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(lastGoodData.system.gpuUsage)}% {gray-fg}(system){/gray-fg}`;
 
-            if (lastGoodData.system.temperature !== undefined) {
-              content += ` - ${Math.round(lastGoodData.system.temperature)}°C`;
-            }
-
-            content += '\n';
+          if (lastGoodData.system.temperature !== undefined) {
+            content += ` - ${Math.round(lastGoodData.system.temperature)}°C`;
           }
 
-          if (lastGoodData.system.cpuUsage !== undefined) {
-            const bar = createProgressBar(lastGoodData.system.cpuUsage);
-            content += `CPU:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(lastGoodData.system.cpuUsage)}%\n`;
-          }
+          content += '\n';
+        }
 
-          if (lastGoodData.system.aneUsage !== undefined && lastGoodData.system.aneUsage > 1) {
-            const bar = createProgressBar(lastGoodData.system.aneUsage);
-            content += `ANE:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(lastGoodData.system.aneUsage)}%\n`;
-          }
+        // CPU: Per-process
+        if (lastGoodData.server.processCpuUsage !== undefined) {
+          const bar = createProgressBar(lastGoodData.server.processCpuUsage);
+          content += `CPU:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(lastGoodData.server.processCpuUsage)}%\n`;
+        }
 
-          if (lastGoodData.system.memoryTotal > 0) {
-            const memoryUsedGB = lastGoodData.system.memoryUsed / (1024 ** 3);
-            const memoryTotalGB = lastGoodData.system.memoryTotal / (1024 ** 3);
-            const memoryPercentage = (lastGoodData.system.memoryUsed / lastGoodData.system.memoryTotal) * 100;
-            const bar = createProgressBar(memoryPercentage);
-            content += `Memory: {cyan-fg}${bar}{/cyan-fg} ${Math.round(memoryPercentage)}% `;
-            content += `(${memoryUsedGB.toFixed(1)} / ${memoryTotalGB.toFixed(1)} GB)\n`;
-          }
+        // Memory: Per-process
+        if (lastGoodData.server.processMemory !== undefined) {
+          const memoryGB = lastGoodData.server.processMemory / (1024 ** 3);
+          const estimatedMax = 8;
+          const memoryPercentage = Math.min((memoryGB / estimatedMax) * 100, 100);
+          const bar = createProgressBar(memoryPercentage);
+          content += `Memory: {cyan-fg}${bar}{/cyan-fg} ${memoryGB.toFixed(2)} GB\n`;
+        }
 
-          if (lastGoodData.system.warnings && lastGoodData.system.warnings.length > 0) {
-            content += `\n{yellow-fg}⚠ ${lastGoodData.system.warnings.join(', ')}{/yellow-fg}\n`;
-          }
+        if (lastGoodData.system && lastGoodData.system.warnings && lastGoodData.system.warnings.length > 0) {
+          content += `\n{yellow-fg}⚠ ${lastGoodData.system.warnings.join(', ')}{/yellow-fg}\n`;
         }
 
         content += '\n';

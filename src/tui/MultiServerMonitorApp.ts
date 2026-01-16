@@ -74,7 +74,7 @@ export async function createMultiServerMonitorUI(
     return '[' + '█'.repeat(Math.max(0, filled)) + '░'.repeat(Math.max(0, empty)) + ']';
   }
 
-  // Render system resources section
+  // Render system resources section (system-wide for list view)
   function renderSystemResources(systemMetrics: SystemMetrics | null): string {
     let content = '';
 
@@ -119,6 +119,96 @@ export async function createMultiServerMonitorUI(
       }
     } else {
       content += '{gray-fg}Collecting system metrics...{/gray-fg}\n';
+    }
+
+    return content;
+  }
+
+  // Render aggregate model resources (all running servers in list view)
+  function renderAggregateModelResources(): string {
+    let content = '';
+
+    content += '{bold}Model Resources{/bold}\n';
+    const termWidth = (screen.width as number) || 80;
+    const divider = '─'.repeat(termWidth - 2);
+    content += divider + '\n';
+
+    // Aggregate CPU and memory across all running servers
+    let totalCpu = 0;
+    let totalMemoryBytes = 0;
+    let serverCount = 0;
+
+    for (const serverData of serverDataMap.values()) {
+      if (serverData.data?.server && !serverData.data.server.stale) {
+        if (serverData.data.server.processCpuUsage !== undefined) {
+          totalCpu += serverData.data.server.processCpuUsage;
+          serverCount++;
+        }
+        if (serverData.data.server.processMemory !== undefined) {
+          totalMemoryBytes += serverData.data.server.processMemory;
+        }
+      }
+    }
+
+    if (serverCount === 0) {
+      content += '{gray-fg}No running servers{/gray-fg}\n';
+      return content;
+    }
+
+    // CPU: Sum of all process CPU percentages
+    const cpuBar = createProgressBar(Math.min(totalCpu, 100));
+    content += `CPU:    {cyan-fg}${cpuBar}{/cyan-fg} ${Math.round(totalCpu)}%`;
+    content += ` {gray-fg}(${serverCount} ${serverCount === 1 ? 'server' : 'servers'}){/gray-fg}\n`;
+
+    // Memory: Sum of all process memory
+    const totalMemoryGB = totalMemoryBytes / (1024 ** 3);
+    const estimatedMaxGB = serverCount * 8; // Assume ~8GB per server max
+    const memoryPercentage = Math.min((totalMemoryGB / estimatedMaxGB) * 100, 100);
+    const memoryBar = createProgressBar(memoryPercentage);
+    content += `Memory: {cyan-fg}${memoryBar}{/cyan-fg} ${totalMemoryGB.toFixed(2)} GB`;
+    content += ` {gray-fg}(${serverCount} ${serverCount === 1 ? 'server' : 'servers'}){/gray-fg}\n`;
+
+    return content;
+  }
+
+  // Render model resources section (per-process for detail view)
+  function renderModelResources(data: MonitorData): string {
+    let content = '';
+
+    content += '{bold}Model Resources{/bold}\n';
+    const termWidth = (screen.width as number) || 80;
+    const divider = '─'.repeat(termWidth - 2);
+    content += divider + '\n';
+
+    // GPU: System-wide (can't get per-process on macOS)
+    if (data.system && data.system.gpuUsage !== undefined) {
+      const bar = createProgressBar(data.system.gpuUsage);
+      content += `GPU:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(data.system.gpuUsage)}% {gray-fg}(system){/gray-fg}`;
+
+      if (data.system.temperature !== undefined) {
+        content += ` - ${Math.round(data.system.temperature)}°C`;
+      }
+
+      content += '\n';
+    }
+
+    // CPU: Per-process
+    if (data.server.processCpuUsage !== undefined) {
+      const bar = createProgressBar(data.server.processCpuUsage);
+      content += `CPU:    {cyan-fg}${bar}{/cyan-fg} ${Math.round(data.server.processCpuUsage)}%\n`;
+    }
+
+    // Memory: Per-process
+    if (data.server.processMemory !== undefined) {
+      const memoryGB = data.server.processMemory / (1024 ** 3);
+      const estimatedMax = 8;
+      const memoryPercentage = Math.min((memoryGB / estimatedMax) * 100, 100);
+      const bar = createProgressBar(memoryPercentage);
+      content += `Memory: {cyan-fg}${bar}{/cyan-fg} ${memoryGB.toFixed(2)} GB\n`;
+    }
+
+    if (data.system && data.system.warnings && data.system.warnings.length > 0) {
+      content += `\n{yellow-fg}⚠ ${data.system.warnings.join(', ')}{/yellow-fg}\n`;
     }
 
     return content;
@@ -173,7 +263,7 @@ export async function createMultiServerMonitorUI(
     let content = '';
 
     // Header
-    content += '{bold}{blue-fg}═══ llama.cpp Multi-Server Monitor ═══{/blue-fg}{/bold}\n';
+    content += '{bold}{blue-fg}═══ llama.cpp Multi-Server Monitor{/blue-fg}{/bold}\n';
 
     // Status line with optional spinner
     const statusPlainText = 'Press 1-9 for details | [F] Filter | [Q] Quit';
@@ -184,6 +274,10 @@ export async function createMultiServerMonitorUI(
 
     // System resources
     content += renderSystemResources(systemMetrics);
+    content += '\n';
+
+    // Aggregate model resources (CPU + memory for all running servers)
+    content += renderAggregateModelResources();
     content += '\n';
 
     // Server list header
@@ -208,18 +302,21 @@ export async function createMultiServerMonitorUI(
       // Port
       const port = server.port.toString().padStart(4);
 
-      // Status
+      // Status - Check actual server status first, then health
       let status = '';
-      if (serverData?.data) {
+      if (server.status !== 'running') {
+        // Server is stopped according to config
+        status = '{gray-fg}○ OFF{/gray-fg} ';
+      } else if (serverData?.data) {
+        // Server is running and we have data
         if (serverData.data.server.healthy) {
           status = '{green-fg}● RUN{/green-fg} ';
         } else {
           status = '{red-fg}● ERR{/red-fg} ';
         }
-      } else if (server.status === 'running') {
-        status = '{yellow-fg}● ...{/yellow-fg} ';
       } else {
-        status = '{gray-fg}○ STOP{/gray-fg}';
+        // Server is running but no data yet (still loading)
+        status = '{yellow-fg}● ...{/yellow-fg} ';
       }
 
       // Slots
@@ -271,7 +368,7 @@ export async function createMultiServerMonitorUI(
     let content = '';
 
     // Header
-    content += `{bold}{blue-fg}═══ Server #${selectedServerIndex + 1}: ${server.id} (${server.port}) ═══{/blue-fg}{/bold}\n`;
+    content += `{bold}{blue-fg}═══ Server #${selectedServerIndex + 1}: ${server.id} (${server.port}){/blue-fg}{/bold}\n`;
 
     // Status line with optional spinner
     const statusPlainText = '[ESC] Back to list | [Q] Quit';
@@ -280,16 +377,16 @@ export async function createMultiServerMonitorUI(
 
     content += `{gray-fg}${statusPlainText}${spinnerText}{/gray-fg}\n\n`;
 
-    // System resources
-    content += renderSystemResources(systemMetrics);
-    content += '\n';
-
     if (!serverData?.data) {
       content += '{yellow-fg}Loading server data...{/yellow-fg}\n';
       return content;
     }
 
     const data = serverData.data;
+
+    // Model resources (per-process)
+    content += renderModelResources(data);
+    content += '\n';
 
     // Server Information
     content += '{bold}Server Information{/bold}\n';
@@ -312,21 +409,7 @@ export async function createMultiServerMonitorUI(
 
     // Handle null host (legacy configs) by defaulting to 127.0.0.1
     const displayHost = server.host || '127.0.0.1';
-    content += `Endpoint: http://${displayHost}:${server.port}`;
-
-    // Add actual process memory (if available)
-    if (data.server.processMemory) {
-      const bytes = data.server.processMemory;
-      let memStr;
-      if (bytes >= 1024 * 1024 * 1024) {
-        memStr = `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-      } else {
-        memStr = `${Math.round(bytes / (1024 * 1024))} MB`;
-      }
-      content += `       Memory:  ${memStr}\n`;
-    } else {
-      content += '\n';
-    }
+    content += `Endpoint: http://${displayHost}:${server.port}\n`;
 
     content += `Slots:    ${data.server.activeSlots} active / ${data.server.totalSlots} total\n`;
     content += '\n';
@@ -394,16 +477,19 @@ export async function createMultiServerMonitorUI(
       // This prevents spawning multiple macmon processes
       const systemMetricsPromise = systemCollector.collectSystemMetrics();
 
-      // Batch collect process memory for ALL servers in one top call
+      // Batch collect process memory and CPU for ALL servers in parallel
       // This prevents spawning multiple top processes (5x speedup)
-      const { getBatchProcessMemory } = await import('../utils/process-utils.js');
+      const { getBatchProcessMemory, getBatchProcessCpu } = await import('../utils/process-utils.js');
       const pids = servers.filter(s => s.pid).map(s => s.pid!);
       const memoryMapPromise = pids.length > 0
         ? getBatchProcessMemory(pids)
         : Promise.resolve(new Map<number, number | null>());
+      const cpuMapPromise = pids.length > 0
+        ? getBatchProcessCpu(pids)
+        : Promise.resolve(new Map<number, number | null>());
 
-      // Wait for memory batch to complete
-      const memoryMap = await memoryMapPromise;
+      // Wait for both batches to complete
+      const [memoryMap, cpuMap] = await Promise.all([memoryMapPromise, cpuMapPromise]);
 
       // Collect server metrics only (NOT system metrics) for each server
       const promises = servers.map(async (server) => {
@@ -411,10 +497,11 @@ export async function createMultiServerMonitorUI(
         try {
           // Use collectServerMetrics instead of collectMonitorData
           // to avoid spawning macmon per server
-          // Pass pre-fetched memory to avoid spawning top per server
+          // Pass pre-fetched memory and CPU to avoid spawning top per server
           const serverMetrics = await aggregator.collectServerMetrics(
             server,
-            server.pid ? memoryMap.get(server.pid) ?? null : null
+            server.pid ? memoryMap.get(server.pid) ?? null : null,
+            server.pid ? cpuMap.get(server.pid) ?? null : null
           );
 
           // Build MonitorData manually with shared system metrics
@@ -455,8 +542,9 @@ export async function createMultiServerMonitorUI(
       }
 
       // Append to history for each server (silent failure)
+      // Only save history for servers that are healthy and not stale
       for (const [serverId, serverData] of serverDataMap) {
-        if (serverData.data && !serverData.data.server.stale) {
+        if (serverData.data && !serverData.data.server.stale && serverData.data.server.healthy) {
           const manager = historyManagers.get(serverId);
           manager?.appendSnapshot(serverData.data.server, serverData.data.system)
             .catch(err => {

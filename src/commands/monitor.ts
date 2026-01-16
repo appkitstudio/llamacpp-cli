@@ -36,6 +36,12 @@ export async function monitorCommand(identifier?: string): Promise<void> {
       );
     }
 
+    // Update server status to reflect actual launchctl state
+    const { statusChecker } = await import('../lib/status-checker.js');
+    const status = await statusChecker.checkServer(server);
+    server.status = status.isRunning ? 'running' : 'stopped';
+    server.pid = status.pid || undefined;
+
     // Check if server is running
     if (server.status !== 'running') {
       screen.destroy();
@@ -51,6 +57,12 @@ export async function monitorCommand(identifier?: string): Promise<void> {
     // Only one server - single server mode
     const server = allServers[0];
 
+    // Update server status to reflect actual launchctl state
+    const { statusChecker } = await import('../lib/status-checker.js');
+    const status = await statusChecker.checkServer(server);
+    server.status = status.isRunning ? 'running' : 'stopped';
+    server.pid = status.pid || undefined;
+
     // Check if server is running
     if (server.status !== 'running') {
       screen.destroy();
@@ -64,6 +76,14 @@ export async function monitorCommand(identifier?: string): Promise<void> {
     await createMonitorUI(screen, server);
   } else {
     // Multiple servers - multi-server mode
+    // Update all server statuses to reflect actual launchctl state
+    const { statusChecker } = await import('../lib/status-checker.js');
+    for (const server of allServers) {
+      const status = await statusChecker.checkServer(server);
+      server.status = status.isRunning ? 'running' : 'stopped';
+      server.pid = status.pid || undefined;
+    }
+
     // Filter to only running servers for monitoring
     const runningServers = allServers.filter(s => s.status === 'running');
 
@@ -78,7 +98,7 @@ export async function monitorCommand(identifier?: string): Promise<void> {
       );
     }
 
-    // Launch multi-server TUI
+    // Launch multi-server TUI (pass all servers so we can see stopped ones too)
     await createMultiServerMonitorUI(screen, allServers);
   }
 
