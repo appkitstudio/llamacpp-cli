@@ -469,7 +469,7 @@ Real-time monitoring TUI showing server metrics, GPU/CPU usage, and active infer
 ```bash
 llamacpp server monitor
 ```
-Shows overview of all servers with system resources. Press 1-9 to drill down into individual server details.
+Shows overview of all servers with system resources. Use arrow keys (↑/↓) or vim keys (k/j) to navigate, then press Enter to view server details.
 
 **2. Single-Server Monitor (with identifier):**
 ```bash
@@ -490,13 +490,13 @@ llamacpp server monitor llama-3-2-3b
 │ GPU: [████░░░] 65%  CPU: [███░░░] 38%  Memory: 58%     │
 ├─────────────────────────────────────────────────────────┤
 │ Servers (3 running, 0 stopped)                          │
-│ # │ Server ID      │ Port │ Status │ Slots │ tok/s    │
+│   │ Server ID      │ Port │ Status │ Slots │ tok/s    │
 │───┼────────────────┼──────┼────────┼───────┼──────────┤
-│ 1 │ llama-3-2-3b   │ 9000 │ ● RUN  │ 2/4   │ 245      │
-│ 2 │ qwen2-7b       │ 9001 │ ● RUN  │ 1/4   │ 198      │
-│ 3 │ llama-3-1-8b   │ 9002 │ ○ IDLE │ 0/4   │ -        │
+│ ► │ llama-3-2-3b   │ 9000 │ ● RUN  │ 2/4   │ 245      │  (highlighted)
+│   │ qwen2-7b       │ 9001 │ ● RUN  │ 1/4   │ 198      │
+│   │ llama-3-1-8b   │ 9002 │ ○ IDLE │ 0/4   │ -        │
 └─────────────────────────────────────────────────────────┘
-Press 1-9 for details | [Q] Quit
+↑/↓ Navigate | Enter for details | [H]istory [R]efresh [Q] Quit
 ```
 
 **Single-Server View:**
@@ -507,7 +507,8 @@ Press 1-9 for details | [Q] Quit
 
 **Keyboard Shortcuts:**
 - **Multi-Server Mode:**
-  - `1-9` - View details for server #N
+  - `↑/↓` or `k/j` - Navigate server list
+  - `Enter` - View details for selected server
   - `ESC` - Back to list (from detail view)
   - `H` - View historical metrics
   - `R` - Force refresh now

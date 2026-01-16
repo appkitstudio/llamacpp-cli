@@ -22,6 +22,7 @@ export async function createMultiServerMonitorUI(
   let intervalId: NodeJS.Timeout | null = null;
   let viewMode: ViewMode = 'list';
   let selectedServerIndex = 0;
+  let selectedRowIndex = 0; // Track which row is highlighted in list view
   let isLoading = false;
   let lastSystemMetrics: SystemMetrics | null = null;
 
@@ -266,7 +267,7 @@ export async function createMultiServerMonitorUI(
     content += '{bold}{blue-fg}═══ llama.cpp Multi-Server Monitor{/blue-fg}{/bold}\n';
 
     // Status line with optional spinner
-    const statusPlainText = 'Press 1-9 for details | [F] Filter | [Q] Quit';
+    const statusPlainText = '↑/↓ Navigate | Enter for details | [H]istory [R]efresh [Q] Quit';
     const spinnerChar = isLoading ? spinnerFrames[spinnerFrameIndex] : '';
     const spinnerText = spinnerChar ? `  {cyan-fg}${spinnerChar}{/cyan-fg}` : '';
 
@@ -284,17 +285,21 @@ export async function createMultiServerMonitorUI(
     const runningCount = servers.filter(s => s.status === 'running').length;
     const stoppedCount = servers.filter(s => s.status !== 'running').length;
     content += `{bold}Servers (${runningCount} running, ${stoppedCount} stopped){/bold}\n`;
-    content += '{gray-fg}Press number for details{/gray-fg}\n';
+    content += '{gray-fg}Use arrow keys to navigate, Enter to view details{/gray-fg}\n';
     content += divider + '\n';
 
     // Table header
-    content += '{bold}# │ Server ID        │ Port │ Status │ Slots │ tok/s  │ Memory{/bold}\n';
+    content += '{bold}  │ Server ID        │ Port │ Status │ Slots │ tok/s  │ Memory{/bold}\n';
     content += divider + '\n';
 
     // Server rows
     servers.forEach((server, index) => {
       const serverData = serverDataMap.get(server.id);
-      const num = index + 1;
+      const isSelected = index === selectedRowIndex;
+
+      // Selection indicator (arrow for selected row)
+      // Use plain arrow for selected (will be white), colored for unselected indicator
+      const indicator = isSelected ? '►' : ' ';
 
       // Server ID (truncate if needed)
       const serverId = server.id.padEnd(16).substring(0, 16);
@@ -303,20 +308,26 @@ export async function createMultiServerMonitorUI(
       const port = server.port.toString().padStart(4);
 
       // Status - Check actual server status first, then health
+      // Build two versions: colored for normal, plain for selected
       let status = '';
+      let statusPlain = '';
       if (server.status !== 'running') {
         // Server is stopped according to config
         status = '{gray-fg}○ OFF{/gray-fg} ';
+        statusPlain = '○ OFF ';
       } else if (serverData?.data) {
         // Server is running and we have data
         if (serverData.data.server.healthy) {
           status = '{green-fg}● RUN{/green-fg} ';
+          statusPlain = '● RUN ';
         } else {
           status = '{red-fg}● ERR{/red-fg} ';
+          statusPlain = '● ERR ';
         }
       } else {
         // Server is running but no data yet (still loading)
         status = '{yellow-fg}● ...{/yellow-fg} ';
+        statusPlain = '● ... ';
       }
 
       // Slots
@@ -348,7 +359,18 @@ export async function createMultiServerMonitorUI(
         }
       }
 
-      content += `${num} │ ${serverId} │ ${port} │ ${status} │ ${slots} │ ${tokensPerSec} │ ${memory}\n`;
+      // Build row content - use plain status for selected rows
+      let rowContent = '';
+      if (isSelected) {
+        // Use color code 15 (bright white) with cyan background
+        // When white-bg worked, it was probably auto-selecting bright white fg
+        rowContent = `{cyan-bg}{15-fg}${indicator} │ ${serverId} │ ${port} │ ${statusPlain}│ ${slots} │ ${tokensPerSec} │ ${memory}{/15-fg}{/cyan-bg}`;
+      } else {
+        // Use colored status for normal rows
+        rowContent = `${indicator} │ ${serverId} │ ${port} │ ${status}│ ${slots} │ ${tokensPerSec} │ ${memory}`;
+      }
+
+      content += rowContent + '\n';
     });
 
     // Footer
@@ -589,12 +611,32 @@ export async function createMultiServerMonitorUI(
     intervalId = setInterval(fetchData, updateInterval);
   }
 
-  // Keyboard shortcuts - List view
-  screen.key(['1', '2', '3', '4', '5', '6', '7', '8', '9'], (ch) => {
-    const index = parseInt(ch, 10) - 1;
-    if (index >= 0 && index < servers.length) {
+  // Keyboard shortcuts - List view navigation with arrow keys
+  screen.key(['up', 'k'], () => {
+    if (viewMode === 'list') {
+      selectedRowIndex = Math.max(0, selectedRowIndex - 1);
+      // Re-render immediately for responsive feel
+      const content = renderListView(lastSystemMetrics);
+      contentBox.setContent(content);
+      screen.render();
+    }
+  });
+
+  screen.key(['down', 'j'], () => {
+    if (viewMode === 'list') {
+      selectedRowIndex = Math.min(servers.length - 1, selectedRowIndex + 1);
+      // Re-render immediately for responsive feel
+      const content = renderListView(lastSystemMetrics);
+      contentBox.setContent(content);
+      screen.render();
+    }
+  });
+
+  // Enter key to view details for selected server
+  screen.key(['enter'], () => {
+    if (viewMode === 'list') {
       showLoading();
-      selectedServerIndex = index;
+      selectedServerIndex = selectedRowIndex;
       viewMode = 'detail';
       fetchData();
     }
