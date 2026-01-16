@@ -509,17 +509,45 @@ Press 1-9 for details | [Q] Quit
 - **Multi-Server Mode:**
   - `1-9` - View details for server #N
   - `ESC` - Back to list (from detail view)
+  - `H` - View historical metrics
   - `R` - Force refresh now
   - `+/-` - Adjust update speed
   - `Q` - Quit
 - **Single-Server Mode:**
+  - `H` - View historical metrics
   - `R` - Force refresh now
   - `+/-` - Adjust update speed
   - `Q` - Quit
+- **Historical View:**
+  - `[` - Shorter time window (24h → 6h → 1h)
+  - `]` - Longer time window (1h → 6h → 24h)
+  - `ESC` - Back to live monitoring
+  - `Q` - Quit
+
+**Historical Monitoring:**
+
+Press `H` from any live monitoring view to see historical time-series charts. The historical view shows:
+
+- **Token generation speed** over time with statistics (avg, max, stddev)
+- **GPU usage** over time with min/max/avg
+- **CPU usage** over time with min/max/avg
+- **Memory usage** over time with min/max/avg
+
+**Time Windows:**
+- **1 hour** - Last hour of metrics
+- **6 hours** - Last 6 hours of metrics
+- **24 hours** - Last 24 hours of metrics (maximum retention)
+
+Use `[` and `]` keys to cycle through time windows. Historical data is automatically collected whenever you run the monitor command. Data older than 24 hours is automatically pruned.
+
+**Multi-Server Historical View:**
+
+From the multi-server dashboard, press `H` to see a summary table comparing average metrics across all servers for the selected time window.
 
 **Features:**
 - **Multi-server dashboard** - Monitor all servers at once
 - **Real-time updates** - Metrics refresh every 2 seconds (adjustable)
+- **Historical monitoring** - View time-series charts of past metrics (press `H` from monitor view)
 - **Token-per-second calculation** - Shows actual generation speed per slot
 - **Progress bars** - Visual representation of GPU/CPU/memory usage
 - **Error recovery** - Shows stale data with warnings if connection lost

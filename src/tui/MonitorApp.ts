@@ -2,6 +2,8 @@ import blessed from 'blessed';
 import { ServerConfig } from '../types/server-config.js';
 import { MetricsAggregator } from '../lib/metrics-aggregator.js';
 import { MonitorData } from '../types/monitor-types.js';
+import { HistoryManager } from '../lib/history-manager.js';
+import { createHistoricalUI } from './HistoricalMonitorApp.js';
 
 export async function createMonitorUI(
   screen: blessed.Widgets.Screen,
@@ -13,6 +15,7 @@ export async function createMonitorUI(
   let lastGoodData: MonitorData | null = null;
   const STALE_THRESHOLD = 5;
   const metricsAggregator = new MetricsAggregator(server);
+  const historyManager = new HistoryManager(server.id);
 
   // Single scrollable content box
   const contentBox = blessed.box({
@@ -50,6 +53,13 @@ export async function createMonitorUI(
       // Reset failure count on success
       consecutiveFailures = 0;
       lastGoodData = data;
+
+      // Append to history (silent failure)
+      if (!data.server.stale) {
+        historyManager.appendSnapshot(data.server, data.system).catch(() => {
+          // Don't interrupt monitoring on history write failure
+        });
+      }
 
       const termWidth = (screen.width as number) || 80;
       const divider = '─'.repeat(termWidth - 2); // Account for padding
@@ -168,7 +178,7 @@ export async function createMonitorUI(
       content += divider + '\n';
       content += `{gray-fg}Updated: ${data.lastUpdated.toLocaleTimeString()} | `;
       content += `Interval: ${updateInterval}ms | `;
-      content += `[R]efresh [+/-]Speed [Q]uit{/gray-fg}`;
+      content += `[H]istory [R]efresh [+/-]Speed [Q]uit{/gray-fg}`;
 
       contentBox.setContent(content);
       screen.render();
@@ -296,7 +306,7 @@ export async function createMonitorUI(
         content += divider + '\n';
         content += `{yellow-fg}Last good data: ${lastGoodData.lastUpdated.toLocaleTimeString()}{/yellow-fg}\n`;
         content += `{yellow-fg}Connection failures: ${consecutiveFailures}{/yellow-fg}\n`;
-        content += `{gray-fg}Interval: ${updateInterval}ms | [R]efresh [+/-]Speed [Q]uit{/gray-fg}`;
+        content += `{gray-fg}Interval: ${updateInterval}ms | [H]istory [R]efresh [+/-]Speed [Q]uit{/gray-fg}`;
 
         contentBox.setContent(content);
         screen.render();
@@ -338,6 +348,18 @@ export async function createMonitorUI(
   screen.key(['-', '_'], () => {
     updateInterval = Math.min(10000, updateInterval + 500);
     startPolling();
+  });
+
+  screen.key(['h', 'H'], async () => {
+    // Keep polling in background for live historical updates
+    // Remove current content box
+    screen.remove(contentBox);
+
+    // Show historical view (polling continues in background)
+    await createHistoricalUI(screen, server, () => {
+      // Re-attach content box when returning from history
+      screen.append(contentBox);
+    });
   });
 
   screen.key(['q', 'Q', 'C-c'], () => {

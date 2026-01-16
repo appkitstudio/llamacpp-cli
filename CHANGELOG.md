@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [Unreleased]
+
+### Features
+
+* **monitor:** add historical monitoring with time-series charts
+  - Press `H` from live monitor to view historical metrics
+  - Time-series charts for token generation speed, GPU/CPU usage, memory
+  - Adjustable time windows: 1h, 6h, 24h (cycle with `[` / `]` keys)
+  - Automatic data collection during monitoring (stored in `~/.llamacpp/history/`)
+  - Multi-server historical view with comparison table
+  - 24-hour data retention with automatic pruning
+  - Charts powered by `asciichart` library for terminal visualization
+  - Summary statistics (avg, max, min, stddev) for all metrics
+
 ## [1.5.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.4.1...v1.5.0) (2026-01-13)
 
 

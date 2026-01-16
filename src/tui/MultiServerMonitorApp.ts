@@ -3,6 +3,8 @@ import { ServerConfig } from '../types/server-config.js';
 import { MetricsAggregator } from '../lib/metrics-aggregator.js';
 import { SystemCollector } from '../lib/system-collector.js';
 import { MonitorData, SystemMetrics } from '../types/monitor-types.js';
+import { HistoryManager } from '../lib/history-manager.js';
+import { createHistoricalUI, createMultiServerHistoricalUI } from './HistoricalMonitorApp.js';
 
 type ViewMode = 'list' | 'detail';
 
@@ -30,11 +32,13 @@ export async function createMultiServerMonitorUI(
 
   const systemCollector = new SystemCollector();
   const aggregators = new Map<string, MetricsAggregator>();
+  const historyManagers = new Map<string, HistoryManager>();
   const serverDataMap = new Map<string, ServerMonitorData>();
 
-  // Initialize aggregators for each server
+  // Initialize aggregators and history managers for each server
   for (const server of servers) {
     aggregators.set(server.id, new MetricsAggregator(server));
+    historyManagers.set(server.id, new HistoryManager(server.id));
     serverDataMap.set(server.id, {
       server,
       data: null,
@@ -253,7 +257,7 @@ export async function createMultiServerMonitorUI(
     // Footer
     content += '\n' + divider + '\n';
     content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | `;
-    content += `Interval: ${updateInterval}ms | [R]efresh [+/-]Speed{/gray-fg}`;
+    content += `Interval: ${updateInterval}ms | [H]istory [R]efresh [+/-]Speed{/gray-fg}`;
 
     return content;
   }
@@ -378,7 +382,7 @@ export async function createMultiServerMonitorUI(
     // Footer
     content += divider + '\n';
     content += `{gray-fg}Updated: ${data.lastUpdated.toLocaleTimeString()} | `;
-    content += `Interval: ${updateInterval}ms | [R]efresh [+/-]Speed{/gray-fg}`;
+    content += `Interval: ${updateInterval}ms | [H]istory [R]efresh [+/-]Speed{/gray-fg}`;
 
     return content;
   }
@@ -447,6 +451,18 @@ export async function createMultiServerMonitorUI(
       for (const serverData of serverDataMap.values()) {
         if (serverData.data) {
           serverData.data.system = systemMetrics;
+        }
+      }
+
+      // Append to history for each server (silent failure)
+      for (const [serverId, serverData] of serverDataMap) {
+        if (serverData.data && !serverData.data.server.stale) {
+          const manager = historyManagers.get(serverId);
+          manager?.appendSnapshot(serverData.data.server, serverData.data.system)
+            .catch(err => {
+              // Don't interrupt monitoring on history write failure
+              console.error(`Failed to save history for ${serverId}:`, err);
+            });
         }
       }
 
@@ -519,6 +535,30 @@ export async function createMultiServerMonitorUI(
   screen.key(['-', '_'], () => {
     updateInterval = Math.min(10000, updateInterval + 500);
     startPolling();
+  });
+
+  screen.key(['h', 'H'], async () => {
+    // Keep polling in background for live historical updates
+    // Stop spinner if running
+    if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+
+    // Remove current content box
+    screen.remove(contentBox);
+
+    if (viewMode === 'list') {
+      // Show multi-server historical view
+      await createMultiServerHistoricalUI(screen, servers, selectedServerIndex, () => {
+        // Re-attach content box when returning from history
+        screen.append(contentBox);
+      });
+    } else {
+      // Show single-server historical view for selected server
+      const selectedServer = servers[selectedServerIndex];
+      await createHistoricalUI(screen, selectedServer, () => {
+        // Re-attach content box when returning from history
+        screen.append(contentBox);
+      });
+    }
   });
 
   screen.key(['q', 'Q', 'C-c'], () => {
