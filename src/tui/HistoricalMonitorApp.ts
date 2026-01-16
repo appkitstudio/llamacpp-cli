@@ -14,11 +14,11 @@ export async function createHistoricalUI(
 ): Promise<void> {
   const historyManager = new HistoryManager(server.id);
   let refreshIntervalId: NodeJS.Timeout | null = null;
-  const REFRESH_INTERVAL = 3000; // Refresh charts every 3 seconds
+  const REFRESH_INTERVAL = 1000; // Refresh charts every 1 second
   let lastGoodRender: string | null = null; // Cache last successful render
   let consecutiveErrors = 0;
   let viewMode: ViewMode = 'recent'; // Default to recent mode
-  let pulseCounter = 0; // Counter for pulsing dot (0,1=filled, 2=empty)
+  let pulseCounter = 0; // Counter for pulsing indicator (0=gray, 1=white)
 
   // Single scrollable content box
   const contentBox = blessed.box({
@@ -119,17 +119,17 @@ export async function createHistoricalUI(
       const divider = '─'.repeat(termWidth - 2);
       let content = '';
 
-      // Header with LIVE indicator and pulsing dot
-      const modeLabel = viewMode === 'recent' ? 'Recent View' : 'Hour View';
+      // Header with server name, port, view mode, and LIVE indicator
+      const modeLabel = viewMode === 'recent' ? 'Minute' : 'Hour';
       const modeColor = viewMode === 'recent' ? 'cyan' : 'magenta';
-      // Show empty when counter is 0 (sample just completed), filled otherwise
-      const pulseIndicator = pulseCounter === 0 ? '○' : '●';
-      content += `{bold}{blue-fg}═══ Historical Monitor {/blue-fg}`;
+      // Show/hide green dot every second
+      const dot = pulseCounter === 0 ? '' : '{green-fg}●{/green-fg}';
+      content += `{bold}{blue-fg}═══ ${server.modelName} (${server.port}) {/blue-fg} `;
       content += `{${modeColor}-fg}[${modeLabel}]{/${modeColor}-fg} `;
-      content += `{green-fg}[LIVE ${pulseIndicator}]{/green-fg}{/bold}\n\n`;
+      content += `${dot}{/bold}\n\n`;
 
-      // Cycle pulse counter: 0 → 1 → 2 → 0
-      pulseCounter = (pulseCounter + 1) % 3;
+      // Cycle pulse counter: 0 → 1 → 0
+      pulseCounter = (pulseCounter + 1) % 2;
 
       // Load history (1 hour)
       const snapshots = await historyManager.loadHistoryByWindow('1h');
@@ -182,10 +182,6 @@ export async function createHistoricalUI(
       downsampleInfo = ` {gray-fg}(${ratio} downsampled){/gray-fg}`;
     }
 
-    // Server info
-    content += `{bold}Server:{/bold} ${server.id}\n`;
-    content += `{bold}Period:{/bold} ${formatTimeRange(snapshots)}\n\n`;
-
     // Extract data from display snapshots as time-series points
     const rawGenerateSpeeds: TimeSeriesPoint[] = [];
     const rawGpuUsages: TimeSeriesPoint[] = [];
@@ -230,23 +226,16 @@ export async function createHistoricalUI(
       ? downsampleMeanTime(rawMemoryPercentages, maxChartPoints)
       : rawMemoryPercentages.map(p => p.value);
 
-    // Token Generation Speed Chart (always show)
-    const tokenLabel = viewMode === 'hour'
-      ? 'Token Generation Speed - Peak per bucket (tok/s)'
-      : 'Token Generation Speed (tok/s)';
-    content += `{bold}${tokenLabel}{/bold}\n`;
+    // 1. Model Token Generation Speed Chart (always show)
+    content += `{bold}Model Token Generation Speed (tok/s){/bold}\n`;
 
-    // Filter out NaN values and check if we have enough data to plot
+    // Always show chart, even with no data
     const validGenSpeeds = generateSpeeds.filter(v => !isNaN(v) && v > 0);
+    try {
+      const plotData = generateSpeeds.map(v => isNaN(v) ? 0 : v);
 
-    // Only plot if we have at least 2 valid data points and valid array
-    if (validGenSpeeds.length >= 2 && generateSpeeds.length > 0) {
-      try {
+      if (validGenSpeeds.length >= 2) {
         const range = getExpandedRange(validGenSpeeds, false);
-
-        // Replace NaN with 0 for plotting (asciichart doesn't handle NaN well)
-        const plotData = generateSpeeds.map(v => isNaN(v) ? 0 : v);
-
         const chart = asciichart.plot(plotData, {
           height: chartHeight,
           colors: [asciichart.cyan],
@@ -259,85 +248,60 @@ export async function createHistoricalUI(
         const stats = calculateStats(validGenSpeeds);
         content += `  Avg: ${stats.avg.toFixed(1)} tok/s (±${stats.stddev.toFixed(1)})  `;
         content += `Max: ${stats.max.toFixed(1)} tok/s\n\n`;
-      } catch (error) {
-        content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
-      }
-    } else {
-      content += '{gray-fg}  No generation activity in this time window{/gray-fg}\n\n';
-    }
-
-    // GPU Usage Chart (only show if data exists)
-    const validGpuUsages = gpuUsages.filter(v => !isNaN(v) && v > 0);
-    if (validGpuUsages.length >= 2 && gpuUsages.length > 0) {
-      try {
-        const gpuLabel = viewMode === 'hour'
-          ? 'GPU Usage - Peak per bucket (%)'
-          : 'GPU Usage (%)';
-        content += `{bold}${gpuLabel}{/bold}\n`;
-        const range = getExpandedRange(validGpuUsages, true); // Percentage chart
-
-        const plotData = gpuUsages.map(v => isNaN(v) ? 0 : v);
-
+      } else {
+        // Show flat line at 0
         const chart = asciichart.plot(plotData, {
           height: chartHeight,
-          colors: [asciichart.green],
+          colors: [asciichart.cyan],
           format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-          min: range.min,
-          max: range.max,
+          min: 0,
+          max: 10,
         });
         content += chart + '\n';
-
-        const stats = calculateStats(validGpuUsages);
-        content += `  Avg: ${stats.avg.toFixed(1)}% (±${stats.stddev.toFixed(1)})  `;
-        content += `Max: ${stats.max.toFixed(1)}%  `;
-        content += `Min: ${stats.min.toFixed(1)}%\n\n`;
-      } catch (error) {
-        content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
+        content += '{gray-fg}  No generation activity in this time window{/gray-fg}\n\n';
       }
+    } catch (error) {
+      content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
     }
 
-    // CPU Usage Chart (only show if data exists)
+    // 2. Model CPU Usage Chart (always show)
+    content += `{bold}Model CPU Usage (%){/bold}\n`;
+
     const validCpuUsages = cpuUsages.filter(v => !isNaN(v) && v > 0);
-    if (validCpuUsages.length >= 2 && cpuUsages.length > 0) {
-      try {
-        const cpuLabel = viewMode === 'hour'
-          ? 'Process CPU Usage - Peak per bucket (%)'
-          : 'Process CPU Usage (%)';
-        content += `{bold}${cpuLabel}{/bold}\n`;
-        const range = getExpandedRange(validCpuUsages, false); // Not forcing 0-100
+    try {
+      const plotData = cpuUsages.map(v => isNaN(v) ? 0 : v);
 
-        const plotData = cpuUsages.map(v => isNaN(v) ? 0 : v);
+      // Always use 0-100 range for CPU percentage
+      const chart = asciichart.plot(plotData, {
+        height: chartHeight,
+        colors: [asciichart.blue],
+        format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
+        min: 0,
+        max: 100,
+      });
+      content += chart + '\n';
 
-        const chart = asciichart.plot(plotData, {
-          height: chartHeight,
-          colors: [asciichart.blue],
-          format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-          min: range.min,
-          max: range.max,
-        });
-        content += chart + '\n';
-
+      if (validCpuUsages.length >= 2) {
         const stats = calculateStats(validCpuUsages);
         content += `  Avg: ${stats.avg.toFixed(1)}% (±${stats.stddev.toFixed(1)})  `;
         content += `Max: ${stats.max.toFixed(1)}%  `;
         content += `Min: ${stats.min.toFixed(1)}%\n\n`;
-      } catch (error) {
-        content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
+      } else {
+        content += '{gray-fg}  No CPU data in this time window{/gray-fg}\n\n';
       }
+    } catch (error) {
+      content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
     }
 
-    // Memory Usage Chart (only show if data exists)
+    // 3. Model Memory Usage Chart (always show)
+    content += `{bold}Model Memory Usage (GB){/bold}\n`;
+
     const validMemoryUsageGB = memoryUsageGB.filter(v => !isNaN(v) && v > 0);
-    if (validMemoryUsageGB.length >= 2 && memoryUsageGB.length > 0) {
-      try {
-        const memLabel = viewMode === 'hour'
-          ? 'Process Memory Usage - Average per bucket (GB)'
-          : 'Process Memory Usage (GB)';
-        content += `{bold}${memLabel}{/bold}\n`;
-        const range = getExpandedRange(validMemoryUsageGB, false); // Not percentage
+    try {
+      const plotData = memoryUsageGB.map(v => isNaN(v) ? 0 : v);
 
-        const plotData = memoryUsageGB.map(v => isNaN(v) ? 0 : v);
-
+      if (validMemoryUsageGB.length >= 2) {
+        const range = getExpandedRange(validMemoryUsageGB, false);
         const chart = asciichart.plot(plotData, {
           height: chartHeight,
           colors: [asciichart.magenta],
@@ -351,9 +315,58 @@ export async function createHistoricalUI(
         content += `  Avg: ${stats.avg.toFixed(2)} GB (±${stats.stddev.toFixed(2)})  `;
         content += `Max: ${stats.max.toFixed(2)} GB  `;
         content += `Min: ${stats.min.toFixed(2)} GB\n\n`;
-      } catch (error) {
-        content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
+      } else {
+        // Show flat line at 0
+        const chart = asciichart.plot(plotData, {
+          height: chartHeight,
+          colors: [asciichart.magenta],
+          format: (x: number) => x.toFixed(2).padStart(6, ' '),
+          min: 0,
+          max: 10,
+        });
+        content += chart + '\n';
+        content += '{gray-fg}  No memory data in this time window{/gray-fg}\n\n';
       }
+    } catch (error) {
+      content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
+    }
+
+    // 4. System GPU Usage Chart (always show, at bottom)
+    content += `{bold}System GPU Usage (%){/bold}\n`;
+
+    const validGpuUsages = gpuUsages.filter(v => !isNaN(v) && v > 0);
+    try {
+      const plotData = gpuUsages.map(v => isNaN(v) ? 0 : v);
+
+      if (validGpuUsages.length >= 2) {
+        const range = getExpandedRange(validGpuUsages, true);
+        const chart = asciichart.plot(plotData, {
+          height: chartHeight,
+          colors: [asciichart.green],
+          format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
+          min: range.min,
+          max: range.max,
+        });
+        content += chart + '\n';
+
+        const stats = calculateStats(validGpuUsages);
+        content += `  Avg: ${stats.avg.toFixed(1)}% (±${stats.stddev.toFixed(1)})  `;
+        content += `Max: ${stats.max.toFixed(1)}%  `;
+        content += `Min: ${stats.min.toFixed(1)}%\n\n`;
+      } else {
+        // Show flat line at 0
+        const chart = asciichart.plot(plotData, {
+          height: chartHeight,
+          colors: [asciichart.green],
+          format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
+          min: 0,
+          max: 100,
+        });
+        content += chart + '\n';
+        content += '{gray-fg}  No GPU data in this time window{/gray-fg}\n\n';
+      }
+    } catch (error) {
+      content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
     }
 
       // Footer with last updated time
