@@ -519,8 +519,7 @@ Press 1-9 for details | [Q] Quit
   - `+/-` - Adjust update speed
   - `Q` - Quit
 - **Historical View:**
-  - `[` - Shorter time window (24h → 6h → 1h)
-  - `]` - Longer time window (1h → 6h → 24h)
+  - `H` - Toggle Hour View (Recent ↔ Hour)
   - `ESC` - Back to live monitoring
   - `Q` - Quit
 
@@ -533,16 +532,34 @@ Press `H` from any live monitoring view to see historical time-series charts. Th
 - **CPU usage** over time with min/max/avg
 - **Memory usage** over time with min/max/avg
 
-**Time Windows:**
-- **1 hour** - Last hour of metrics
-- **6 hours** - Last 6 hours of metrics
-- **24 hours** - Last 24 hours of metrics (maximum retention)
+**View Modes (Toggle with `H` key):**
 
-Use `[` and `]` keys to cycle through time windows. Historical data is automatically collected whenever you run the monitor command. Data older than 24 hours is automatically pruned.
+- **Recent View (default):**
+  - Shows last 40-80 samples (~1-3 minutes)
+  - Raw data with no downsampling - perfect accuracy
+  - Best for: "What's happening right now?"
+
+- **Hour View:**
+  - Shows all ~1,800 samples from last hour
+  - **Absolute time-aligned downsampling** (30:1 ratio) - chart stays perfectly stable
+  - Bucket boundaries never shift (aligned to round minutes)
+  - New samples only affect their own bucket, not the entire chart
+  - **Bucket max** for GPU/CPU/token speed (preserves peaks)
+  - **Bucket mean** for memory (shows average)
+  - Chart labels indicate "Peak per bucket" or "Average per bucket"
+  - Best for: "What happened over the last hour?"
+
+**Note:** The `H` key has two functions:
+- From **live monitoring** → Enter historical view (Recent mode)
+- Within **historical view** → Toggle between Recent and Hour views
+
+**Data Collection:**
+
+Historical data is automatically collected whenever you run the monitor command. Data is retained for 24 hours in `~/.llamacpp/history/<server-id>.json` files, then automatically pruned.
 
 **Multi-Server Historical View:**
 
-From the multi-server dashboard, press `H` to see a summary table comparing average metrics across all servers for the selected time window.
+From the multi-server dashboard, press `H` to see a summary table comparing average metrics across all servers for the last hour.
 
 **Features:**
 - **Multi-server dashboard** - Monitor all servers at once

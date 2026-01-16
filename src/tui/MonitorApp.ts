@@ -350,13 +350,24 @@ export async function createMonitorUI(
     startPolling();
   });
 
+  // Track whether we're in historical view to prevent H key conflicts
+  let inHistoricalView = false;
+
   screen.key(['h', 'H'], async () => {
+    // Prevent entering historical view if already there
+    if (inHistoricalView) return;
+
     // Keep polling in background for live historical updates
     // Remove current content box
     screen.remove(contentBox);
 
+    // Mark that we're in historical view
+    inHistoricalView = true;
+
     // Show historical view (polling continues in background)
     await createHistoricalUI(screen, server, () => {
+      // Mark that we've left historical view
+      inHistoricalView = false;
       // Re-attach content box when returning from history
       screen.append(contentBox);
     });

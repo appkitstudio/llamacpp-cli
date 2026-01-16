@@ -4,17 +4,31 @@ All notable changes to this project will be documented in this file. See [commit
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* **monitor:** fix H key toggle in historical view - now properly switches between Recent and Hour modes
+  - Issue: H key would enter Hour mode but not toggle back to Recent mode
+  - Root cause: Monitor view's H key handler was still active in historical view, causing conflicts
+  - Solution: Add `inHistoricalView` flag to prevent monitor's H key handler from firing when in historical view
+
 ### Features
 
 * **monitor:** add historical monitoring with time-series charts
   - Press `H` from live monitor to view historical metrics
   - Time-series charts for token generation speed, GPU/CPU usage, memory
-  - Adjustable time windows: 1h, 6h, 24h (cycle with `[` / `]` keys)
+  - **Two view modes:** Toggle with `H` key between Recent View (raw 1-3 min) and Hour View (downsampled full hour)
+  - **Absolute time-aligned downsampling:** Buckets represent fixed, absolute time periods
+    - Bucket boundaries never shift (aligned to round time intervals like minutes)
+    - New samples only affect their own bucket, not the entire chart
+    - Chart remains perfectly stable as data streams in (no shimmer or recalculation)
+    - Bucket max for GPU/CPU/tokens (preserves peaks), bucket mean for memory
+  - Clear chart labels indicate "Peak per bucket" or "Average per bucket" when downsampled
   - Automatic data collection during monitoring (stored in `~/.llamacpp/history/`)
   - Multi-server historical view with comparison table
   - 24-hour data retention with automatic pruning
   - Charts powered by `asciichart` library for terminal visualization
   - Summary statistics (avg, max, min, stddev) for all metrics
+  - All percentage graphs (GPU, CPU, Memory) now use consistent 0-100 y-axis scale
 
 ## [1.5.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.4.1...v1.5.0) (2026-01-13)
 

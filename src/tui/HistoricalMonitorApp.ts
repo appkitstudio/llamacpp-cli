@@ -3,6 +3,9 @@ import * as asciichart from 'asciichart';
 import { ServerConfig } from '../types/server-config.js';
 import { HistoryManager } from '../lib/history-manager.js';
 import { TimeWindow, TIME_WINDOWS, TIME_WINDOW_HOURS, HistorySnapshot } from '../types/history-types.js';
+import { downsampleMaxTime, downsampleMeanTime, getDownsampleRatio, TimeSeriesPoint } from '../utils/downsample-utils.js';
+
+type ViewMode = 'recent' | 'hour';
 
 export async function createHistoricalUI(
   screen: blessed.Widgets.Screen,
@@ -14,6 +17,8 @@ export async function createHistoricalUI(
   const REFRESH_INTERVAL = 3000; // Refresh charts every 3 seconds
   let lastGoodRender: string | null = null; // Cache last successful render
   let consecutiveErrors = 0;
+  let viewMode: ViewMode = 'recent'; // Default to recent mode
+  let pulseCounter = 0; // Counter for pulsing dot (0,1=filled, 2=empty)
 
   // Single scrollable content box
   const contentBox = blessed.box({
@@ -38,7 +43,12 @@ export async function createHistoricalUI(
 
   // Helper: Calculate expanded range to prevent duplicate y-axis values
   function getExpandedRange(data: number[], isPercentage: boolean = false): { min: number; max: number } {
-    if (data.length === 0) return { min: 0, max: isPercentage ? 100 : 10 };
+    // For percentage charts, always use 0-100 range
+    if (isPercentage) {
+      return { min: 0, max: 100 };
+    }
+
+    if (data.length === 0) return { min: 0, max: 10 };
 
     const dataMin = Math.min(...data);
     const dataMax = Math.max(...data);
@@ -49,12 +59,6 @@ export async function createHistoricalUI(
 
     let min = Math.max(0, Math.floor(dataMin - padding));
     let max = Math.ceil(dataMax + padding);
-
-    // For percentage charts, clamp to 0-100 range
-    if (isPercentage) {
-      min = 0;
-      max = Math.min(100, max);
-    }
 
     return { min, max };
   }
@@ -81,23 +85,31 @@ export async function createHistoricalUI(
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
-  // Helper: Format time range
+  // Helper: Format time range with elapsed time
   function formatTimeRange(snapshots: HistorySnapshot[]): string {
     if (snapshots.length === 0) return 'No data';
 
     const start = new Date(snapshots[0].timestamp);
     const end = new Date(snapshots[snapshots.length - 1].timestamp);
 
-    const formatDate = (d: Date) => {
-      return d.toLocaleString([], {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
+    const formatTime = (d: Date) => {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
-    return `${formatDate(start)} - ${formatDate(end)}`;
+    // Calculate elapsed time
+    const elapsedMs = end.getTime() - start.getTime();
+    const elapsedMinutes = Math.floor(elapsedMs / (1000 * 60));
+    const hours = Math.floor(elapsedMinutes / 60);
+    const minutes = elapsedMinutes % 60;
+
+    let elapsed = '';
+    if (hours > 0) {
+      elapsed = `${hours}h ${minutes}m`;
+    } else {
+      elapsed = `${minutes}m`;
+    }
+
+    return `${formatTime(start)} - ${formatTime(end)} (${elapsed})`;
   }
 
   // Render historical view
@@ -107,9 +119,17 @@ export async function createHistoricalUI(
       const divider = '─'.repeat(termWidth - 2);
       let content = '';
 
-      // Header with LIVE indicator
-      content += `{bold}{blue-fg}═══ Historical Monitor - Last Hour {/blue-fg}`;
-      content += `{green-fg}[LIVE]{/green-fg}{/bold}\n\n`;
+      // Header with LIVE indicator and pulsing dot
+      const modeLabel = viewMode === 'recent' ? 'Recent View' : 'Hour View';
+      const modeColor = viewMode === 'recent' ? 'cyan' : 'magenta';
+      // Show empty when counter is 0 (sample just completed), filled otherwise
+      const pulseIndicator = pulseCounter === 0 ? '○' : '●';
+      content += `{bold}{blue-fg}═══ Historical Monitor {/blue-fg}`;
+      content += `{${modeColor}-fg}[${modeLabel}]{/${modeColor}-fg} `;
+      content += `{green-fg}[LIVE ${pulseIndicator}]{/green-fg}{/bold}\n\n`;
+
+      // Cycle pulse counter: 0 → 1 → 2 → 0
+      pulseCounter = (pulseCounter + 1) % 3;
 
       // Load history (1 hour)
       const snapshots = await historyManager.loadHistoryByWindow('1h');
@@ -138,44 +158,80 @@ export async function createHistoricalUI(
       return;
     }
 
-    // Use sliding window of most recent samples to fit chart width
-    // No downsampling needed - just show the last N samples
+    // Determine which samples to display based on mode
     const maxChartPoints = Math.min(chartWidth, 80); // Cap at 80 for very wide terminals
+    let displaySnapshots: HistorySnapshot[];
+    let downsampleInfo = '';
 
-    // Take only the most recent samples that fit in the chart
-    const recentSnapshots = snapshots.length > maxChartPoints
-      ? snapshots.slice(-maxChartPoints)  // Last N samples
-      : snapshots;  // All samples if less than max
+    if (viewMode === 'recent') {
+      // Recent mode: show last N samples with no downsampling
+      displaySnapshots = snapshots.length > maxChartPoints
+        ? snapshots.slice(-maxChartPoints)  // Last N samples
+        : snapshots;  // All samples if less than max
 
-    // Server info with sample counts
-    content += `{bold}Server:{/bold} ${server.id}\n`;
-    content += `{bold}Period:{/bold} ${formatTimeRange(snapshots)}\n`;
-    content += `{bold}Samples:{/bold} ${snapshots.length.toLocaleString()}`;
-    if (snapshots.length > maxChartPoints) {
-      const windowMinutes = Math.round((maxChartPoints * 2) / 60); // 2s per sample
-      content += ` {gray-fg}(showing last ${windowMinutes} min){/gray-fg}`;
+      if (snapshots.length > maxChartPoints) {
+        const windowMinutes = Math.round((maxChartPoints * 2) / 60); // 2s per sample
+        downsampleInfo = ` {gray-fg}(showing last ${windowMinutes} min, raw data){/gray-fg}`;
+      } else {
+        downsampleInfo = ` {gray-fg}(raw data){/gray-fg}`;
+      }
+    } else {
+      // Hour mode: show all samples (downsampling will be applied per metric)
+      displaySnapshots = snapshots;
+      const ratio = getDownsampleRatio(snapshots.length, maxChartPoints);
+      downsampleInfo = ` {gray-fg}(${ratio} downsampled){/gray-fg}`;
     }
-    content += '\n\n';
 
-    // Extract data from recent snapshots only
-    const generateSpeeds: number[] = [];
-    const gpuUsages: number[] = [];
-    const cpuUsages: number[] = [];
-    const memoryPercentages: number[] = [];
+    // Server info
+    content += `{bold}Server:{/bold} ${server.id}\n`;
+    content += `{bold}Period:{/bold} ${formatTimeRange(snapshots)}\n\n`;
 
-    for (const snapshot of recentSnapshots) {
-      generateSpeeds.push(snapshot.server.avgGenerateSpeed || 0);
-      gpuUsages.push(snapshot.system?.gpuUsage || 0);
-      cpuUsages.push(snapshot.system?.cpuUsage || 0);
-      memoryPercentages.push(
-        snapshot.system && snapshot.system.memoryTotal > 0
+    // Extract data from display snapshots as time-series points
+    const rawGenerateSpeeds: TimeSeriesPoint[] = [];
+    const rawGpuUsages: TimeSeriesPoint[] = [];
+    const rawCpuUsages: TimeSeriesPoint[] = [];
+    const rawMemoryPercentages: TimeSeriesPoint[] = [];
+
+    for (const snapshot of displaySnapshots) {
+      rawGenerateSpeeds.push({
+        timestamp: snapshot.timestamp,
+        value: snapshot.server.avgGenerateSpeed || 0
+      });
+      rawGpuUsages.push({
+        timestamp: snapshot.timestamp,
+        value: snapshot.system?.gpuUsage || 0
+      });
+      rawCpuUsages.push({
+        timestamp: snapshot.timestamp,
+        value: snapshot.system?.cpuUsage || 0
+      });
+      rawMemoryPercentages.push({
+        timestamp: snapshot.timestamp,
+        value: snapshot.system && snapshot.system.memoryTotal > 0
           ? (snapshot.system.memoryUsed / snapshot.system.memoryTotal) * 100
           : 0
-      );
+      });
     }
 
+    // Apply time-aligned downsampling based on mode
+    const generateSpeeds = viewMode === 'hour'
+      ? downsampleMaxTime(rawGenerateSpeeds, maxChartPoints)
+      : rawGenerateSpeeds.map(p => p.value);
+    const gpuUsages = viewMode === 'hour'
+      ? downsampleMaxTime(rawGpuUsages, maxChartPoints)
+      : rawGpuUsages.map(p => p.value);
+    const cpuUsages = viewMode === 'hour'
+      ? downsampleMaxTime(rawCpuUsages, maxChartPoints)
+      : rawCpuUsages.map(p => p.value);
+    const memoryPercentages = viewMode === 'hour'
+      ? downsampleMeanTime(rawMemoryPercentages, maxChartPoints)
+      : rawMemoryPercentages.map(p => p.value);
+
     // Token Generation Speed Chart (always show)
-    content += '{bold}Token Generation Speed (tok/s){/bold}\n';
+    const tokenLabel = viewMode === 'hour'
+      ? 'Token Generation Speed - Peak per bucket (tok/s)'
+      : 'Token Generation Speed (tok/s)';
+    content += `{bold}${tokenLabel}{/bold}\n`;
 
     // Filter out NaN values and check if we have enough data to plot
     const validGenSpeeds = generateSpeeds.filter(v => !isNaN(v) && v > 0);
@@ -211,7 +267,10 @@ export async function createHistoricalUI(
     const validGpuUsages = gpuUsages.filter(v => !isNaN(v) && v > 0);
     if (validGpuUsages.length >= 2 && gpuUsages.length > 0) {
       try {
-        content += '{bold}GPU Usage (%){/bold}\n';
+        const gpuLabel = viewMode === 'hour'
+          ? 'GPU Usage - Peak per bucket (%)'
+          : 'GPU Usage (%)';
+        content += `{bold}${gpuLabel}{/bold}\n`;
         const range = getExpandedRange(validGpuUsages, true); // Percentage chart
 
         const plotData = gpuUsages.map(v => isNaN(v) ? 0 : v);
@@ -238,7 +297,10 @@ export async function createHistoricalUI(
     const validCpuUsages = cpuUsages.filter(v => !isNaN(v) && v > 0);
     if (validCpuUsages.length >= 2 && cpuUsages.length > 0) {
       try {
-        content += '{bold}CPU Usage (%){/bold}\n';
+        const cpuLabel = viewMode === 'hour'
+          ? 'CPU Usage - Peak per bucket (%)'
+          : 'CPU Usage (%)';
+        content += `{bold}${cpuLabel}{/bold}\n`;
         const range = getExpandedRange(validCpuUsages, true); // Percentage chart
 
         const plotData = cpuUsages.map(v => isNaN(v) ? 0 : v);
@@ -265,7 +327,10 @@ export async function createHistoricalUI(
     const validMemoryPercentages = memoryPercentages.filter(v => !isNaN(v) && v > 0);
     if (validMemoryPercentages.length >= 2 && memoryPercentages.length > 0) {
       try {
-        content += '{bold}Memory Usage (%){/bold}\n';
+        const memLabel = viewMode === 'hour'
+          ? 'Memory Usage - Average per bucket (%)'
+          : 'Memory Usage (%)';
+        content += `{bold}${memLabel}{/bold}\n`;
         const range = getExpandedRange(validMemoryPercentages, true); // Percentage chart
 
         const plotData = memoryPercentages.map(v => isNaN(v) ? 0 : v);
@@ -291,7 +356,7 @@ export async function createHistoricalUI(
       // Footer with last updated time
       content += divider + '\n';
       const now = new Date().toLocaleTimeString();
-      content += `{gray-fg}Updated: ${now} | ESC = Back  Q = Quit{/gray-fg}`;
+      content += `{gray-fg}Updated: ${now} | H = Toggle Hour View  ESC = Back  Q = Quit{/gray-fg}`;
 
       contentBox.setContent(content);
       screen.render();
@@ -322,6 +387,12 @@ export async function createHistoricalUI(
   }
 
   // Keyboard handlers
+  screen.key(['h', 'H'], () => {
+    // Toggle between recent and hour modes
+    viewMode = viewMode === 'recent' ? 'hour' : 'recent';
+    render(); // Trigger immediate re-render with new mode
+  });
+
   screen.key(['escape'], () => {
     // Clean up refresh interval
     if (refreshIntervalId) {

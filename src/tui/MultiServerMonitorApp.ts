@@ -537,7 +537,13 @@ export async function createMultiServerMonitorUI(
     startPolling();
   });
 
+  // Track whether we're in historical view to prevent H key conflicts
+  let inHistoricalView = false;
+
   screen.key(['h', 'H'], async () => {
+    // Prevent entering historical view if already there
+    if (inHistoricalView) return;
+
     // Keep polling in background for live historical updates
     // Stop spinner if running
     if (spinnerIntervalId) clearInterval(spinnerIntervalId);
@@ -545,9 +551,14 @@ export async function createMultiServerMonitorUI(
     // Remove current content box
     screen.remove(contentBox);
 
+    // Mark that we're in historical view
+    inHistoricalView = true;
+
     if (viewMode === 'list') {
       // Show multi-server historical view
       await createMultiServerHistoricalUI(screen, servers, selectedServerIndex, () => {
+        // Mark that we've left historical view
+        inHistoricalView = false;
         // Re-attach content box when returning from history
         screen.append(contentBox);
       });
@@ -555,6 +566,8 @@ export async function createMultiServerMonitorUI(
       // Show single-server historical view for selected server
       const selectedServer = servers[selectedServerIndex];
       await createHistoricalUI(screen, selectedServer, () => {
+        // Mark that we've left historical view
+        inHistoricalView = false;
         // Re-attach content box when returning from history
         screen.append(contentBox);
       });
