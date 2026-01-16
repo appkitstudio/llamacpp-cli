@@ -17,7 +17,7 @@ interface ServerMonitorData {
 export async function createMultiServerMonitorUI(
   screen: blessed.Widgets.Screen,
   servers: ServerConfig[],
-  fromPs: boolean = false,
+  _fromPs: boolean = false,
   directJumpIndex?: number
 ): Promise<void> {
   let updateInterval = 2000;

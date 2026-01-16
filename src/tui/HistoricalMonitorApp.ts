@@ -2,10 +2,8 @@ import blessed from 'blessed';
 import * as asciichart from 'asciichart';
 import { ServerConfig } from '../types/server-config.js';
 import { HistoryManager } from '../lib/history-manager.js';
-import { TimeWindow, TIME_WINDOWS, TIME_WINDOW_HOURS, HistorySnapshot } from '../types/history-types.js';
+import { HistorySnapshot } from '../types/history-types.js';
 import {
-  downsampleMaxTime,
-  downsampleMeanTime,
   downsampleMaxTimeWithFullHour,
   downsampleMeanTimeWithFullHour,
   getDownsampleRatio,
@@ -14,20 +12,61 @@ import {
 
 type ViewMode = 'recent' | 'hour';
 
-export async function createHistoricalUI(
-  screen: blessed.Widgets.Screen,
-  server: ServerConfig,
-  onBack: () => void
-): Promise<void> {
-  const historyManager = new HistoryManager(server.id);
-  let refreshIntervalId: NodeJS.Timeout | null = null;
-  const REFRESH_INTERVAL = 1000; // Refresh charts every 1 second
-  let lastGoodRender: string | null = null; // Cache last successful render
-  let consecutiveErrors = 0;
-  let viewMode: ViewMode = 'recent'; // Default to recent mode
+interface ChartStats {
+  avg: number;
+  max: number;
+  min: number;
+  stddev: number;
+}
 
-  // Single scrollable content box
-  const contentBox = blessed.box({
+interface ChartConfig {
+  title: string;
+  color: typeof asciichart.cyan;
+  formatValue: (x: number) => string;
+  isPercentage: boolean;
+  noDataMessage: string;
+}
+
+/**
+ * Calculate statistics for a set of values.
+ */
+function calculateStats(values: number[]): ChartStats {
+  if (values.length === 0) {
+    return { avg: 0, max: 0, min: 0, stddev: 0 };
+  }
+
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const variance = values.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / values.length;
+  const stddev = Math.sqrt(variance);
+
+  return { avg, max, min, stddev };
+}
+
+/**
+ * Calculate expanded range for chart y-axis to prevent duplicate labels.
+ */
+function getExpandedRange(data: number[], isPercentage: boolean): { min: number; max: number } {
+  if (isPercentage) return { min: 0, max: 100 };
+  if (data.length === 0) return { min: 0, max: 10 };
+
+  const dataMin = Math.min(...data);
+  const dataMax = Math.max(...data);
+  const range = dataMax - dataMin;
+  const padding = Math.max(range * 0.3, 5);
+
+  return {
+    min: Math.max(0, Math.floor(dataMin - padding)),
+    max: Math.ceil(dataMax + padding)
+  };
+}
+
+/**
+ * Create a scrollable content box for historical charts.
+ */
+function createContentBox(): blessed.Widgets.BoxElement {
+  return blessed.box({
     top: 0,
     left: 0,
     width: '100%',
@@ -39,99 +78,139 @@ export async function createHistoricalUI(
     vi: true,
     mouse: true,
     scrollbar: {
-      ch: '█',
-      style: {
-        fg: 'blue',
-      },
+      ch: '\u2588',
+      style: { fg: 'blue' },
     },
   });
+}
+
+/**
+ * Render a single chart with statistics.
+ */
+function renderChart(
+  values: number[],
+  rawValues: TimeSeriesPoint[],
+  config: ChartConfig,
+  chartHeight: number
+): string {
+  let content = `{bold}${config.title}{/bold}\n`;
+  const validValues = values.filter(v => !isNaN(v) && v > 0);
+  const plotData = values.map(v => isNaN(v) ? 0 : v);
+
+  try {
+    if (validValues.length >= 2) {
+      const range = getExpandedRange(validValues, config.isPercentage);
+      content += asciichart.plot(plotData, {
+        height: chartHeight,
+        colors: [config.color],
+        format: config.formatValue,
+        min: range.min,
+        max: range.max,
+      });
+      content += '\n';
+
+      const stats = calculateStats(validValues);
+      const lastValue = rawValues[rawValues.length - 1]?.value ?? 0;
+
+      if (config.title.includes('GB')) {
+        content += `  Avg: ${stats.avg.toFixed(2)} GB (\u00b1${stats.stddev.toFixed(2)})  `;
+        content += `Max: ${stats.max.toFixed(2)} GB  `;
+        content += `Min: ${stats.min.toFixed(2)} GB  `;
+        content += `Last: ${lastValue.toFixed(2)} GB\n\n`;
+      } else if (config.isPercentage) {
+        content += `  Avg: ${stats.avg.toFixed(1)}% (\u00b1${stats.stddev.toFixed(1)})  `;
+        content += `Max: ${stats.max.toFixed(1)}%  `;
+        content += `Min: ${stats.min.toFixed(1)}%  `;
+        content += `Last: ${lastValue.toFixed(1)}%\n\n`;
+      } else {
+        content += `  Avg: ${stats.avg.toFixed(1)} tok/s (\u00b1${stats.stddev.toFixed(1)})  `;
+        content += `Max: ${stats.max.toFixed(1)} tok/s  `;
+        content += `Last: ${lastValue.toFixed(1)} tok/s\n\n`;
+      }
+    } else {
+      const defaultRange = config.isPercentage ? { min: 0, max: 100 } : { min: 0, max: 10 };
+      content += asciichart.plot(plotData, {
+        height: chartHeight,
+        colors: [config.color],
+        format: config.formatValue,
+        min: defaultRange.min,
+        max: defaultRange.max,
+      });
+      content += `\n{gray-fg}  ${config.noDataMessage}{/gray-fg}\n\n`;
+    }
+  } catch {
+    content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
+  }
+
+  return content;
+}
+
+export async function createHistoricalUI(
+  screen: blessed.Widgets.Screen,
+  server: ServerConfig,
+  onBack: () => void
+): Promise<void> {
+  const historyManager = new HistoryManager(server.id);
+  let refreshIntervalId: NodeJS.Timeout | null = null;
+  const REFRESH_INTERVAL = 1000;
+  let lastGoodRender: string | null = null;
+  let consecutiveErrors = 0;
+  let viewMode: ViewMode = 'recent';
+
+  const contentBox = createContentBox();
   screen.append(contentBox);
 
-  // Helper: Calculate expanded range to prevent duplicate y-axis values
-  function getExpandedRange(data: number[], isPercentage: boolean = false): { min: number; max: number } {
-    // For percentage charts, always use 0-100 range
-    if (isPercentage) {
-      return { min: 0, max: 100 };
-    }
+  // Chart configurations
+  const chartConfigs: Record<string, ChartConfig> = {
+    tokenSpeed: {
+      title: 'Model Token Generation Speed (tok/s)',
+      color: asciichart.cyan,
+      formatValue: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
+      isPercentage: false,
+      noDataMessage: 'No generation activity in this time window',
+    },
+    cpu: {
+      title: 'Model CPU Usage (%)',
+      color: asciichart.blue,
+      formatValue: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
+      isPercentage: true,
+      noDataMessage: 'No CPU data in this time window',
+    },
+    memory: {
+      title: 'Model Memory Usage (GB)',
+      color: asciichart.magenta,
+      formatValue: (x: number) => x.toFixed(2).padStart(6, ' '),
+      isPercentage: false,
+      noDataMessage: 'No memory data in this time window',
+    },
+    gpu: {
+      title: 'System GPU Usage (%)',
+      color: asciichart.green,
+      formatValue: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
+      isPercentage: true,
+      noDataMessage: 'No GPU data in this time window',
+    },
+  };
 
-    if (data.length === 0) return { min: 0, max: 10 };
-
-    const dataMin = Math.min(...data);
-    const dataMax = Math.max(...data);
-    const range = dataMax - dataMin;
-
-    // Expand range by 30% on each side to ensure good spacing
-    const padding = Math.max(range * 0.3, 5); // At least 5 units of padding
-
-    let min = Math.max(0, Math.floor(dataMin - padding));
-    let max = Math.ceil(dataMax + padding);
-
-    return { min, max };
-  }
-
-  // Helper: Calculate statistics
-  function calculateStats(values: number[]): { avg: number; max: number; min: number; stddev: number; maxIndex: number } {
-    if (values.length === 0) {
-      return { avg: 0, max: 0, min: 0, stddev: 0, maxIndex: 0 };
-    }
-
-    const avg = values.reduce((a, b) => a + b, 0) / values.length;
-    const max = Math.max(...values);
-    const min = Math.min(...values);
-    const maxIndex = values.indexOf(max);
-    const variance = values.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / values.length;
-    const stddev = Math.sqrt(variance);
-
-    return { avg, max, min, stddev, maxIndex };
-  }
-
-  // Helper: Format time for display
-  function formatTime(timestamp: number): string {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-
-  // Helper: Format time range with elapsed time
-  function formatTimeRange(snapshots: HistorySnapshot[]): string {
-    if (snapshots.length === 0) return 'No data';
-
-    const start = new Date(snapshots[0].timestamp);
-    const end = new Date(snapshots[snapshots.length - 1].timestamp);
-
-    const formatTime = (d: Date) => {
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    };
-
-    // Calculate elapsed time
-    const elapsedMs = end.getTime() - start.getTime();
-    const elapsedMinutes = Math.floor(elapsedMs / (1000 * 60));
-    const hours = Math.floor(elapsedMinutes / 60);
-    const minutes = elapsedMinutes % 60;
-
-    let elapsed = '';
-    if (hours > 0) {
-      elapsed = `${hours}h ${minutes}m`;
-    } else {
-      elapsed = `${minutes}m`;
-    }
-
-    return `${formatTime(start)} - ${formatTime(end)} (${elapsed})`;
-  }
-
-  // Render historical view
-  async function render() {
+  async function render(): Promise<void> {
     try {
       const termWidth = (screen.width as number) || 80;
-      const divider = '─'.repeat(termWidth - 2);
-      let content = '';
+      const divider = '\u2500'.repeat(termWidth - 2);
+      const chartHeight = 5;
+      const chartWidth = Math.min(Math.max(termWidth - 20, 40), 80);
 
-      // Header with server name, port, and view mode
+      if (chartWidth <= 0 || !Number.isFinite(chartWidth)) {
+        contentBox.setContent('{red-fg}Error: Invalid chart width{/red-fg}\n');
+        screen.render();
+        return;
+      }
+
+      // Header
       const modeLabel = viewMode === 'recent' ? 'Minute' : 'Hour';
       const modeColor = viewMode === 'recent' ? 'cyan' : 'magenta';
-      content += `{bold}{blue-fg}═══ ${server.modelName} (${server.port}) {/blue-fg} `;
+      let content = `{bold}{blue-fg}\u2550\u2550\u2550 ${server.modelName} (${server.port}) {/blue-fg} `;
       content += `{${modeColor}-fg}[${modeLabel}]{/${modeColor}-fg}{/bold}\n\n`;
 
-      // Load history (1 hour)
       const snapshots = await historyManager.loadHistoryByWindow('1h');
 
       if (snapshots.length === 0) {
@@ -145,259 +224,67 @@ export async function createHistoricalUI(
         return;
       }
 
-    const chartHeight = 5; // Compact height
-    // More conservative width calculation to prevent wrapping
-    // Account for: box borders (2), padding (4), axis labels (~8), margin (4)
-    const chartWidth = Math.min(Math.max(termWidth - 20, 40), 80);
+      const maxChartPoints = Math.min(chartWidth, 80);
+      const displaySnapshots = viewMode === 'recent' && snapshots.length > maxChartPoints
+        ? snapshots.slice(-maxChartPoints)
+        : snapshots;
 
-    // Validate chartWidth
-    if (chartWidth <= 0 || !Number.isFinite(chartWidth)) {
-      content += '{red-fg}Error: Invalid chart width{/red-fg}\n';
-      contentBox.setContent(content);
-      screen.render();
-      return;
-    }
+      // Extract time-series data
+      const rawData = {
+        tokenSpeed: [] as TimeSeriesPoint[],
+        gpu: [] as TimeSeriesPoint[],
+        cpu: [] as TimeSeriesPoint[],
+        memory: [] as TimeSeriesPoint[],
+      };
 
-    // Determine which samples to display based on mode
-    const maxChartPoints = Math.min(chartWidth, 80); // Cap at 80 for very wide terminals
-    let displaySnapshots: HistorySnapshot[];
-    let downsampleInfo = '';
-
-    if (viewMode === 'recent') {
-      // Recent mode: show last N samples with no downsampling
-      displaySnapshots = snapshots.length > maxChartPoints
-        ? snapshots.slice(-maxChartPoints)  // Last N samples
-        : snapshots;  // All samples if less than max
-
-      if (snapshots.length > maxChartPoints) {
-        const windowMinutes = Math.round((maxChartPoints * 2) / 60); // 2s per sample
-        downsampleInfo = ` {gray-fg}(showing last ${windowMinutes} min, raw data){/gray-fg}`;
-      } else {
-        downsampleInfo = ` {gray-fg}(raw data){/gray-fg}`;
+      for (const snapshot of displaySnapshots) {
+        const ts = snapshot.timestamp;
+        rawData.tokenSpeed.push({ timestamp: ts, value: snapshot.server.avgGenerateSpeed || 0 });
+        rawData.gpu.push({ timestamp: ts, value: snapshot.system?.gpuUsage || 0 });
+        rawData.cpu.push({ timestamp: ts, value: snapshot.server.processCpuUsage || 0 });
+        rawData.memory.push({
+          timestamp: ts,
+          value: snapshot.server.processMemory ? snapshot.server.processMemory / (1024 ** 3) : 0
+        });
       }
-    } else {
-      // Hour mode: show all samples (downsampling will be applied per metric)
-      displaySnapshots = snapshots;
-      const ratio = getDownsampleRatio(snapshots.length, maxChartPoints);
-      downsampleInfo = ` {gray-fg}(${ratio} downsampled){/gray-fg}`;
-    }
 
-    // Extract data from display snapshots as time-series points
-    const rawGenerateSpeeds: TimeSeriesPoint[] = [];
-    const rawGpuUsages: TimeSeriesPoint[] = [];
-    const rawCpuUsages: TimeSeriesPoint[] = [];
-    const rawMemoryPercentages: TimeSeriesPoint[] = [];
+      // Apply downsampling based on view mode
+      const useDownsampling = viewMode === 'hour';
+      const values = {
+        tokenSpeed: useDownsampling
+          ? downsampleMaxTimeWithFullHour(rawData.tokenSpeed, maxChartPoints)
+          : rawData.tokenSpeed.map(p => p.value),
+        cpu: useDownsampling
+          ? downsampleMaxTimeWithFullHour(rawData.cpu, maxChartPoints)
+          : rawData.cpu.map(p => p.value),
+        memory: useDownsampling
+          ? downsampleMeanTimeWithFullHour(rawData.memory, maxChartPoints)
+          : rawData.memory.map(p => p.value),
+        gpu: useDownsampling
+          ? downsampleMaxTimeWithFullHour(rawData.gpu, maxChartPoints)
+          : rawData.gpu.map(p => p.value),
+      };
 
-    for (const snapshot of displaySnapshots) {
-      rawGenerateSpeeds.push({
-        timestamp: snapshot.timestamp,
-        value: snapshot.server.avgGenerateSpeed || 0
-      });
-      // GPU: Keep system-wide (can't get per-process on macOS)
-      rawGpuUsages.push({
-        timestamp: snapshot.timestamp,
-        value: snapshot.system?.gpuUsage || 0
-      });
-      // CPU: Use per-process CPU usage from ps
-      rawCpuUsages.push({
-        timestamp: snapshot.timestamp,
-        value: snapshot.server.processCpuUsage || 0
-      });
-      // Memory: Use per-process memory in GB
-      rawMemoryPercentages.push({
-        timestamp: snapshot.timestamp,
-        value: snapshot.server.processMemory
-          ? snapshot.server.processMemory / (1024 * 1024 * 1024) // Convert bytes to GB
-          : 0
-      });
-    }
+      // Render all charts
+      content += renderChart(values.tokenSpeed, rawData.tokenSpeed, chartConfigs.tokenSpeed, chartHeight);
+      content += renderChart(values.cpu, rawData.cpu, chartConfigs.cpu, chartHeight);
+      content += renderChart(values.memory, rawData.memory, chartConfigs.memory, chartHeight);
+      content += renderChart(values.gpu, rawData.gpu, chartConfigs.gpu, chartHeight);
 
-    // Apply time-aligned downsampling based on mode
-    // In hour mode, use full-hour coverage functions that fill gaps with 0
-    const generateSpeeds = viewMode === 'hour'
-      ? downsampleMaxTimeWithFullHour(rawGenerateSpeeds, maxChartPoints)
-      : rawGenerateSpeeds.map(p => p.value);
-    const gpuUsages = viewMode === 'hour'
-      ? downsampleMaxTimeWithFullHour(rawGpuUsages, maxChartPoints)
-      : rawGpuUsages.map(p => p.value);
-    const cpuUsages = viewMode === 'hour'
-      ? downsampleMaxTimeWithFullHour(rawCpuUsages, maxChartPoints)
-      : rawCpuUsages.map(p => p.value);
-    const memoryUsageGB = viewMode === 'hour'
-      ? downsampleMeanTimeWithFullHour(rawMemoryPercentages, maxChartPoints)
-      : rawMemoryPercentages.map(p => p.value);
-
-    // 1. Model Token Generation Speed Chart (always show)
-    content += `{bold}Model Token Generation Speed (tok/s){/bold}\n`;
-
-    // Always show chart, even with no data
-    const validGenSpeeds = generateSpeeds.filter(v => !isNaN(v) && v > 0);
-    try {
-      const plotData = generateSpeeds.map(v => isNaN(v) ? 0 : v);
-
-      if (validGenSpeeds.length >= 2) {
-        const range = getExpandedRange(validGenSpeeds, false);
-        const chart = asciichart.plot(plotData, {
-          height: chartHeight,
-          colors: [asciichart.cyan],
-          format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-          min: range.min,
-          max: range.max,
-        });
-        content += chart + '\n';
-
-        const stats = calculateStats(validGenSpeeds);
-        const lastValue = rawGenerateSpeeds[rawGenerateSpeeds.length - 1]?.value ?? 0;
-        content += `  Avg: ${stats.avg.toFixed(1)} tok/s (±${stats.stddev.toFixed(1)})  `;
-        content += `Max: ${stats.max.toFixed(1)} tok/s  `;
-        content += `Last: ${lastValue.toFixed(1)} tok/s\n\n`;
-      } else {
-        // Show flat line at 0
-        const chart = asciichart.plot(plotData, {
-          height: chartHeight,
-          colors: [asciichart.cyan],
-          format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-          min: 0,
-          max: 10,
-        });
-        content += chart + '\n';
-        content += '{gray-fg}  No generation activity in this time window{/gray-fg}\n\n';
-      }
-    } catch (error) {
-      content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
-    }
-
-    // 2. Model CPU Usage Chart (always show)
-    content += `{bold}Model CPU Usage (%){/bold}\n`;
-
-    const validCpuUsages = cpuUsages.filter(v => !isNaN(v) && v > 0);
-    try {
-      const plotData = cpuUsages.map(v => isNaN(v) ? 0 : v);
-
-      // Always use 0-100 range for CPU percentage
-      const chart = asciichart.plot(plotData, {
-        height: chartHeight,
-        colors: [asciichart.blue],
-        format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-        min: 0,
-        max: 100,
-      });
-      content += chart + '\n';
-
-      if (validCpuUsages.length >= 2) {
-        const stats = calculateStats(validCpuUsages);
-        const lastValue = rawCpuUsages[rawCpuUsages.length - 1]?.value ?? 0;
-        content += `  Avg: ${stats.avg.toFixed(1)}% (±${stats.stddev.toFixed(1)})  `;
-        content += `Max: ${stats.max.toFixed(1)}%  `;
-        content += `Min: ${stats.min.toFixed(1)}%  `;
-        content += `Last: ${lastValue.toFixed(1)}%\n\n`;
-      } else {
-        content += '{gray-fg}  No CPU data in this time window{/gray-fg}\n\n';
-      }
-    } catch (error) {
-      content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
-    }
-
-    // 3. Model Memory Usage Chart (always show)
-    content += `{bold}Model Memory Usage (GB){/bold}\n`;
-
-    const validMemoryUsageGB = memoryUsageGB.filter(v => !isNaN(v) && v > 0);
-    try {
-      const plotData = memoryUsageGB.map(v => isNaN(v) ? 0 : v);
-
-      if (validMemoryUsageGB.length >= 2) {
-        const range = getExpandedRange(validMemoryUsageGB, false);
-        const chart = asciichart.plot(plotData, {
-          height: chartHeight,
-          colors: [asciichart.magenta],
-          format: (x: number) => x.toFixed(2).padStart(6, ' '),
-          min: range.min,
-          max: range.max,
-        });
-        content += chart + '\n';
-
-        const stats = calculateStats(validMemoryUsageGB);
-        const lastValue = rawMemoryPercentages[rawMemoryPercentages.length - 1]?.value ?? 0;
-        content += `  Avg: ${stats.avg.toFixed(2)} GB (±${stats.stddev.toFixed(2)})  `;
-        content += `Max: ${stats.max.toFixed(2)} GB  `;
-        content += `Min: ${stats.min.toFixed(2)} GB  `;
-        content += `Last: ${lastValue.toFixed(2)} GB\n\n`;
-      } else {
-        // Show flat line at 0
-        const chart = asciichart.plot(plotData, {
-          height: chartHeight,
-          colors: [asciichart.magenta],
-          format: (x: number) => x.toFixed(2).padStart(6, ' '),
-          min: 0,
-          max: 10,
-        });
-        content += chart + '\n';
-        content += '{gray-fg}  No memory data in this time window{/gray-fg}\n\n';
-      }
-    } catch (error) {
-      content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
-    }
-
-    // 4. System GPU Usage Chart (always show, at bottom)
-    content += `{bold}System GPU Usage (%){/bold}\n`;
-
-    const validGpuUsages = gpuUsages.filter(v => !isNaN(v) && v > 0);
-    try {
-      const plotData = gpuUsages.map(v => isNaN(v) ? 0 : v);
-
-      if (validGpuUsages.length >= 2) {
-        const range = getExpandedRange(validGpuUsages, true);
-        const chart = asciichart.plot(plotData, {
-          height: chartHeight,
-          colors: [asciichart.green],
-          format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-          min: range.min,
-          max: range.max,
-        });
-        content += chart + '\n';
-
-        const stats = calculateStats(validGpuUsages);
-        const lastValue = rawGpuUsages[rawGpuUsages.length - 1]?.value ?? 0;
-        content += `  Avg: ${stats.avg.toFixed(1)}% (±${stats.stddev.toFixed(1)})  `;
-        content += `Max: ${stats.max.toFixed(1)}%  `;
-        content += `Min: ${stats.min.toFixed(1)}%  `;
-        content += `Last: ${lastValue.toFixed(1)}%\n\n`;
-      } else {
-        // Show flat line at 0
-        const chart = asciichart.plot(plotData, {
-          height: chartHeight,
-          colors: [asciichart.green],
-          format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-          min: 0,
-          max: 100,
-        });
-        content += chart + '\n';
-        content += '{gray-fg}  No GPU data in this time window{/gray-fg}\n\n';
-      }
-    } catch (error) {
-      content += '{red-fg}  Error rendering chart{/red-fg}\n\n';
-    }
-
-      // Footer with last updated time
+      // Footer
       content += divider + '\n';
-      const now = new Date().toLocaleTimeString();
-      content += `{gray-fg}Updated: ${now} | H = Toggle Hour View  ESC = Back  Q = Quit{/gray-fg}`;
+      content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | H = Toggle Hour View  ESC = Back  Q = Quit{/gray-fg}`;
 
       contentBox.setContent(content);
       screen.render();
 
-      // Cache successful render
       lastGoodRender = content;
       consecutiveErrors = 0;
     } catch (error) {
       consecutiveErrors++;
-
-      // If we have a cached good render, show it
       if (lastGoodRender && consecutiveErrors < 5) {
         contentBox.setContent(lastGoodRender);
-        screen.render();
       } else {
-        // Show error details if no good render or too many errors
         const errorMsg = error instanceof Error ? error.message : String(error);
         contentBox.setContent(
           '{bold}{red-fg}Render Error{/red-fg}{/bold}\n\n' +
@@ -405,145 +292,113 @@ export async function createHistoricalUI(
           `Consecutive errors: ${consecutiveErrors}\n\n` +
           '{gray-fg}ESC = Back  Q = Quit{/gray-fg}'
         );
-        screen.render();
       }
+      screen.render();
     }
   }
 
-  // Keyboard handlers
-  screen.key(['h', 'H'], () => {
-    // Toggle between recent and hour modes
-    viewMode = viewMode === 'recent' ? 'hour' : 'recent';
-    render(); // Trigger immediate re-render with new mode
-  });
-
-  screen.key(['escape'], () => {
-    // Clean up refresh interval
+  function cleanup(): void {
     if (refreshIntervalId) {
       clearInterval(refreshIntervalId);
       refreshIntervalId = null;
     }
+  }
+
+  screen.key(['h', 'H'], () => {
+    viewMode = viewMode === 'recent' ? 'hour' : 'recent';
+    render();
+  });
+
+  screen.key(['escape'], () => {
+    cleanup();
     screen.remove(contentBox);
     onBack();
   });
 
   screen.key(['q', 'Q', 'C-c'], () => {
-    // Clean up refresh interval
-    if (refreshIntervalId) {
-      clearInterval(refreshIntervalId);
-      refreshIntervalId = null;
-    }
+    cleanup();
     screen.destroy();
     process.exit(0);
   });
 
-  // Initial render
-  contentBox.setContent('{cyan-fg}⏳ Loading historical data...{/cyan-fg}');
+  contentBox.setContent('{cyan-fg}\u23f3 Loading historical data...{/cyan-fg}');
   screen.render();
   await render();
 
-  // Start refresh interval for live updates
-  refreshIntervalId = setInterval(() => {
-    render(); // Errors are now handled inside render()
-  }, REFRESH_INTERVAL);
+  refreshIntervalId = setInterval(render, REFRESH_INTERVAL);
 }
 
 // Multi-server historical view
 export async function createMultiServerHistoricalUI(
   screen: blessed.Widgets.Screen,
   servers: ServerConfig[],
-  selectedIndex: number,
+  _selectedIndex: number,
   onBack: () => void
 ): Promise<void> {
   let refreshIntervalId: NodeJS.Timeout | null = null;
-  const REFRESH_INTERVAL = 3000; // Refresh charts every 3 seconds
-  let lastGoodRender: string | null = null; // Cache last successful render
+  const REFRESH_INTERVAL = 3000;
+  let lastGoodRender: string | null = null;
   let consecutiveErrors = 0;
-  let viewMode: 'recent' | 'hour' = 'recent'; // Default to recent view (matches single-server)
+  let viewMode: ViewMode = 'recent';
 
-  // Single scrollable content box
-  const contentBox = blessed.box({
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    tags: true,
-    scrollable: true,
-    alwaysScroll: true,
-    keys: true,
-    vi: true,
-    mouse: true,
-    scrollbar: {
-      ch: '█',
-      style: {
-        fg: 'blue',
-      },
-    },
-  });
+  const contentBox = createContentBox();
   screen.append(contentBox);
 
-  // Helper: Calculate statistics
-  function calculateStats(values: number[]): { avg: number; max: number; min: number; stddev: number } {
-    if (values.length === 0) {
-      return { avg: 0, max: 0, min: 0, stddev: 0 };
-    }
+  // Chart configurations for multi-server view
+  const chartConfigs: Record<string, ChartConfig> = {
+    tokenSpeed: {
+      title: 'Total Model Token Generation Speed (tok/s)',
+      color: asciichart.cyan,
+      formatValue: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
+      isPercentage: false,
+      noDataMessage: 'No generation activity in this time window',
+    },
+    cpu: {
+      title: 'Total Model CPU Usage (%)',
+      color: asciichart.blue,
+      formatValue: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
+      isPercentage: true,
+      noDataMessage: 'No CPU data in this time window',
+    },
+    memory: {
+      title: 'Total Model Memory Usage (GB)',
+      color: asciichart.magenta,
+      formatValue: (x: number) => x.toFixed(2).padStart(6, ' '),
+      isPercentage: false,
+      noDataMessage: 'No memory data in this time window',
+    },
+    gpu: {
+      title: 'System GPU Usage (%)',
+      color: asciichart.green,
+      formatValue: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
+      isPercentage: true,
+      noDataMessage: 'No GPU data in this time window',
+    },
+  };
 
-    const avg = values.reduce((a, b) => a + b, 0) / values.length;
-    const max = Math.max(...values);
-    const min = Math.min(...values);
-    const variance = values.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / values.length;
-    const stddev = Math.sqrt(variance);
-
-    return { avg, max, min, stddev };
-  }
-
-  // Helper: Calculate expanded range for charts
-  function getExpandedRange(data: number[], isPercentage: boolean = false): { min: number; max: number } {
-    if (isPercentage) {
-      return { min: 0, max: 100 };
-    }
-
-    if (data.length === 0) return { min: 0, max: 10 };
-
-    const dataMin = Math.min(...data);
-    const dataMax = Math.max(...data);
-    const range = dataMax - dataMin;
-
-    const padding = Math.max(range * 0.3, 5);
-
-    let min = Math.max(0, Math.floor(dataMin - padding));
-    let max = Math.ceil(dataMax + padding);
-
-    return { min, max };
-  }
-
-  // Render multi-server historical view
-  async function render() {
+  async function render(): Promise<void> {
     try {
       const termWidth = (screen.width as number) || 80;
-      const divider = '─'.repeat(termWidth - 2);
+      const divider = '\u2500'.repeat(termWidth - 2);
       const chartWidth = Math.min(Math.max(40, termWidth - 20), 80);
-      const chartHeight = 5; // Match single-server compact height
-      let content = '';
+      const chartHeight = 5;
 
-      // Header (match single-server style with view mode)
+      // Header
       const modeLabel = viewMode === 'recent' ? 'Minute' : 'Hour';
       const modeColor = viewMode === 'recent' ? 'cyan' : 'magenta';
-      content += `{bold}{blue-fg}═══ All servers (${servers.length}){/blue-fg} `;
+      let content = `{bold}{blue-fg}\u2550\u2550\u2550 All servers (${servers.length}){/blue-fg} `;
       content += `{${modeColor}-fg}[${modeLabel}]{/${modeColor}-fg}{/bold}\n\n`;
 
-      // Load history for all servers
+      // Load and aggregate history for all servers
       const serverHistories = await Promise.all(
         servers.map(async (server) => {
           const manager = new HistoryManager(server.id);
-          const snapshots = await manager.loadHistoryByWindow('1h');
-          return { server, snapshots };
+          return manager.loadHistoryByWindow('1h');
         })
       );
 
       // Aggregate data across all servers at each timestamp
-      // Align timestamps to 2-second intervals (matching polling rate) to ensure proper aggregation
-      const ALIGNMENT_INTERVAL = 2000; // 2 seconds
+      const ALIGNMENT_INTERVAL = 2000;
       const timestampMap = new Map<number, {
         tokensPerSec: number[];
         gpuUsage: number[];
@@ -551,9 +406,8 @@ export async function createMultiServerHistoricalUI(
         memoryGB: number[];
       }>();
 
-      for (const { snapshots } of serverHistories) {
+      for (const snapshots of serverHistories) {
         for (const snapshot of snapshots) {
-          // Round timestamp to nearest 2-second interval for proper aggregation
           const timestamp = Math.round(snapshot.timestamp / ALIGNMENT_INTERVAL) * ALIGNMENT_INTERVAL;
 
           if (!timestampMap.has(timestamp)) {
@@ -589,190 +443,67 @@ export async function createMultiServerHistoricalUI(
         return {
           timestamp: ts,
           totalTokS: data.tokensPerSec.reduce((a, b) => a + b, 0),
-          avgGpu: data.gpuUsage.length > 0 ? data.gpuUsage.reduce((a, b) => a + b, 0) / data.gpuUsage.length : 0,
+          avgGpu: data.gpuUsage.length > 0
+            ? data.gpuUsage.reduce((a, b) => a + b, 0) / data.gpuUsage.length
+            : 0,
           totalCpu: data.cpuUsage.reduce((a, b) => a + b, 0),
           totalMemoryGB: data.memoryGB.reduce((a, b) => a + b, 0),
         };
       });
 
       if (aggregatedData.length > 0) {
-        // Determine display samples based on view mode
-        let displayData = aggregatedData;
-        if (viewMode === 'recent') {
-          // Recent mode: show last N samples
-          const maxPoints = Math.min(chartWidth, 80);
-          displayData = aggregatedData.length > maxPoints
-            ? aggregatedData.slice(-maxPoints)
-            : aggregatedData;
-        }
+        const maxPoints = Math.min(chartWidth, 80);
+        const displayData = viewMode === 'recent' && aggregatedData.length > maxPoints
+          ? aggregatedData.slice(-maxPoints)
+          : aggregatedData;
 
-        // Downsample based on view mode
-        // In hour mode, use full-hour coverage functions that fill gaps with 0
-        const shouldDownsample = viewMode === 'hour';
+        const useDownsampling = viewMode === 'hour';
 
-        // 1. Total Token Generation Speed Chart
-        const tokSData: TimeSeriesPoint[] = displayData.map(d => ({ timestamp: d.timestamp, value: d.totalTokS }));
-        const tokSValues: number[] = shouldDownsample
-          ? downsampleMaxTimeWithFullHour(tokSData, chartWidth)
-          : tokSData.map(d => d.value);
+        // Extract time-series data
+        const rawData = {
+          tokenSpeed: displayData.map(d => ({ timestamp: d.timestamp, value: d.totalTokS })),
+          cpu: displayData.map(d => ({ timestamp: d.timestamp, value: d.totalCpu })),
+          memory: displayData.map(d => ({ timestamp: d.timestamp, value: d.totalMemoryGB })),
+          gpu: displayData.map(d => ({ timestamp: d.timestamp, value: d.avgGpu })),
+        };
 
-        content += `{bold}Total Model Token Generation Speed (tok/s){/bold}\n`;
-        const validTokS = tokSValues.filter(v => !isNaN(v) && v > 0);
+        // Apply downsampling
+        const values = {
+          tokenSpeed: useDownsampling
+            ? downsampleMaxTimeWithFullHour(rawData.tokenSpeed, chartWidth)
+            : rawData.tokenSpeed.map(d => d.value),
+          cpu: useDownsampling
+            ? downsampleMaxTimeWithFullHour(rawData.cpu, chartWidth)
+            : rawData.cpu.map(d => d.value),
+          memory: useDownsampling
+            ? downsampleMeanTimeWithFullHour(rawData.memory, chartWidth)
+            : rawData.memory.map(d => d.value),
+          gpu: useDownsampling
+            ? downsampleMaxTimeWithFullHour(rawData.gpu, chartWidth)
+            : rawData.gpu.map(d => d.value),
+        };
 
-        if (validTokS.length >= 2) {
-          const tokSRange = getExpandedRange(validTokS);
-          const tokSStats = calculateStats(validTokS);
-          content += asciichart.plot(tokSValues.map(v => isNaN(v) ? 0 : v), {
-            height: chartHeight,
-            colors: [asciichart.cyan],
-            format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-            min: tokSRange.min,
-            max: tokSRange.max,
-          });
-          content += '\n';
-          const lastTokS = aggregatedData[aggregatedData.length - 1]?.totalTokS ?? 0;
-          content += `  Avg: ${tokSStats.avg.toFixed(1)} tok/s (±${tokSStats.stddev.toFixed(1)})  `;
-          content += `Max: ${tokSStats.max.toFixed(1)} tok/s  `;
-          content += `Last: ${lastTokS.toFixed(1)} tok/s\n\n`;
-        } else {
-          content += asciichart.plot(tokSValues.map(v => isNaN(v) ? 0 : v), {
-            height: chartHeight,
-            colors: [asciichart.cyan],
-            format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-            min: 0,
-            max: 10,
-          });
-          content += '\n{gray-fg}  No generation activity in this time window{/gray-fg}\n\n';
-        }
-
-        // 2. Total CPU Usage Chart
-        const cpuData: TimeSeriesPoint[] = displayData.map(d => ({ timestamp: d.timestamp, value: d.totalCpu }));
-        const cpuValues: number[] = shouldDownsample
-          ? downsampleMaxTimeWithFullHour(cpuData, chartWidth)
-          : cpuData.map(d => d.value);
-
-        content += `{bold}Total Model CPU Usage (%){/bold}\n`;
-        const validCpu = cpuValues.filter(v => !isNaN(v) && v > 0);
-
-        if (validCpu.length >= 2) {
-          const cpuStats = calculateStats(validCpu);
-          const cpuRange = getExpandedRange(validCpu, true);
-          content += asciichart.plot(cpuValues.map(v => isNaN(v) ? 0 : v), {
-            height: chartHeight,
-            colors: [asciichart.blue],
-            format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-            min: cpuRange.min,
-            max: cpuRange.max,
-          });
-          content += '\n';
-          const lastCpu = aggregatedData[aggregatedData.length - 1]?.totalCpu ?? 0;
-          content += `  Avg: ${cpuStats.avg.toFixed(1)}% (±${cpuStats.stddev.toFixed(1)})  `;
-          content += `Max: ${cpuStats.max.toFixed(1)}%  `;
-          content += `Min: ${cpuStats.min.toFixed(1)}%  `;
-          content += `Last: ${lastCpu.toFixed(1)}%\n\n`;
-        } else {
-          content += asciichart.plot(cpuValues.map(v => isNaN(v) ? 0 : v), {
-            height: chartHeight,
-            colors: [asciichart.blue],
-            format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-            min: 0,
-            max: 100,
-          });
-          content += '\n{gray-fg}  No CPU data in this time window{/gray-fg}\n\n';
-        }
-
-        // 3. Total Memory Usage Chart
-        const memData: TimeSeriesPoint[] = displayData.map(d => ({ timestamp: d.timestamp, value: d.totalMemoryGB }));
-        const memValues: number[] = shouldDownsample
-          ? downsampleMeanTimeWithFullHour(memData, chartWidth)
-          : memData.map(d => d.value);
-
-        content += `{bold}Total Model Memory Usage (GB){/bold}\n`;
-        const validMem = memValues.filter(v => !isNaN(v) && v > 0);
-
-        if (validMem.length >= 2) {
-          const memStats = calculateStats(validMem);
-          const memRange = getExpandedRange(validMem);
-          content += asciichart.plot(memValues.map(v => isNaN(v) ? 0 : v), {
-            height: chartHeight,
-            colors: [asciichart.magenta],
-            format: (x: number) => x.toFixed(2).padStart(6, ' '),
-            min: memRange.min,
-            max: memRange.max,
-          });
-          content += '\n';
-          const lastMem = aggregatedData[aggregatedData.length - 1]?.totalMemoryGB ?? 0;
-          content += `  Avg: ${memStats.avg.toFixed(2)} GB (±${memStats.stddev.toFixed(2)})  `;
-          content += `Max: ${memStats.max.toFixed(2)} GB  `;
-          content += `Min: ${memStats.min.toFixed(2)} GB  `;
-          content += `Last: ${lastMem.toFixed(2)} GB\n\n`;
-        } else {
-          content += asciichart.plot(memValues.map(v => isNaN(v) ? 0 : v), {
-            height: chartHeight,
-            colors: [asciichart.magenta],
-            format: (x: number) => x.toFixed(2).padStart(6, ' '),
-            min: 0,
-            max: 10,
-          });
-          content += '\n{gray-fg}  No memory data in this time window{/gray-fg}\n\n';
-        }
-
-        // 4. System GPU Usage Chart (average across all servers) - at bottom
-        const gpuData: TimeSeriesPoint[] = displayData.map(d => ({ timestamp: d.timestamp, value: d.avgGpu }));
-        const gpuValues: number[] = shouldDownsample
-          ? downsampleMaxTimeWithFullHour(gpuData, chartWidth)
-          : gpuData.map(d => d.value);
-
-        content += `{bold}System GPU Usage (%){/bold}\n`;
-        const validGpu = gpuValues.filter(v => !isNaN(v) && v > 0);
-
-        if (validGpu.length >= 2) {
-          const gpuStats = calculateStats(validGpu);
-          content += asciichart.plot(gpuValues.map(v => isNaN(v) ? 0 : v), {
-            height: chartHeight,
-            colors: [asciichart.green],
-            format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-            min: 0,
-            max: 100,
-          });
-          content += '\n';
-          const lastGpu = aggregatedData[aggregatedData.length - 1]?.avgGpu ?? 0;
-          content += `  Avg: ${gpuStats.avg.toFixed(1)}% (±${gpuStats.stddev.toFixed(1)})  `;
-          content += `Max: ${gpuStats.max.toFixed(1)}%  `;
-          content += `Min: ${gpuStats.min.toFixed(1)}%  `;
-          content += `Last: ${lastGpu.toFixed(1)}%\n\n`;
-        } else {
-          content += asciichart.plot(gpuValues.map(v => isNaN(v) ? 0 : v), {
-            height: chartHeight,
-            colors: [asciichart.green],
-            format: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
-            min: 0,
-            max: 100,
-          });
-          content += '\n{gray-fg}  No GPU data in this time window{/gray-fg}\n\n';
-        }
+        // Render all charts
+        content += renderChart(values.tokenSpeed, rawData.tokenSpeed, chartConfigs.tokenSpeed, chartHeight);
+        content += renderChart(values.cpu, rawData.cpu, chartConfigs.cpu, chartHeight);
+        content += renderChart(values.memory, rawData.memory, chartConfigs.memory, chartHeight);
+        content += renderChart(values.gpu, rawData.gpu, chartConfigs.gpu, chartHeight);
       }
 
-      // Footer with last updated time (match single-server style)
+      // Footer
       content += divider + '\n';
-      const now = new Date().toLocaleTimeString();
-      content += `{gray-fg}Updated: ${now} | H = Toggle Hour View  ESC = Back  Q = Quit{/gray-fg}`;
+      content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | H = Toggle Hour View  ESC = Back  Q = Quit{/gray-fg}`;
 
       contentBox.setContent(content);
       screen.render();
 
-      // Cache successful render
       lastGoodRender = content;
       consecutiveErrors = 0;
     } catch (error) {
       consecutiveErrors++;
-
-      // If we have a cached good render, show it
       if (lastGoodRender && consecutiveErrors < 5) {
         contentBox.setContent(lastGoodRender);
-        screen.render();
       } else {
-        // Show error details if no good render or too many errors
         const errorMsg = error instanceof Error ? error.message : String(error);
         contentBox.setContent(
           '{bold}{red-fg}Render Error{/red-fg}{/bold}\n\n' +
@@ -780,45 +511,38 @@ export async function createMultiServerHistoricalUI(
           `Consecutive errors: ${consecutiveErrors}\n\n` +
           '{gray-fg}ESC = Back  Q = Quit{/gray-fg}'
         );
-        screen.render();
       }
+      screen.render();
     }
   }
 
-  // Keyboard handlers
-  screen.key(['h', 'H'], () => {
-    // Toggle between recent and hour modes
-    viewMode = viewMode === 'recent' ? 'hour' : 'recent';
-    render(); // Trigger immediate re-render with new mode
-  });
-
-  screen.key(['escape'], () => {
-    // Clean up refresh interval
+  function cleanup(): void {
     if (refreshIntervalId) {
       clearInterval(refreshIntervalId);
       refreshIntervalId = null;
     }
+  }
+
+  screen.key(['h', 'H'], () => {
+    viewMode = viewMode === 'recent' ? 'hour' : 'recent';
+    render();
+  });
+
+  screen.key(['escape'], () => {
+    cleanup();
     screen.remove(contentBox);
     onBack();
   });
 
   screen.key(['q', 'Q', 'C-c'], () => {
-    // Clean up refresh interval
-    if (refreshIntervalId) {
-      clearInterval(refreshIntervalId);
-      refreshIntervalId = null;
-    }
+    cleanup();
     screen.destroy();
     process.exit(0);
   });
 
-  // Initial render
-  contentBox.setContent('{cyan-fg}⏳ Loading historical data...{/cyan-fg}');
+  contentBox.setContent('{cyan-fg}\u23f3 Loading historical data...{/cyan-fg}');
   screen.render();
   await render();
 
-  // Start refresh interval for live updates
-  refreshIntervalId = setInterval(() => {
-    render(); // Errors are now handled inside render()
-  }, REFRESH_INTERVAL);
+  refreshIntervalId = setInterval(render, REFRESH_INTERVAL);
 }
