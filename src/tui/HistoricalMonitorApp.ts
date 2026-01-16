@@ -3,7 +3,14 @@ import * as asciichart from 'asciichart';
 import { ServerConfig } from '../types/server-config.js';
 import { HistoryManager } from '../lib/history-manager.js';
 import { TimeWindow, TIME_WINDOWS, TIME_WINDOW_HOURS, HistorySnapshot } from '../types/history-types.js';
-import { downsampleMaxTime, downsampleMeanTime, getDownsampleRatio, TimeSeriesPoint } from '../utils/downsample-utils.js';
+import {
+  downsampleMaxTime,
+  downsampleMeanTime,
+  downsampleMaxTimeWithFullHour,
+  downsampleMeanTimeWithFullHour,
+  getDownsampleRatio,
+  TimeSeriesPoint
+} from '../utils/downsample-utils.js';
 
 type ViewMode = 'recent' | 'hour';
 
@@ -206,17 +213,18 @@ export async function createHistoricalUI(
     }
 
     // Apply time-aligned downsampling based on mode
+    // In hour mode, use full-hour coverage functions that fill gaps with 0
     const generateSpeeds = viewMode === 'hour'
-      ? downsampleMaxTime(rawGenerateSpeeds, maxChartPoints)
+      ? downsampleMaxTimeWithFullHour(rawGenerateSpeeds, maxChartPoints)
       : rawGenerateSpeeds.map(p => p.value);
     const gpuUsages = viewMode === 'hour'
-      ? downsampleMaxTime(rawGpuUsages, maxChartPoints)
+      ? downsampleMaxTimeWithFullHour(rawGpuUsages, maxChartPoints)
       : rawGpuUsages.map(p => p.value);
     const cpuUsages = viewMode === 'hour'
-      ? downsampleMaxTime(rawCpuUsages, maxChartPoints)
+      ? downsampleMaxTimeWithFullHour(rawCpuUsages, maxChartPoints)
       : rawCpuUsages.map(p => p.value);
     const memoryUsageGB = viewMode === 'hour'
-      ? downsampleMeanTime(rawMemoryPercentages, maxChartPoints)
+      ? downsampleMeanTimeWithFullHour(rawMemoryPercentages, maxChartPoints)
       : rawMemoryPercentages.map(p => p.value);
 
     // 1. Model Token Generation Speed Chart (always show)
@@ -599,15 +607,16 @@ export async function createMultiServerHistoricalUI(
         }
 
         // Downsample based on view mode
-        const shouldDownsample = viewMode === 'hour' && displayData.length > chartWidth;
+        // In hour mode, use full-hour coverage functions that fill gaps with 0
+        const shouldDownsample = viewMode === 'hour';
 
         // 1. Total Token Generation Speed Chart
         const tokSData: TimeSeriesPoint[] = displayData.map(d => ({ timestamp: d.timestamp, value: d.totalTokS }));
         const tokSValues: number[] = shouldDownsample
-          ? downsampleMaxTime(tokSData, chartWidth)
+          ? downsampleMaxTimeWithFullHour(tokSData, chartWidth)
           : tokSData.map(d => d.value);
 
-        content += `{bold}Total Token Generation Speed (tok/s){/bold}\n`;
+        content += `{bold}Total Model Token Generation Speed (tok/s){/bold}\n`;
         const validTokS = tokSValues.filter(v => !isNaN(v) && v > 0);
 
         if (validTokS.length >= 2) {
@@ -639,10 +648,10 @@ export async function createMultiServerHistoricalUI(
         // 2. Total CPU Usage Chart
         const cpuData: TimeSeriesPoint[] = displayData.map(d => ({ timestamp: d.timestamp, value: d.totalCpu }));
         const cpuValues: number[] = shouldDownsample
-          ? downsampleMaxTime(cpuData, chartWidth)
+          ? downsampleMaxTimeWithFullHour(cpuData, chartWidth)
           : cpuData.map(d => d.value);
 
-        content += `{bold}Total CPU Usage (%){/bold}\n`;
+        content += `{bold}Total Model CPU Usage (%){/bold}\n`;
         const validCpu = cpuValues.filter(v => !isNaN(v) && v > 0);
 
         if (validCpu.length >= 2) {
@@ -675,10 +684,10 @@ export async function createMultiServerHistoricalUI(
         // 3. Total Memory Usage Chart
         const memData: TimeSeriesPoint[] = displayData.map(d => ({ timestamp: d.timestamp, value: d.totalMemoryGB }));
         const memValues: number[] = shouldDownsample
-          ? downsampleMeanTime(memData, chartWidth)
+          ? downsampleMeanTimeWithFullHour(memData, chartWidth)
           : memData.map(d => d.value);
 
-        content += `{bold}Total Memory Usage (GB){/bold}\n`;
+        content += `{bold}Total Model Memory Usage (GB){/bold}\n`;
         const validMem = memValues.filter(v => !isNaN(v) && v > 0);
 
         if (validMem.length >= 2) {
@@ -711,7 +720,7 @@ export async function createMultiServerHistoricalUI(
         // 4. System GPU Usage Chart (average across all servers) - at bottom
         const gpuData: TimeSeriesPoint[] = displayData.map(d => ({ timestamp: d.timestamp, value: d.avgGpu }));
         const gpuValues: number[] = shouldDownsample
-          ? downsampleMaxTime(gpuData, chartWidth)
+          ? downsampleMaxTimeWithFullHour(gpuData, chartWidth)
           : gpuData.map(d => d.value);
 
         content += `{bold}System GPU Usage (%){/bold}\n`;

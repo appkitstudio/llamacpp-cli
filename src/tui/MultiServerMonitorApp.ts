@@ -286,8 +286,21 @@ export async function createMultiServerMonitorUI(
     content += '{gray-fg}Use arrow keys to navigate, Enter to view details{/gray-fg}\n';
     content += divider + '\n';
 
-    // Table header
-    content += '{bold}  │ Server ID        │ Port │ Status │ Slots │ tok/s  │ Memory{/bold}\n';
+    // Calculate Server ID column width (variable based on screen width)
+    // Fixed columns breakdown:
+    // indicator(1) + " │ "(3) + " │ "(3) + port(4) + " │ "(3) + status(6) + "│ "(2) +
+    // slots(5) + " │ "(3) + tok/s(6) + " │ "(3) + memory(7) = 46
+    const fixedColumnsWidth = 48; // Add 2 extra for safety margin
+    const minServerIdWidth = 20;
+    const maxServerIdWidth = 60;
+    const serverIdWidth = Math.max(
+      minServerIdWidth,
+      Math.min(maxServerIdWidth, termWidth - fixedColumnsWidth)
+    );
+
+    // Table header with variable Server ID width
+    const serverIdHeader = 'Server ID'.padEnd(serverIdWidth);
+    content += `{bold}  │ ${serverIdHeader}│ Port │ Status │ Slots │ tok/s  │ Memory{/bold}\n`;
     content += divider + '\n';
 
     // Server rows
@@ -299,8 +312,8 @@ export async function createMultiServerMonitorUI(
       // Use plain arrow for selected (will be white), colored for unselected indicator
       const indicator = isSelected ? '►' : ' ';
 
-      // Server ID (truncate if needed)
-      const serverId = server.id.padEnd(16).substring(0, 16);
+      // Server ID (variable width, truncate if longer than available space)
+      const serverId = server.id.padEnd(serverIdWidth).substring(0, serverIdWidth);
 
       // Port
       const port = server.port.toString().padStart(4);
