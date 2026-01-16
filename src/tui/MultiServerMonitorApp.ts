@@ -16,15 +16,19 @@ interface ServerMonitorData {
 
 export async function createMultiServerMonitorUI(
   screen: blessed.Widgets.Screen,
-  servers: ServerConfig[]
+  servers: ServerConfig[],
+  fromPs: boolean = false,
+  directJumpIndex?: number
 ): Promise<void> {
   let updateInterval = 2000;
   let intervalId: NodeJS.Timeout | null = null;
-  let viewMode: ViewMode = 'list';
-  let selectedServerIndex = 0;
-  let selectedRowIndex = 0; // Track which row is highlighted in list view
+  let viewMode: ViewMode = directJumpIndex !== undefined ? 'detail' : 'list';
+  let selectedServerIndex = directJumpIndex ?? 0;
+  let selectedRowIndex = directJumpIndex ?? 0; // Track which row is highlighted in list view
   let isLoading = false;
   let lastSystemMetrics: SystemMetrics | null = null;
+  let cameFromDirectJump = directJumpIndex !== undefined; // Track if we entered via ps <id>
+  let inHistoricalView = false; // Track whether we're in historical view to prevent key conflicts
 
   // Spinner animation
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -134,13 +138,14 @@ export async function createMultiServerMonitorUI(
     const divider = '─'.repeat(termWidth - 2);
     content += divider + '\n';
 
-    // Aggregate CPU and memory across all running servers
+    // Aggregate CPU and memory across all running servers (skip stopped servers)
     let totalCpu = 0;
     let totalMemoryBytes = 0;
     let serverCount = 0;
 
     for (const serverData of serverDataMap.values()) {
-      if (serverData.data?.server && !serverData.data.server.stale) {
+      // Only count running servers with valid data
+      if (serverData.server.status === 'running' && serverData.data?.server && !serverData.data.server.stale) {
         if (serverData.data.server.processCpuUsage !== undefined) {
           totalCpu += serverData.data.server.processCpuUsage;
           serverCount++;
@@ -264,14 +269,7 @@ export async function createMultiServerMonitorUI(
     let content = '';
 
     // Header
-    content += '{bold}{blue-fg}═══ llama.cpp Multi-Server Monitor{/blue-fg}{/bold}\n';
-
-    // Status line with optional spinner
-    const statusPlainText = '↑/↓ Navigate | Enter for details | [H]istory [R]efresh [Q] Quit';
-    const spinnerChar = isLoading ? spinnerFrames[spinnerFrameIndex] : '';
-    const spinnerText = spinnerChar ? `  {cyan-fg}${spinnerChar}{/cyan-fg}` : '';
-
-    content += `{gray-fg}${statusPlainText}${spinnerText}{/gray-fg}\n\n`;
+    content += '{bold}{blue-fg}═══ llama.cpp{/blue-fg}{/bold}\n\n';
 
     // System resources
     content += renderSystemResources(systemMetrics);
@@ -375,8 +373,7 @@ export async function createMultiServerMonitorUI(
 
     // Footer
     content += '\n' + divider + '\n';
-    content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | `;
-    content += `Interval: ${updateInterval}ms | [H]istory [R]efresh [+/-]Speed{/gray-fg}`;
+    content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | [H]istory [Q]uit{/gray-fg}`;
 
     return content;
   }
@@ -390,14 +387,50 @@ export async function createMultiServerMonitorUI(
     let content = '';
 
     // Header
-    content += `{bold}{blue-fg}═══ Server #${selectedServerIndex + 1}: ${server.id} (${server.port}){/blue-fg}{/bold}\n`;
+    content += `{bold}{blue-fg}═══ ${server.id} (${server.port}){/blue-fg}{/bold}\n\n`;
 
-    // Status line with optional spinner
-    const statusPlainText = '[ESC] Back to list | [Q] Quit';
-    const spinnerChar = isLoading ? spinnerFrames[spinnerFrameIndex] : '';
-    const spinnerText = spinnerChar ? `  {cyan-fg}${spinnerChar}{/cyan-fg}` : '';
+    // Check if server is stopped
+    if (server.status !== 'running') {
+      // Show stopped server configuration (no metrics)
+      content += '{bold}Server Information{/bold}\n';
+      content += divider + '\n';
+      content += `Status:   {gray-fg}○ STOPPED{/gray-fg}\n`;
+      content += `Model:    ${server.modelName}\n`;
+      const displayHost = server.host || '127.0.0.1';
+      content += `Endpoint: http://${displayHost}:${server.port}\n`;
+      content += '\n';
 
-    content += `{gray-fg}${statusPlainText}${spinnerText}{/gray-fg}\n\n`;
+      content += '{bold}Configuration{/bold}\n';
+      content += divider + '\n';
+      content += `Threads:    ${server.threads}\n`;
+      content += `Context:    ${server.ctxSize} tokens\n`;
+      content += `GPU Layers: ${server.gpuLayers}\n`;
+      if (server.verbose) {
+        content += `Verbose:    Enabled\n`;
+      }
+      if (server.customFlags && server.customFlags.length > 0) {
+        content += `Flags:      ${server.customFlags.join(', ')}\n`;
+      }
+      content += '\n';
+
+      if (server.lastStarted) {
+        content += '{bold}Last Activity{/bold}\n';
+        content += divider + '\n';
+        content += `Started:  ${new Date(server.lastStarted).toLocaleString()}\n`;
+        if (server.lastStopped) {
+          content += `Stopped:  ${new Date(server.lastStopped).toLocaleString()}\n`;
+        }
+        content += '\n';
+      }
+
+      content += '{bold}Quick Actions{/bold}\n';
+      content += divider + '\n';
+      content += `{dim}Start server:  llamacpp server start ${server.port}{/dim}\n`;
+      content += `{dim}Update config: llamacpp server config ${server.port} [options]{/dim}\n`;
+      content += `{dim}View logs:     llamacpp server logs ${server.port}{/dim}\n`;
+
+      return content;
+    }
 
     if (!serverData?.data) {
       content += '{yellow-fg}Loading server data...{/yellow-fg}\n';
@@ -486,8 +519,7 @@ export async function createMultiServerMonitorUI(
 
     // Footer
     content += divider + '\n';
-    content += `{gray-fg}Updated: ${data.lastUpdated.toLocaleTimeString()} | `;
-    content += `Interval: ${updateInterval}ms | [H]istory [R]efresh [+/-]Speed{/gray-fg}`;
+    content += `{gray-fg}Updated: ${data.lastUpdated.toLocaleTimeString()} | [H]istory [ESC] Back [Q]uit{/gray-fg}`;
 
     return content;
   }
@@ -513,41 +545,54 @@ export async function createMultiServerMonitorUI(
       // Wait for both batches to complete
       const [memoryMap, cpuMap] = await Promise.all([memoryMapPromise, cpuMapPromise]);
 
-      // Collect server metrics only (NOT system metrics) for each server
-      const promises = servers.map(async (server) => {
-        const aggregator = aggregators.get(server.id)!;
-        try {
-          // Use collectServerMetrics instead of collectMonitorData
-          // to avoid spawning macmon per server
-          // Pass pre-fetched memory and CPU to avoid spawning top per server
-          const serverMetrics = await aggregator.collectServerMetrics(
-            server,
-            server.pid ? memoryMap.get(server.pid) ?? null : null,
-            server.pid ? cpuMap.get(server.pid) ?? null : null
-          );
+      // Collect server metrics only for RUNNING servers (skip stopped servers)
+      const promises = servers
+        .filter(server => server.status === 'running')
+        .map(async (server) => {
+          const aggregator = aggregators.get(server.id)!;
+          try {
+            // Use collectServerMetrics instead of collectMonitorData
+            // to avoid spawning macmon per server
+            // Pass pre-fetched memory and CPU to avoid spawning top per server
+            const serverMetrics = await aggregator.collectServerMetrics(
+              server,
+              server.pid ? memoryMap.get(server.pid) ?? null : null,
+              server.pid ? cpuMap.get(server.pid) ?? null : null
+            );
 
-          // Build MonitorData manually with shared system metrics
-          const data: MonitorData = {
-            server: serverMetrics,
-            system: undefined, // Will be set after system metrics resolve
-            lastUpdated: new Date(),
-            updateInterval,
-            consecutiveFailures: 0,
-          };
+            // Build MonitorData manually with shared system metrics
+            const data: MonitorData = {
+              server: serverMetrics,
+              system: undefined, // Will be set after system metrics resolve
+              lastUpdated: new Date(),
+              updateInterval,
+              consecutiveFailures: 0,
+            };
 
-          serverDataMap.set(server.id, {
-            server,
-            data,
-            error: null,
-          });
-        } catch (err) {
+            serverDataMap.set(server.id, {
+              server,
+              data,
+              error: null,
+            });
+          } catch (err) {
+            serverDataMap.set(server.id, {
+              server,
+              data: null,
+              error: err instanceof Error ? err.message : 'Unknown error',
+            });
+          }
+        });
+
+      // Set null data for stopped servers (no metrics collection)
+      servers
+        .filter(server => server.status !== 'running')
+        .forEach(server => {
           serverDataMap.set(server.id, {
             server,
             data: null,
-            error: err instanceof Error ? err.message : 'Unknown error',
+            error: null,
           });
-        }
-      });
+        });
 
       // Wait for both system metrics and server metrics to complete
       const systemMetrics = await systemMetricsPromise;
@@ -644,31 +689,27 @@ export async function createMultiServerMonitorUI(
 
   // Keyboard shortcuts - Detail view
   screen.key(['escape'], () => {
+    // Don't handle ESC if we're in historical view - let historical view handle it
+    if (inHistoricalView) return;
+
     if (viewMode === 'detail') {
       showLoading();
       viewMode = 'list';
+      cameFromDirectJump = false; // Clear direct jump flag when returning to list
       fetchData();
+    } else if (viewMode === 'list') {
+      // ESC in list view - exit
+      showLoading();
+      if (intervalId) clearInterval(intervalId);
+      if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+      setTimeout(() => {
+        screen.destroy();
+        process.exit(0);
+      }, 100);
     }
   });
 
   // Keyboard shortcuts - Common
-  screen.key(['r', 'R'], () => {
-    showLoading();
-    fetchData();
-  });
-
-  screen.key(['+', '='], () => {
-    updateInterval = Math.max(500, updateInterval - 500);
-    startPolling();
-  });
-
-  screen.key(['-', '_'], () => {
-    updateInterval = Math.min(10000, updateInterval + 500);
-    startPolling();
-  });
-
-  // Track whether we're in historical view to prevent H key conflicts
-  let inHistoricalView = false;
 
   screen.key(['h', 'H'], async () => {
     // Prevent entering historical view if already there
@@ -691,6 +732,10 @@ export async function createMultiServerMonitorUI(
         inHistoricalView = false;
         // Re-attach content box when returning from history
         screen.append(contentBox);
+        // Re-render the list view
+        const content = renderListView(lastSystemMetrics);
+        contentBox.setContent(content);
+        screen.render();
       });
     } else {
       // Show single-server historical view for selected server
@@ -700,6 +745,10 @@ export async function createMultiServerMonitorUI(
         inHistoricalView = false;
         // Re-attach content box when returning from history
         screen.append(contentBox);
+        // Re-render the detail view
+        const content = renderDetailView(lastSystemMetrics);
+        contentBox.setContent(content);
+        screen.render();
       });
     }
   });

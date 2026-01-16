@@ -42,11 +42,12 @@ program
 
 // List running servers
 program
-  .command('ps')
-  .description('List all servers with status')
-  .action(async () => {
+  .command('ps [identifier]')
+  .description('Interactive server monitoring dashboard')
+  .option('--table', 'Show static table instead of TUI (for scripting)')
+  .action(async (identifier?: string, options?: { table?: boolean }) => {
     try {
-      await psCommand();
+      await psCommand(identifier, options);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);
@@ -269,12 +270,14 @@ server
     }
   });
 
-// Monitor server
+// Monitor server (deprecated - redirects to ps)
 server
   .command('monitor [identifier]')
-  .description('Monitor server with real-time metrics TUI')
+  .description('Monitor server with real-time metrics TUI (deprecated: use "llamacpp ps" instead)')
   .action(async (identifier?: string) => {
     try {
+      console.log(chalk.yellow('⚠️  The "monitor" command is deprecated and will be removed in a future version.'));
+      console.log(chalk.dim('   Please use "llamacpp ps" instead for the same functionality.\n'));
       await monitorCommand(identifier);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
