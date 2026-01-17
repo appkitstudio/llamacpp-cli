@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { stateManager } from '../lib/state-manager';
 import { launchctlManager } from '../lib/launchctl-manager';
 import { statusChecker } from '../lib/status-checker';
+import { parseMetalMemoryFromLog } from '../utils/file-utils';
 
 export async function startCommand(identifier: string): Promise<void> {
   // Initialize state manager
@@ -61,9 +62,21 @@ export async function startCommand(identifier: string): Promise<void> {
   }
 
   // 7. Update server status
-  await statusChecker.updateServerStatus(server);
+  let updatedServer = await statusChecker.updateServerStatus(server);
 
-  // 8. Display success
+  // 8. Parse Metal (GPU) memory allocation if not already captured
+  if (!updatedServer.metalMemoryMB) {
+    console.log(chalk.dim('Detecting Metal (GPU) memory allocation...'));
+    await new Promise(resolve => setTimeout(resolve, 8000)); // 8 second delay
+    const metalMemoryMB = await parseMetalMemoryFromLog(updatedServer.stderrPath);
+    if (metalMemoryMB) {
+      updatedServer = { ...updatedServer, metalMemoryMB };
+      await stateManager.saveServerConfig(updatedServer);
+      console.log(chalk.dim(`Metal memory: ${metalMemoryMB.toFixed(0)} MB`));
+    }
+  }
+
+  // 9. Display success
   console.log();
   console.log(chalk.green('✅ Server started successfully!'));
   console.log();

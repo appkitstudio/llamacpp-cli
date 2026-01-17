@@ -206,6 +206,13 @@ export class MetricsAggregator {
           ) / processingSlots.length
         : undefined;
 
+    // Calculate total memory (CPU + Metal GPU memory if available)
+    let totalMemory = fetchedMemory ?? undefined;
+    if (totalMemory !== undefined && server.metalMemoryMB) {
+      // Add Metal memory (convert MB to bytes)
+      totalMemory += server.metalMemoryMB * 1024 * 1024;
+    }
+
     return {
       server,
       healthy,
@@ -219,7 +226,7 @@ export class MetricsAggregator {
       slots,
       avgPromptSpeed,
       avgGenerateSpeed,
-      processMemory: fetchedMemory ?? undefined,
+      processMemory: totalMemory,
       processCpuUsage: fetchedCpu ?? undefined,
       timestamp: now,
       stale: false,

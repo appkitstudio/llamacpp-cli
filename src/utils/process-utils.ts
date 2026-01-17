@@ -220,9 +220,12 @@ export async function getBatchProcessMemory(pids: number[]): Promise<Map<number,
 
 /**
  * Get memory usage for a single process in bytes
- * Uses 'top' on macOS which includes GPU/Metal memory (more accurate for llama-server)
+ * Uses 'top' on macOS which reports CPU memory only (NOT GPU/Metal memory)
  * Returns null if process not found or error occurs
  * Caches results for 3 seconds to prevent spawning too many top processes
+ *
+ * Note: For llama-server processes with GPU offloading, use ServerConfig.metalMemoryMB
+ * to get GPU memory allocation (parsed from logs during server startup)
  *
  * Note: For multiple PIDs, use getBatchProcessMemory() instead - much more efficient
  */

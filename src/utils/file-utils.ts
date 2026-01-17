@@ -104,3 +104,43 @@ export function expandHome(filePath: string): string {
   }
   return filePath;
 }
+
+/**
+ * Parse Metal (GPU) memory allocation from llama-server stderr logs
+ * Looks for line: "load_tensors: Metal_Mapped model buffer size = 11120.23 MiB"
+ * Returns memory in MB, or null if not found
+ */
+export async function parseMetalMemoryFromLog(stderrPath: string): Promise<number | null> {
+  try {
+    // Check if log file exists
+    if (!(await fileExists(stderrPath))) {
+      return null;
+    }
+
+    // Open file for reading
+    const fileHandle = await fs.open(stderrPath, 'r');
+
+    try {
+      // Read first 256KB (Metal allocation happens early during model loading)
+      const buffer = Buffer.alloc(256 * 1024);
+      const { bytesRead } = await fileHandle.read(buffer, 0, buffer.length, 0);
+      const content = buffer.toString('utf-8', 0, bytesRead);
+      const lines = content.split('\n');
+
+      // Look for Metal_Mapped buffer size
+      for (const line of lines) {
+        const match = line.match(/Metal_Mapped model buffer size\s*=\s*([\d.]+)\s*MiB/);
+        if (match) {
+          const sizeInMB = parseFloat(match[1]);
+          return isNaN(sizeInMB) ? null : sizeInMB;
+        }
+      }
+
+      return null;
+    } finally {
+      await fileHandle.close();
+    }
+  } catch {
+    return null;
+  }
+}

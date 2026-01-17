@@ -22,6 +22,7 @@ export interface ServerConfig {
   createdAt: string;       // ISO timestamp
   lastStarted?: string;    // ISO timestamp
   lastStopped?: string;    // ISO timestamp
+  metalMemoryMB?: number;  // Metal (GPU) memory allocated in MB (parsed from logs)
 
   // launchctl metadata
   plistPath: string;       // Full path to plist file

@@ -9,7 +9,7 @@ import { launchctlManager } from '../lib/launchctl-manager';
 import { statusChecker } from '../lib/status-checker';
 import { commandExists } from '../utils/process-utils';
 import { formatBytes } from '../utils/format-utils';
-import { ensureDir } from '../utils/file-utils';
+import { ensureDir, parseMetalMemoryFromLog } from '../utils/file-utils';
 import { ensureModelsDirectory } from '../lib/models-dir-setup';
 
 interface CreateOptions {
@@ -159,12 +159,22 @@ export async function createCommand(model: string, options: CreateOptions): Prom
   }
 
   // 12. Update config with running status
-  const updatedConfig = await statusChecker.updateServerStatus(config);
+  let updatedConfig = await statusChecker.updateServerStatus(config);
 
-  // 13. Save server config
+  // 13. Parse Metal (GPU) memory allocation from logs
+  // Wait a few seconds for model to start loading (large models take time)
+  console.log(chalk.dim('Detecting Metal (GPU) memory allocation...'));
+  await new Promise(resolve => setTimeout(resolve, 8000)); // 8 second delay
+  const metalMemoryMB = await parseMetalMemoryFromLog(updatedConfig.stderrPath);
+  if (metalMemoryMB) {
+    updatedConfig = { ...updatedConfig, metalMemoryMB };
+    console.log(chalk.dim(`Metal memory: ${metalMemoryMB.toFixed(0)} MB`));
+  }
+
+  // 14. Save server config
   await stateManager.saveServerConfig(updatedConfig);
 
-  // 14. Display success message
+  // 15. Display success message
   console.log();
   console.log(chalk.green('✅ Server created and started successfully!'));
   console.log();

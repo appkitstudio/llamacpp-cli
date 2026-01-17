@@ -67,23 +67,34 @@ echo -e "${BLUE}Parallel requests: 3${NC}"
 echo -e "${BLUE}Press CTRL-C to stop${NC}"
 echo -e "${MAGENTA}========================================${NC}\n"
 
-# Main loop - continuously send requests
+# Function to count running background jobs
+count_running_jobs() {
+  jobs -r | wc -l | tr -d ' '
+}
+
+# Main loop - maintain exactly 3 concurrent requests at all times
+# Start initial 3 requests
+for i in {1..3}; do
+  PORT=${PORTS[$RANDOM % ${#PORTS[@]}]}
+  PROMPT=${PROMPTS[$RANDOM % ${#PROMPTS[@]}]}
+  ((REQUEST_COUNT++))
+  run_chat "$PORT" "$PROMPT" "$REQUEST_COUNT" &
+done
+
+# Continuously monitor and start new requests as old ones complete
 while true; do
-  # Run 3 requests in parallel
-  for i in {1..3}; do
-    # Randomly select port and prompt
+  # Get count of running background jobs
+  RUNNING=$(count_running_jobs)
+
+  # Start new requests to maintain 3 concurrent
+  while [ "$RUNNING" -lt 3 ]; do
     PORT=${PORTS[$RANDOM % ${#PORTS[@]}]}
     PROMPT=${PROMPTS[$RANDOM % ${#PROMPTS[@]}]}
-
     ((REQUEST_COUNT++))
-
-    # Run in background for parallel execution
     run_chat "$PORT" "$PROMPT" "$REQUEST_COUNT" &
+    RUNNING=$(count_running_jobs)
   done
 
-  # Wait for current batch to complete before starting next
-  wait
-
-  # Small delay between batches to avoid overwhelming the system
-  sleep 2
+  # Small sleep to avoid busy-waiting
+  sleep 0.5
 done

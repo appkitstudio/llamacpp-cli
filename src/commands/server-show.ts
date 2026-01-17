@@ -68,9 +68,16 @@ export async function serverShowCommand(identifier: string): Promise<void> {
     }
 
     if (updatedServer.pid) {
-      const memoryBytes = await getProcessMemory(updatedServer.pid);
-      if (memoryBytes !== null) {
-        console.log(`${chalk.bold('Memory:')}         ${formatBytes(memoryBytes)}`);
+      const cpuMemoryBytes = await getProcessMemory(updatedServer.pid);
+      if (cpuMemoryBytes !== null) {
+        const metalMemoryBytes = updatedServer.metalMemoryMB ? updatedServer.metalMemoryMB * 1024 * 1024 : 0;
+        const totalMemoryBytes = cpuMemoryBytes + metalMemoryBytes;
+
+        if (metalMemoryBytes > 0) {
+          console.log(`${chalk.bold('Memory:')}         ${formatBytes(totalMemoryBytes)} (CPU: ${formatBytes(cpuMemoryBytes)}, GPU: ${formatBytes(metalMemoryBytes)})`);
+        } else {
+          console.log(`${chalk.bold('Memory:')}         ${formatBytes(cpuMemoryBytes)} (CPU only)`);
+        }
       }
     }
   }

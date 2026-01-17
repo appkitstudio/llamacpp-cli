@@ -55,12 +55,14 @@ async function showStaticTable(): Promise<void> {
         ? formatUptime(server.lastStarted)
         : '-';
 
-    // Get memory usage for running servers
+    // Get memory usage for running servers (CPU + Metal GPU memory)
     let memoryText = '-';
     if (server.status === 'running' && server.pid) {
-      const memoryBytes = await getProcessMemory(server.pid);
-      if (memoryBytes !== null) {
-        memoryText = formatBytes(memoryBytes);
+      const cpuMemoryBytes = await getProcessMemory(server.pid);
+      if (cpuMemoryBytes !== null) {
+        const metalMemoryBytes = server.metalMemoryMB ? server.metalMemoryMB * 1024 * 1024 : 0;
+        const totalMemoryBytes = cpuMemoryBytes + metalMemoryBytes;
+        memoryText = formatBytes(totalMemoryBytes);
       }
     }
 
