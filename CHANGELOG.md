@@ -2,33 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
-## [Unreleased]
+## [1.6.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.5.0...v1.6.0) (2026-01-17)
 
-### Bug Fixes
-
-* **monitor:** fix H key toggle in historical view - now properly switches between Recent and Hour modes
-  - Issue: H key would enter Hour mode but not toggle back to Recent mode
-  - Root cause: Monitor view's H key handler was still active in historical view, causing conflicts
-  - Solution: Add `inHistoricalView` flag to prevent monitor's H key handler from firing when in historical view
 
 ### Features
 
-* **monitor:** add historical monitoring with time-series charts
-  - Press `H` from live monitor to view historical metrics
-  - Time-series charts for token generation speed, GPU/CPU usage, memory
-  - **Two view modes:** Toggle with `H` key between Recent View (raw 1-3 min) and Hour View (downsampled full hour)
-  - **Absolute time-aligned downsampling:** Buckets represent fixed, absolute time periods
-    - Bucket boundaries never shift (aligned to round time intervals like minutes)
-    - New samples only affect their own bucket, not the entire chart
-    - Chart remains perfectly stable as data streams in (no shimmer or recalculation)
-    - Bucket max for GPU/CPU/tokens (preserves peaks), bucket mean for memory
-  - Clear chart labels indicate "Peak per bucket" or "Average per bucket" when downsampled
-  - Automatic data collection during monitoring (stored in `~/.llamacpp/history/`)
-  - Multi-server historical view with comparison table
-  - 24-hour data retention with automatic pruning
-  - Charts powered by `asciichart` library for terminal visualization
-  - Summary statistics (avg, max, min, stddev) for all metrics
-  - All percentage graphs (GPU, CPU, Memory) now use consistent 0-100 y-axis scale
+* add full-hour downsampling functions and enhance multi-server monitor UI with dynamic server ID width ([ae2862a](https://github.com/appkitstudio/llamacpp-cli/commit/ae2862acba905cddf60f0e7c30f6a7867391a5e2))
+* add GPU memory tracking to server monitoring ([bc59c6a](https://github.com/appkitstudio/llamacpp-cli/commit/bc59c6a74580e428ab674167146caea47d8a32c1))
+* enhance monitoring functionality with server status updates and improved resource tracking ([45fb833](https://github.com/appkitstudio/llamacpp-cli/commit/45fb833da5efe023a2271e7bd12d780a71474629))
+* enhance multi-server monitor UI with improved navigation and selection indicators ([9e57cfb](https://github.com/appkitstudio/llamacpp-cli/commit/9e57cfb8ce93a2c561981598cf75f0e4ff1a477d))
+* enhance server monitoring with interactive dashboard and improved metrics display ([fba8d79](https://github.com/appkitstudio/llamacpp-cli/commit/fba8d79ee58ecd7ccfe02e319ae7bf5474b591df))
+* implement per-process metrics for historical monitoring accuracy ([cc59df0](https://github.com/appkitstudio/llamacpp-cli/commit/cc59df069775031de1bfacdeb3a462a17610e4eb))
+* improve historical monitoring UI with faster refresh rate and enhanced display elements ([e0ce04b](https://github.com/appkitstudio/llamacpp-cli/commit/e0ce04ba258f6d945a977c39f056ba22cb324c70))
 
 ## [1.5.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.4.1...v1.5.0) (2026-01-13)
 
