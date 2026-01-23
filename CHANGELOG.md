@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.7.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.6.0...v1.7.0) (2026-01-23)
+
+
+### Features
+
+* add log management commands and auto-rotation for server logs ([e670a53](https://github.com/appkitstudio/llamacpp-cli/commit/e670a53a712d04267f06327af730dc2429e4ab43))
+
 ## [1.6.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.5.0...v1.6.0) (2026-01-17)
 
 
