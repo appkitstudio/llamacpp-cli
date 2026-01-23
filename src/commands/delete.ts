@@ -24,20 +24,20 @@ export async function deleteCommand(identifier: string): Promise<void> {
   console.log();
   console.log(chalk.blue(`🗑️  Deleting server ${server.modelName}...`));
 
-  // Stop server if running
+  // Unload service (stops and removes from launchd)
   if (server.status === 'running') {
-    console.log(chalk.dim('Stopping server...'));
-    try {
-      await launchctlManager.stopService(server.label);
-      await launchctlManager.waitForServiceStop(server.label, 5000);
-    } catch (error) {
-      console.log(chalk.yellow('⚠️  Failed to stop server gracefully'));
-    }
+    console.log(chalk.dim('Stopping and unloading service...'));
+  } else {
+    console.log(chalk.dim('Unloading service...'));
   }
-
-  // Unload service
-  console.log(chalk.dim('Unloading launchctl service...'));
-  await launchctlManager.unloadService(server.plistPath);
+  try {
+    await launchctlManager.unloadService(server.plistPath);
+    if (server.status === 'running') {
+      await launchctlManager.waitForServiceStop(server.label, 5000);
+    }
+  } catch (error) {
+    console.log(chalk.yellow('⚠️  Failed to unload service gracefully'));
+  }
 
   // Delete plist
   console.log(chalk.dim('Deleting plist file...'));

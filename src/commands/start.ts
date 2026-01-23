@@ -3,6 +3,7 @@ import { stateManager } from '../lib/state-manager';
 import { launchctlManager } from '../lib/launchctl-manager';
 import { statusChecker } from '../lib/status-checker';
 import { parseMetalMemoryFromLog } from '../utils/file-utils';
+import { autoRotateIfNeeded, formatFileSize } from '../utils/log-utils';
 
 export async function startCommand(identifier: string): Promise<void> {
   // Initialize state manager
@@ -30,28 +31,42 @@ export async function startCommand(identifier: string): Promise<void> {
 
   console.log(chalk.blue(`▶️  Starting ${server.modelName} (port ${server.port})...`));
 
-  // 3. Ensure plist exists (recreate if missing)
+  // 3. Auto-rotate logs if they exceed 100MB
+  try {
+    const result = await autoRotateIfNeeded(server.stdoutPath, server.stderrPath, 100);
+    if (result.rotated) {
+      console.log(chalk.dim('Auto-rotated large log files:'));
+      for (const file of result.files) {
+        console.log(chalk.dim(`  → ${file}`));
+      }
+    }
+  } catch (error) {
+    // Non-fatal, just warn
+    console.log(chalk.yellow(`⚠️  Failed to rotate logs: ${(error as Error).message}`));
+  }
+
+  // 4. Ensure plist exists (recreate if missing)
   try {
     await launchctlManager.createPlist(server);
   } catch (error) {
     // May already exist, that's okay
   }
 
-  // 4. Load service if needed
+  // 5. Load service if needed
   try {
     await launchctlManager.loadService(server.plistPath);
   } catch (error) {
     // May already be loaded, that's okay
   }
 
-  // 5. Start the service
+  // 6. Start the service
   try {
     await launchctlManager.startService(server.label);
   } catch (error) {
     throw new Error(`Failed to start service: ${(error as Error).message}`);
   }
 
-  // 6. Wait for startup
+  // 7. Wait for startup
   console.log(chalk.dim('Waiting for server to start...'));
   const started = await launchctlManager.waitForServiceStart(server.label, 5000);
 
@@ -61,10 +76,10 @@ export async function startCommand(identifier: string): Promise<void> {
     );
   }
 
-  // 7. Update server status
+  // 8. Update server status
   let updatedServer = await statusChecker.updateServerStatus(server);
 
-  // 8. Parse Metal (GPU) memory allocation if not already captured
+  // 9. Parse Metal (GPU) memory allocation if not already captured
   if (!updatedServer.metalMemoryMB) {
     console.log(chalk.dim('Detecting Metal (GPU) memory allocation...'));
     await new Promise(resolve => setTimeout(resolve, 8000)); // 8 second delay
@@ -76,7 +91,7 @@ export async function startCommand(identifier: string): Promise<void> {
     }
   }
 
-  // 9. Display success
+  // 10. Display success
   console.log();
   console.log(chalk.green('✅ Server started successfully!'));
   console.log();

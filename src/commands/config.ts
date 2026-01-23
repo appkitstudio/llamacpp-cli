@@ -3,6 +3,7 @@ import { stateManager } from '../lib/state-manager';
 import { statusChecker } from '../lib/status-checker';
 import { launchctlManager } from '../lib/launchctl-manager';
 import { configGenerator } from '../lib/config-generator';
+import { autoRotateIfNeeded } from '../utils/log-utils';
 
 export interface ConfigUpdateOptions {
   host?: string;
@@ -109,7 +110,6 @@ export async function serverConfigCommand(
   // Unload service if running and restart flag is set (forces plist re-read)
   if (wasRunning && options.restart) {
     console.log(chalk.dim('Stopping server...'));
-    await launchctlManager.stopService(server.label);
     await launchctlManager.unloadService(server.plistPath);
 
     // Wait a moment for clean shutdown
@@ -146,6 +146,20 @@ export async function serverConfigCommand(
 
   // Restart server if it was running and restart flag is set
   if (wasRunning && options.restart) {
+    // Auto-rotate logs if they exceed 100MB
+    try {
+      const result = await autoRotateIfNeeded(updatedConfig.stdoutPath, updatedConfig.stderrPath, 100);
+      if (result.rotated) {
+        console.log(chalk.dim('Auto-rotated large log files:'));
+        for (const file of result.files) {
+          console.log(chalk.dim(`  → ${file}`));
+        }
+      }
+    } catch (error) {
+      // Non-fatal, just warn
+      console.log(chalk.yellow(`⚠️  Failed to rotate logs: ${(error as Error).message}`));
+    }
+
     console.log(chalk.dim('Starting server with new configuration...'));
     await launchctlManager.loadService(updatedConfig.plistPath);
     await launchctlManager.startService(updatedConfig.label);

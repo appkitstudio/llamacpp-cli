@@ -152,7 +152,6 @@ export async function createCommand(model: string, options: CreateOptions): Prom
 
   if (!started) {
     // Clean up if startup fails
-    await launchctlManager.stopService(config.label);
     await launchctlManager.unloadService(config.plistPath);
     await launchctlManager.deletePlist(config.plistPath);
     throw new Error('Server failed to start. Check logs with: llamacpp server logs --errors');

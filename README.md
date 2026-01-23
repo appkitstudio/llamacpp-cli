@@ -77,6 +77,9 @@ llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf
 # View running servers
 llamacpp ps
 
+# View log sizes for all servers
+llamacpp logs
+
 # Monitor all servers (multi-server dashboard)
 llamacpp server monitor
 
@@ -269,6 +272,41 @@ Shows:
 - Memory usage (RAM consumption)
 - Uptime (how long server has been running)
 
+### `llamacpp logs [options]`
+View log sizes for all servers and perform batch log operations.
+
+```bash
+# Show table of log sizes for all servers
+llamacpp logs
+
+# Clear current logs for ALL servers (preserves archives)
+llamacpp logs --clear
+
+# Delete only archived logs for ALL servers (preserves current)
+llamacpp logs --clear-archived
+
+# Clear current + delete ALL archived logs (maximum cleanup)
+llamacpp logs --clear-all
+
+# Rotate ALL server logs with timestamps
+llamacpp logs --rotate
+```
+
+**Displays:**
+- Current stderr size per server
+- Current stdout size per server
+- Archived logs size and count
+- Total log usage per server
+- Grand total across all servers
+
+**Batch Operations:**
+- `--clear` - Truncates all current logs to 0 bytes (archives preserved)
+- `--clear-archived` - Deletes only archived logs (current logs preserved)
+- `--clear-all` - Clears current AND deletes all archives (frees maximum space)
+- `--rotate` - Archives all current logs with timestamps
+
+**Use case:** Quickly see which servers are accumulating large logs, or clean up all logs at once.
+
 ## Server Management
 
 ### `llamacpp server create <model> [options]`
@@ -431,6 +469,18 @@ llamacpp server logs llama-3.2-3b --verbose
 
 # Custom filter pattern
 llamacpp server logs llama-3.2-3b --filter "error|warning"
+
+# Clear log file (truncate to zero bytes)
+llamacpp server logs llama-3.2-3b --clear
+
+# Delete only archived logs (preserves current)
+llamacpp server logs llama-3.2-3b --clear-archived
+
+# Clear current AND delete all archived logs
+llamacpp server logs llama-3.2-3b --clear-all
+
+# Rotate log file with timestamp (preserves old logs)
+llamacpp server logs llama-3.2-3b --rotate
 ```
 
 **Options:**
@@ -441,6 +491,17 @@ llamacpp server logs llama-3.2-3b --filter "error|warning"
 - `--verbose` - Show all messages including debug internals
 - `--filter <pattern>` - Custom grep pattern for filtering
 - `--stdout` - Show stdout instead of stderr (rarely needed)
+- `--clear` - Clear (truncate) log file to zero bytes
+- `--clear-archived` - Delete only archived logs (preserves current logs)
+- `--clear-all` - Clear current logs AND delete all archived logs (frees most space)
+- `--rotate` - Rotate log file with timestamp (e.g., `server.2026-01-22-19-30-00.stderr`)
+
+**Automatic Log Rotation:**
+Logs are automatically rotated when they exceed 100MB during:
+- `llamacpp server start <identifier>` - Rotates before starting
+- `llamacpp server config <identifier> --restart` - Rotates before restarting
+
+Rotated logs are saved with timestamps in the same directory: `~/.llamacpp/logs/`
 
 **Output Formats:**
 
@@ -622,7 +683,12 @@ llamacpp-cli uses macOS launchctl to manage llama-server processes:
 3. Starts the server with `launchctl start`
 4. Monitors status via `launchctl list` and `lsof`
 
-Services are named `com.llama.<model-id>` and persist across reboots.
+Services are named `com.llama.<model-id>`.
+
+**Auto-Restart Behavior:**
+- When you **start** a server, it's registered with launchd and will auto-restart on crash
+- When you **stop** a server, it's unloaded from launchd and stays stopped (no auto-restart)
+- Crashed servers will automatically restart (when loaded)
 
 ## Known Limitations
 

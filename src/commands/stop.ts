@@ -18,11 +18,11 @@ export async function stopCommand(identifier: string): Promise<void> {
 
   console.log(chalk.blue(`⏹️  Stopping ${server.modelName} (port ${server.port})...`));
 
-  // Stop the service
+  // Unload the service (removes from launchd management - won't auto-restart)
   try {
-    await launchctlManager.stopService(server.label);
+    await launchctlManager.unloadService(server.plistPath);
   } catch (error) {
-    throw new Error(`Failed to stop service: ${(error as Error).message}`);
+    throw new Error(`Failed to unload service: ${(error as Error).message}`);
   }
 
   // Wait for clean shutdown

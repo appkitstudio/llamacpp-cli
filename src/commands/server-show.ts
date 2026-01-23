@@ -3,6 +3,8 @@ import { stateManager } from '../lib/state-manager';
 import { statusChecker } from '../lib/status-checker';
 import { formatUptime, formatBytes } from '../utils/format-utils';
 import { getProcessMemory } from '../utils/process-utils';
+import { getFileSize, formatFileSize, getArchivedLogInfo } from '../utils/log-utils';
+import { fileExists } from '../utils/file-utils';
 
 export async function serverShowCommand(identifier: string): Promise<void> {
   // Find the server
@@ -94,6 +96,29 @@ export async function serverShowCommand(identifier: string): Promise<void> {
   console.log(`${chalk.bold('Verbose Logs:')}   ${updatedServer.verbose ? chalk.green('enabled') : chalk.dim('disabled')}`);
   if (updatedServer.customFlags && updatedServer.customFlags.length > 0) {
     console.log(`${chalk.bold('Custom Flags:')}   ${updatedServer.customFlags.join(' ')}`);
+  }
+
+  // Logs section
+  console.log('\n' + '─'.repeat(70));
+  console.log(chalk.bold('Logs:'));
+  console.log('─'.repeat(70));
+
+  // Get current log sizes
+  const stderrSize = (await fileExists(updatedServer.stderrPath))
+    ? await getFileSize(updatedServer.stderrPath)
+    : 0;
+  const stdoutSize = (await fileExists(updatedServer.stdoutPath))
+    ? await getFileSize(updatedServer.stdoutPath)
+    : 0;
+
+  // Get archived log info
+  const archivedInfo = await getArchivedLogInfo(updatedServer.id);
+
+  console.log(`${chalk.bold('Stderr:')}         ${formatFileSize(stderrSize)} (current)`);
+  console.log(`${chalk.bold('Stdout:')}         ${formatFileSize(stdoutSize)} (current)`);
+
+  if (archivedInfo.count > 0) {
+    console.log(`${chalk.bold('Archived:')}       ${formatFileSize(archivedInfo.totalSize)} (${archivedInfo.count} file${archivedInfo.count > 1 ? 's' : ''})`);
   }
 
   // Timestamps section

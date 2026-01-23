@@ -47,21 +47,14 @@ export async function rmCommand(modelIdentifier: string): Promise<void> {
     for (const server of serversUsingModel) {
       console.log(chalk.dim(`  Removing server: ${server.id}`));
 
-      // Stop server if running
-      if (server.status === 'running') {
-        try {
-          await launchctlManager.stopService(server.label);
-          await launchctlManager.waitForServiceStop(server.label, 5000);
-        } catch (error) {
-          console.log(chalk.yellow(`    ⚠️  Failed to stop server gracefully`));
-        }
-      }
-
-      // Unload service
+      // Unload service (stops and removes from launchd)
       try {
         await launchctlManager.unloadService(server.plistPath);
+        if (server.status === 'running') {
+          await launchctlManager.waitForServiceStop(server.label, 5000);
+        }
       } catch (error) {
-        // Ignore errors if service is already unloaded
+        console.log(chalk.yellow(`    ⚠️  Failed to unload service gracefully`));
       }
 
       // Delete plist

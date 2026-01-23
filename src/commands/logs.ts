@@ -6,6 +6,14 @@ import { stateManager } from '../lib/state-manager';
 import { fileExists } from '../utils/file-utils';
 import { execCommand } from '../utils/process-utils';
 import { logParser } from '../utils/log-parser';
+import {
+  getFileSize,
+  formatFileSize,
+  rotateLogFile,
+  clearLogFile,
+  getArchivedLogInfo,
+  deleteArchivedLogs,
+} from '../utils/log-utils';
 
 interface LogsOptions {
   follow?: boolean;
@@ -15,6 +23,10 @@ interface LogsOptions {
   http?: boolean;
   stdout?: boolean;
   filter?: string;
+  clear?: boolean;
+  rotate?: boolean;
+  clearArchived?: boolean;
+  clearAll?: boolean;
 }
 
 export async function logsCommand(identifier: string, options: LogsOptions): Promise<void> {
@@ -27,6 +39,96 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
   // Determine log file (default to stderr where verbose logs go)
   const logPath = options.stdout ? server.stdoutPath : server.stderrPath;
   const logType = options.stdout ? 'stdout' : 'stderr';
+
+  // Handle --clear-archived option (deletes only archived logs)
+  if (options.clearArchived) {
+    const archivedInfo = await deleteArchivedLogs(server.id);
+
+    if (archivedInfo.count === 0) {
+      console.log(chalk.yellow(`⚠️  No archived logs found for ${server.modelName}`));
+      console.log(chalk.dim(`   Archived logs are created via --rotate or automatic rotation`));
+      return;
+    }
+
+    console.log(chalk.green(`✅ Deleted archived logs for ${server.modelName}`));
+    console.log(chalk.dim(`   Files deleted: ${archivedInfo.count}`));
+    console.log(chalk.dim(`   Space freed: ${formatFileSize(archivedInfo.totalSize)}`));
+    console.log(chalk.dim(`   Current logs preserved`));
+    return;
+  }
+
+  // Handle --clear-all option (clears both current and archived logs)
+  if (options.clearAll) {
+    let totalFreed = 0;
+    let currentSize = 0;
+    let archivedSize = 0;
+
+    // Clear current stderr
+    if (await fileExists(server.stderrPath)) {
+      currentSize += await getFileSize(server.stderrPath);
+      await clearLogFile(server.stderrPath);
+    }
+
+    // Clear current stdout
+    if (await fileExists(server.stdoutPath)) {
+      currentSize += await getFileSize(server.stdoutPath);
+      await clearLogFile(server.stdoutPath);
+    }
+
+    // Delete all archived logs
+    const archivedInfo = await deleteArchivedLogs(server.id);
+    archivedSize = archivedInfo.totalSize;
+
+    totalFreed = currentSize + archivedSize;
+
+    console.log(chalk.green(`✅ Cleared all logs for ${server.modelName}`));
+    if (currentSize > 0) {
+      console.log(chalk.dim(`   Current logs: ${formatFileSize(currentSize)}`));
+    }
+    if (archivedSize > 0) {
+      console.log(chalk.dim(`   Archived logs: ${formatFileSize(archivedSize)} (${archivedInfo.count} file${archivedInfo.count > 1 ? 's' : ''})`));
+    }
+    console.log(chalk.dim(`   Total freed: ${formatFileSize(totalFreed)}`));
+    return;
+  }
+
+  // Handle --clear option
+  if (options.clear) {
+    if (!(await fileExists(logPath))) {
+      console.log(chalk.yellow(`⚠️  No ${logType} found for ${server.modelName}`));
+      console.log(chalk.dim(`   Log file does not exist: ${logPath}`));
+      return;
+    }
+
+    const sizeBefore = await getFileSize(logPath);
+    await clearLogFile(logPath);
+
+    console.log(chalk.green(`✅ Cleared ${logType} for ${server.modelName}`));
+    console.log(chalk.dim(`   Freed: ${formatFileSize(sizeBefore)}`));
+    console.log(chalk.dim(`   ${logPath}`));
+    return;
+  }
+
+  // Handle --rotate option
+  if (options.rotate) {
+    if (!(await fileExists(logPath))) {
+      console.log(chalk.yellow(`⚠️  No ${logType} found for ${server.modelName}`));
+      console.log(chalk.dim(`   Log file does not exist: ${logPath}`));
+      return;
+    }
+
+    try {
+      const archivedPath = await rotateLogFile(logPath);
+      const size = await getFileSize(archivedPath);
+
+      console.log(chalk.green(`✅ Rotated ${logType} for ${server.modelName}`));
+      console.log(chalk.dim(`   Archived: ${formatFileSize(size)}`));
+      console.log(chalk.dim(`   → ${archivedPath}`));
+    } catch (error) {
+      throw new Error(`Failed to rotate log: ${(error as Error).message}`);
+    }
+    return;
+  }
 
   // Check if log file exists
   if (!(await fileExists(logPath))) {
@@ -64,6 +166,16 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
 
   console.log(chalk.blue(`📋 Logs for ${server.modelName} (${logType}${filterDesc})`));
   console.log(chalk.dim(`   ${logPath}`));
+
+  // Show log size information
+  const currentSize = await getFileSize(logPath);
+  const archivedInfo = await getArchivedLogInfo(server.id);
+
+  if (archivedInfo.count > 0) {
+    console.log(chalk.dim(`   Current: ${formatFileSize(currentSize)} | Archived: ${formatFileSize(archivedInfo.totalSize)} (${archivedInfo.count} file${archivedInfo.count > 1 ? 's' : ''})`));
+  } else {
+    console.log(chalk.dim(`   Current: ${formatFileSize(currentSize)}`));
+  }
 
   // Show subtle note if verbose logging is not enabled
   if (!server.verbose && !options.verbose && !options.errors && !options.http && !options.filter) {
@@ -140,9 +252,17 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
       // Compact mode: read file and parse
       try {
         // Use large multiplier to account for verbose debug output between requests
-        const command = `tail -n ${lines * 100} "${logPath}" | grep -E "log_server_r"`;
+        // Add || true to prevent grep from failing when no matches found
+        const command = `tail -n ${lines * 100} "${logPath}" | grep -E "log_server_r" || true`;
         const output = await execCommand(command);
         const logLines = output.split('\n').filter((l) => l.trim());
+
+        if (logLines.length === 0) {
+          console.log(chalk.dim('No HTTP request logs in compact format.'));
+          console.log(chalk.dim('The server may be starting up, or only simple GET requests have been made.'));
+          console.log(chalk.dim('\nTip: Use --http to see raw HTTP logs, or --verbose for all server logs.'));
+          return;
+        }
 
         const compactLines: string[] = [];
         for (const line of logLines) {
@@ -155,6 +275,14 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
         logParser.flush((compactLine) => {
           compactLines.push(compactLine);
         });
+
+        // Check if we got any parsed output
+        if (compactLines.length === 0) {
+          console.log(chalk.dim('HTTP request logs found, but could not parse in compact format.'));
+          console.log(chalk.dim('This usually happens with simple GET requests (health checks, slots, etc.).'));
+          console.log(chalk.dim('\nTip: Use --http to see raw HTTP logs instead.'));
+          return;
+        }
 
         // Show only the last N compact lines
         const limitedLines = compactLines.slice(-lines);
@@ -169,13 +297,21 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
 
         if (filterPattern) {
           // Use tail piped to grep
-          command = `tail -n ${lines} "${logPath}" | grep -E "${filterPattern}"`;
+          // Add || true to prevent grep from failing when no matches found
+          command = `tail -n ${lines} "${logPath}" | grep -E "${filterPattern}" || true`;
         } else {
           // No filter
           command = `tail -n ${lines} "${logPath}"`;
         }
 
         const output = await execCommand(command);
+
+        if (filterPattern && output.trim() === '') {
+          console.log(chalk.dim(`No logs matching pattern: ${filterPattern}`));
+          console.log(chalk.dim('\nTip: Try --verbose to see all logs, or adjust your filter pattern.'));
+          return;
+        }
+
         console.log(output);
       } catch (error) {
         throw new Error(`Failed to read logs: ${(error as Error).message}`);

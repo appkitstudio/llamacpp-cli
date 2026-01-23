@@ -12,6 +12,7 @@ import { deleteCommand } from './commands/delete';
 import { pullCommand } from './commands/pull';
 import { rmCommand } from './commands/rm';
 import { logsCommand } from './commands/logs';
+import { logsAllCommand } from './commands/logs-all';
 import { searchCommand } from './commands/search';
 import { showCommand } from './commands/show';
 import { serverShowCommand } from './commands/server-show';
@@ -25,7 +26,7 @@ const program = new Command();
 program
   .name('llamacpp')
   .description('CLI tool to manage local llama.cpp servers on macOS')
-  .version(packageJson.version);
+  .version(packageJson.version, '-v, --version', 'Output the version number');
 
 // List models
 program
@@ -48,6 +49,23 @@ program
   .action(async (identifier?: string, options?: { table?: boolean }) => {
     try {
       await psCommand(identifier, options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// View all server logs
+program
+  .command('logs')
+  .description('View log sizes for all servers (with batch operations)')
+  .option('--clear', 'Clear current logs for all servers')
+  .option('--clear-archived', 'Delete only archived logs for all servers')
+  .option('--clear-all', 'Clear current + delete archived logs for all servers')
+  .option('--rotate', 'Rotate logs for all servers with timestamps')
+  .action(async (options) => {
+    try {
+      await logsAllCommand(options);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);
@@ -261,6 +279,10 @@ server
   .option('--verbose', 'Show all messages including debug internals')
   .option('--filter <pattern>', 'Custom grep pattern for filtering')
   .option('--stdout', 'Show stdout instead of stderr (rarely needed)')
+  .option('--clear', 'Clear (truncate) log file to zero bytes')
+  .option('--clear-archived', 'Delete only archived logs (preserves current logs)')
+  .option('--clear-all', 'Clear current logs AND delete all archived logs')
+  .option('--rotate', 'Rotate log file with timestamp (preserves old logs)')
   .action(async (identifier: string, options) => {
     try {
       await logsCommand(identifier, options);
