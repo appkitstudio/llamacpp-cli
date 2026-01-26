@@ -356,6 +356,9 @@ llamacpp server show llama-3-2-3b       # By server ID
 Update server configuration parameters without recreating the server.
 
 ```bash
+# Change model while keeping all other settings
+llamacpp server config llama-3.2-3b --model llama-3.2-1b-instruct-q4_k_m.gguf --restart
+
 # Update context size and restart
 llamacpp server config llama-3.2-3b --ctx-size 8192 --restart
 
@@ -373,6 +376,7 @@ llamacpp server config llama-3.2-3b --threads 8 --ctx-size 16384 --gpu-layers 40
 ```
 
 **Options:**
+- `-m, --model <filename>` - Update model (filename or path)
 - `-h, --host <address>` - Update bind address (`127.0.0.1` for localhost, `0.0.0.0` for remote access)
 - `-t, --threads <number>` - Update thread count
 - `-c, --ctx-size <number>` - Update context size

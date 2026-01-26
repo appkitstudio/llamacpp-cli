@@ -193,6 +193,7 @@ server
   .command('config')
   .description('Update server configuration parameters')
   .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .option('-m, --model <filename>', 'Update model (filename or path)')
   .option('-h, --host <address>', 'Update bind address (127.0.0.1 for localhost, 0.0.0.0 for remote access)')
   .option('-t, --threads <number>', 'Update thread count', parseInt)
   .option('-c, --ctx-size <number>', 'Update context size', parseInt)
