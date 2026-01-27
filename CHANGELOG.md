@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.9.0] (2026-01-26)
+
+### Features
+
+* **router**: add unified router endpoint for automatic model routing ([#TBD])
+
+  The router provides a single OpenAI-compatible endpoint that automatically routes requests to the correct backend server based on model name. Perfect for LLM clients that don't support multiple endpoints.
+
+  **Key features:**
+  - Single endpoint (default: http://localhost:9100) for all models
+  - Automatic routing based on `model` field in requests
+  - Zero-config model discovery from running servers
+  - Aggregated `/v1/models` endpoint
+  - Native Node.js HTTP proxy (no external dependencies)
+  - Streaming support for chat completions
+  - Comprehensive error handling (404, 503, 502, 504)
+
+  **Commands:**
+  - `llamacpp router start` - Start router service
+  - `llamacpp router stop` - Stop router service
+  - `llamacpp router status` - Show status and available models
+  - `llamacpp router restart` - Restart router
+  - `llamacpp router config` - Update configuration (port, host, timeout, health-interval)
+
+  **Usage:**
+  ```python
+  from openai import OpenAI
+
+  client = OpenAI(base_url="http://localhost:9100/v1", api_key="not-needed")
+  response = client.chat.completions.create(
+      model="llama-3.2-3b-instruct-q4_k_m.gguf",
+      messages=[{"role": "user", "content": "Hello!"}]
+  )
+  ```
+
 ## [1.7.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.6.0...v1.7.0) (2026-01-23)
 
 

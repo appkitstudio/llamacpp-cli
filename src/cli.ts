@@ -19,6 +19,11 @@ import { serverShowCommand } from './commands/server-show';
 import { serverConfigCommand } from './commands/config';
 import { configGlobalCommand } from './commands/config-global';
 import { monitorCommand } from './commands/monitor';
+import { routerStartCommand } from './commands/router/start';
+import { routerStopCommand } from './commands/router/stop';
+import { routerStatusCommand } from './commands/router/status';
+import { routerRestartCommand } from './commands/router/restart';
+import { routerConfigCommand } from './commands/router/config';
 import packageJson from '../package.json';
 
 const program = new Command();
@@ -302,6 +307,81 @@ server
       console.log(chalk.yellow('⚠️  The "monitor" command is deprecated and will be removed in a future version.'));
       console.log(chalk.dim('   Please use "llamacpp ps" instead for the same functionality.\n'));
       await monitorCommand(identifier);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Router management commands
+const router = program
+  .command('router')
+  .description('Manage the unified router endpoint');
+
+// Start router
+router
+  .command('start')
+  .description('Start the router service')
+  .action(async () => {
+    try {
+      await routerStartCommand();
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Stop router
+router
+  .command('stop')
+  .description('Stop the router service')
+  .action(async () => {
+    try {
+      await routerStopCommand();
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Show router status
+router
+  .command('status')
+  .description('Show router status and configuration')
+  .action(async () => {
+    try {
+      await routerStatusCommand();
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Restart router
+router
+  .command('restart')
+  .description('Restart the router service')
+  .action(async () => {
+    try {
+      await routerRestartCommand();
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Configure router
+router
+  .command('config')
+  .description('Update router configuration')
+  .option('-p, --port <number>', 'Update port number', parseInt)
+  .option('-h, --host <address>', 'Update bind address')
+  .option('--timeout <ms>', 'Update request timeout (milliseconds)', parseInt)
+  .option('--health-interval <ms>', 'Update health check interval (milliseconds)', parseInt)
+  .option('-r, --restart', 'Automatically restart router if running')
+  .action(async (options) => {
+    try {
+      await routerConfigCommand(options);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);

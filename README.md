@@ -12,6 +12,7 @@ CLI tool to manage local llama.cpp servers on macOS. Provides an Ollama-like exp
 ## Features
 
 - 🚀 **Easy server management** - Start, stop, and monitor llama.cpp servers
+- 🔀 **Unified router** - Single OpenAI-compatible endpoint for all models with automatic routing
 - 🤖 **Model downloads** - Pull GGUF models from Hugging Face
 - ⚙️ **Smart defaults** - Auto-configure threads, context size, and GPU layers based on model size
 - 🔌 **Auto port assignment** - Automatically find available ports (9000-9999)
@@ -139,6 +140,85 @@ curl http://localhost:9000/health
 ```
 
 The server is fully compatible with OpenAI's API format, so you can use it with any OpenAI-compatible client library.
+
+## Router (Unified Endpoint)
+
+The router provides a single OpenAI-compatible endpoint that automatically routes requests to the correct backend server based on the model name. This is perfect for LLM clients that don't support multiple endpoints.
+
+### Quick Start
+
+```bash
+# Start the router (default port: 9100)
+llamacpp router start
+
+# Configure your LLM client to use http://localhost:9100
+# The router automatically routes requests to the correct server based on model name
+```
+
+### Commands
+
+```bash
+llamacpp router start       # Start the router service
+llamacpp router stop        # Stop the router service
+llamacpp router status      # Show router status and available models
+llamacpp router restart     # Restart the router
+llamacpp router config      # Update router settings (--port, --host, --timeout, --health-interval)
+```
+
+### Usage Example
+
+The router acts as a single endpoint for all your models:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:9100/v1",
+    api_key="not-needed"  # API key not required for local servers
+)
+
+# Router automatically routes to the correct server based on model name
+response = client.chat.completions.create(
+    model="llama-3.2-3b-instruct-q4_k_m.gguf",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+### Supported Endpoints
+
+- `POST /v1/chat/completions` - Chat completions (routes to correct backend)
+- `POST /v1/embeddings` - Text embeddings (routes to correct backend)
+- `GET /v1/models` - List all available models from running servers
+- `GET /health` - Router health check
+
+### Configuration
+
+The router can be configured with:
+
+```bash
+# Change port
+llamacpp router config --port 9200 --restart
+
+# Update request timeout (ms)
+llamacpp router config --timeout 60000 --restart
+
+# Update health check interval (ms)
+llamacpp router config --health-interval 3000 --restart
+
+# Change bind address (for remote access)
+llamacpp router config --host 0.0.0.0 --restart
+```
+
+**Note:** Changes require a restart to take effect. Use `--restart` flag to apply immediately.
+
+### How It Works
+
+1. Router receives request with `model` field
+2. Finds running server configured for that model
+3. Proxies request to backend server
+4. Streams response back to client
+
+If the requested model's server is not running, the router returns a 503 error with a helpful message.
 
 ### Example Output
 
