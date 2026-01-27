@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.9.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.8.0...v1.9.0) (2026-01-27)
+
+
+### Features
+
+* add unified router endpoint for automatic model routing ([6db0892](https://github.com/appkitstudio/llamacpp-cli/commit/6db0892adca753c021c7d9be6b69231c983170a1))
+
 ## [1.9.0] (2026-01-26)
 
 ### Features
