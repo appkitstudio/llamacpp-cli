@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.10.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.9.0...v1.10.0) (2026-02-02)
+
+
+### Features
+
+* add Config screen TUI for editing server configuration ([0555eb8](https://github.com/appkitstudio/llamacpp-cli/commit/0555eb87b25fd9c0496ddf04bf59433ae0e9dc48))
+* add Models management TUI for displaying and deleting models ([45b312f](https://github.com/appkitstudio/llamacpp-cli/commit/45b312f160e476a8effd0ad92a7f88e2b533f9c5))
+* add splash screen with ASCII logo on TUI startup ([9a2bbba](https://github.com/appkitstudio/llamacpp-cli/commit/9a2bbbac80c8736548a71d38230a69b3745198ea))
+* add Start/Stop controls and UI improvements to TUI ([2409c8e](https://github.com/appkitstudio/llamacpp-cli/commit/2409c8e283f37050f2b4faccbaef82bf6db2ac39))
+* enhance TUI with interactive dashboard and deprecate old commands ([464c224](https://github.com/appkitstudio/llamacpp-cli/commit/464c224aefc2592442f80e72a076ec792a9d36dc))
+
+
+### Code Refactoring
+
+* simplify TUI code for clarity and maintainability ([2b50d52](https://github.com/appkitstudio/llamacpp-cli/commit/2b50d5288b2ecd5bed4619518f50d74bd43c6b76))
+
 ## [1.9.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.8.0...v1.9.0) (2026-01-27)
 
 
