@@ -21,4 +21,5 @@ export interface RouterConfig {
   // Router settings
   healthCheckInterval: number;  // ms between health checks (default: 5000)
   requestTimeout: number;        // ms for backend requests (default: 120000)
+  verbose: boolean;              // Enable verbose logging to file (default: false)
 }

@@ -6,6 +6,7 @@ interface ConfigOptions {
   host?: string;
   timeout?: number;
   healthInterval?: number;
+  verbose?: boolean;
   restart?: boolean;
 }
 
@@ -18,9 +19,9 @@ export async function routerConfigCommand(options: ConfigOptions): Promise<void>
     }
 
     // Check if any options were provided
-    const hasOptions = options.port || options.host || options.timeout || options.healthInterval;
+    const hasOptions = options.port || options.host || options.timeout || options.healthInterval || options.verbose !== undefined;
     if (!hasOptions) {
-      throw new Error('No configuration options provided. Use --port, --host, --timeout, or --health-interval');
+      throw new Error('No configuration options provided. Use --port, --host, --timeout, --health-interval, or --verbose');
     }
 
     const isRunning = config.status === 'running';
@@ -53,6 +54,12 @@ export async function routerConfigCommand(options: ConfigOptions): Promise<void>
     if (options.healthInterval !== undefined) {
       changes.push(`Health Check Interval: ${config.healthCheckInterval}ms → ${options.healthInterval}ms`);
       updates.healthCheckInterval = options.healthInterval;
+    }
+
+    if (options.verbose !== undefined) {
+      const verboseStr = (val: boolean) => val ? 'enabled' : 'disabled';
+      changes.push(`Verbose Logging: ${verboseStr(config.verbose)} → ${verboseStr(options.verbose)}`);
+      updates.verbose = options.verbose;
     }
 
     // Display changes

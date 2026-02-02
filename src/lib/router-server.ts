@@ -8,6 +8,7 @@ import * as path from 'path';
 import { RouterConfig } from '../types/router-config';
 import { ServerConfig } from '../types/server-config';
 import { readJson, fileExists, getConfigDir, getServersDir } from '../utils/file-utils';
+import { RouterLogger, RequestTimer, RouterLogEntry } from './router-logger';
 
 interface ErrorResponse {
   error: string;
@@ -32,6 +33,7 @@ interface ModelsResponse {
 class RouterServer {
   private config!: RouterConfig;
   private server!: http.Server;
+  private logger!: RouterLogger;
 
   async initialize(): Promise<void> {
     // Load router config
@@ -40,6 +42,12 @@ class RouterServer {
       throw new Error('Router configuration not found');
     }
     this.config = await readJson<RouterConfig>(configPath);
+
+    // Initialize logger with verbose setting
+    this.logger = new RouterLogger(this.config.verbose);
+
+    // Rotate log file if needed
+    await this.logger.rotateIfNeeded();
 
     // Create HTTP server
     this.server = http.createServer(async (req, res) => {
@@ -77,9 +85,6 @@ class RouterServer {
    * Main request handler
    */
   private async handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    // Log request
-    console.error(`[Router] ${req.method} ${req.url}`);
-
     // CORS headers
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -150,82 +155,145 @@ class RouterServer {
    * Chat completions endpoint - route to backend server
    */
   private async handleChatCompletions(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    // Parse request body
-    const body = await this.readBody(req);
-    let requestData: any;
+    const timer = new RequestTimer();
+    let modelName = 'unknown';
+    let statusCode = 500;
+    let errorMsg: string | undefined;
+    let promptPreview: string | undefined;
+
     try {
-      requestData = JSON.parse(body);
+      // Parse request body
+      const body = await this.readBody(req);
+      let requestData: any;
+      try {
+        requestData = JSON.parse(body);
+      } catch (error) {
+        statusCode = 400;
+        errorMsg = 'Invalid JSON in request body';
+        this.sendError(res, statusCode, 'Bad Request', errorMsg);
+        await this.logRequest(modelName, '/v1/chat/completions', statusCode, timer.elapsed(), errorMsg);
+        return;
+      }
+
+      // Extract model name and prompt preview
+      modelName = requestData.model || 'unknown';
+      promptPreview = this.extractPromptPreview(requestData);
+
+      if (!requestData.model) {
+        statusCode = 400;
+        errorMsg = 'Missing "model" field in request';
+        this.sendError(res, statusCode, 'Bad Request', errorMsg);
+        await this.logRequest(modelName, '/v1/chat/completions', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+        return;
+      }
+
+      // Find server for model
+      const server = await this.findServerForModel(modelName);
+      if (!server) {
+        statusCode = 404;
+        errorMsg = `No server found for model: ${modelName}`;
+        this.sendError(res, statusCode, 'Not Found', errorMsg);
+        await this.logRequest(modelName, '/v1/chat/completions', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+        return;
+      }
+
+      if (server.status !== 'running') {
+        statusCode = 503;
+        errorMsg = `Server for model "${modelName}" is not running`;
+        this.sendError(res, statusCode, 'Service Unavailable', errorMsg);
+        await this.logRequest(modelName, '/v1/chat/completions', statusCode, timer.elapsed(), errorMsg, `${server.host}:${server.port}`, promptPreview);
+        return;
+      }
+
+      // Proxy request to backend
+      const backendUrl = `http://${server.host}:${server.port}/v1/chat/completions`;
+      await this.proxyRequest(backendUrl, requestData, req, res);
+
+      // Log success
+      statusCode = 200;
+      await this.logRequest(modelName, '/v1/chat/completions', statusCode, timer.elapsed(), undefined, `${server.host}:${server.port}`, promptPreview);
     } catch (error) {
-      this.sendError(res, 400, 'Bad Request', 'Invalid JSON in request body');
-      return;
+      errorMsg = (error as Error).message;
+      await this.logRequest(modelName, '/v1/chat/completions', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+      throw error;
     }
-
-    // Extract model name
-    const modelName = requestData.model;
-    if (!modelName) {
-      this.sendError(res, 400, 'Bad Request', 'Missing "model" field in request');
-      return;
-    }
-
-    // Find server for model
-    const server = await this.findServerForModel(modelName);
-    if (!server) {
-      this.sendError(res, 404, 'Not Found', `No server found for model: ${modelName}`);
-      return;
-    }
-
-    if (server.status !== 'running') {
-      this.sendError(res, 503, 'Service Unavailable', `Server for model "${modelName}" is not running`);
-      return;
-    }
-
-    // Proxy request to backend
-    const backendUrl = `http://${server.host}:${server.port}/v1/chat/completions`;
-    await this.proxyRequest(backendUrl, requestData, req, res);
   }
 
   /**
    * Embeddings endpoint - route to backend server
    */
   private async handleEmbeddings(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    // Parse request body
-    const body = await this.readBody(req);
-    let requestData: any;
+    const timer = new RequestTimer();
+    let modelName = 'unknown';
+    let statusCode = 500;
+    let errorMsg: string | undefined;
+    let promptPreview: string | undefined;
+
     try {
-      requestData = JSON.parse(body);
+      // Parse request body
+      const body = await this.readBody(req);
+      let requestData: any;
+      try {
+        requestData = JSON.parse(body);
+      } catch (error) {
+        statusCode = 400;
+        errorMsg = 'Invalid JSON in request body';
+        this.sendError(res, statusCode, 'Bad Request', errorMsg);
+        await this.logRequest(modelName, '/v1/embeddings', statusCode, timer.elapsed(), errorMsg);
+        return;
+      }
+
+      // Extract model name and prompt preview
+      modelName = requestData.model || 'unknown';
+      promptPreview = this.extractPromptPreview(requestData);
+
+      if (!requestData.model) {
+        statusCode = 400;
+        errorMsg = 'Missing "model" field in request';
+        this.sendError(res, statusCode, 'Bad Request', errorMsg);
+        await this.logRequest(modelName, '/v1/embeddings', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+        return;
+      }
+
+      // Find server for model
+      const server = await this.findServerForModel(modelName);
+      if (!server) {
+        statusCode = 404;
+        errorMsg = `No server found for model: ${modelName}`;
+        this.sendError(res, statusCode, 'Not Found', errorMsg);
+        await this.logRequest(modelName, '/v1/embeddings', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+        return;
+      }
+
+      if (server.status !== 'running') {
+        statusCode = 503;
+        errorMsg = `Server for model "${modelName}" is not running`;
+        this.sendError(res, statusCode, 'Service Unavailable', errorMsg);
+        await this.logRequest(modelName, '/v1/embeddings', statusCode, timer.elapsed(), errorMsg, `${server.host}:${server.port}`, promptPreview);
+        return;
+      }
+
+      // Check if server has embeddings enabled
+      if (!server.embeddings) {
+        statusCode = 400;
+        errorMsg = `Server for model "${modelName}" does not have embeddings enabled`;
+        this.sendError(res, statusCode, 'Bad Request', errorMsg);
+        await this.logRequest(modelName, '/v1/embeddings', statusCode, timer.elapsed(), errorMsg, `${server.host}:${server.port}`, promptPreview);
+        return;
+      }
+
+      // Proxy request to backend
+      const backendUrl = `http://${server.host}:${server.port}/v1/embeddings`;
+      await this.proxyRequest(backendUrl, requestData, req, res);
+
+      // Log success
+      statusCode = 200;
+      await this.logRequest(modelName, '/v1/embeddings', statusCode, timer.elapsed(), undefined, `${server.host}:${server.port}`, promptPreview);
     } catch (error) {
-      this.sendError(res, 400, 'Bad Request', 'Invalid JSON in request body');
-      return;
+      errorMsg = (error as Error).message;
+      await this.logRequest(modelName, '/v1/embeddings', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+      throw error;
     }
-
-    // Extract model name
-    const modelName = requestData.model;
-    if (!modelName) {
-      this.sendError(res, 400, 'Bad Request', 'Missing "model" field in request');
-      return;
-    }
-
-    // Find server for model
-    const server = await this.findServerForModel(modelName);
-    if (!server) {
-      this.sendError(res, 404, 'Not Found', `No server found for model: ${modelName}`);
-      return;
-    }
-
-    if (server.status !== 'running') {
-      this.sendError(res, 503, 'Service Unavailable', `Server for model "${modelName}" is not running`);
-      return;
-    }
-
-    // Check if server has embeddings enabled
-    if (!server.embeddings) {
-      this.sendError(res, 400, 'Bad Request', `Server for model "${modelName}" does not have embeddings enabled`);
-      return;
-    }
-
-    // Proxy request to backend
-    const backendUrl = `http://${server.host}:${server.port}/v1/embeddings`;
-    await this.proxyRequest(backendUrl, requestData, req, res);
   }
 
   /**
@@ -340,6 +408,69 @@ class RouterServer {
     } catch (error) {
       console.error('[Router] Failed to read servers directory:', error);
       return [];
+    }
+  }
+
+  /**
+   * Helper method to log a request
+   */
+  private async logRequest(
+    model: string,
+    endpoint: string,
+    statusCode: number,
+    durationMs: number,
+    error?: string,
+    backend?: string,
+    prompt?: string
+  ): Promise<void> {
+    const entry: RouterLogEntry = {
+      timestamp: RequestTimer.now(),
+      model,
+      endpoint,
+      method: 'POST',
+      status: statusCode >= 200 && statusCode < 300 ? 'success' : 'error',
+      statusCode,
+      durationMs,
+      error,
+      backend,
+      prompt,
+    };
+
+    await this.logger.logRequest(entry);
+  }
+
+  /**
+   * Extract prompt preview from request data (first 50 chars)
+   */
+  private extractPromptPreview(requestData: any): string | undefined {
+    try {
+      // For chat completions, get the last user message
+      if (requestData.messages && Array.isArray(requestData.messages)) {
+        const lastUserMessage = [...requestData.messages]
+          .reverse()
+          .find((msg: any) => msg.role === 'user');
+
+        if (lastUserMessage?.content) {
+          const content = typeof lastUserMessage.content === 'string'
+            ? lastUserMessage.content
+            : JSON.stringify(lastUserMessage.content);
+          return content.substring(0, 50).replace(/\n/g, ' ');
+        }
+      }
+
+      // For embeddings, get the input text
+      if (requestData.input) {
+        const input = typeof requestData.input === 'string'
+          ? requestData.input
+          : Array.isArray(requestData.input)
+          ? requestData.input[0]
+          : JSON.stringify(requestData.input);
+        return input.substring(0, 50).replace(/\n/g, ' ');
+      }
+
+      return undefined;
+    } catch {
+      return undefined;
     }
   }
 

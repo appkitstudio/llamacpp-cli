@@ -12,8 +12,9 @@ CLI tool to manage local llama.cpp servers on macOS. Provides an Ollama-like exp
 ## Features
 
 - 🚀 **Easy server management** - Start, stop, and monitor llama.cpp servers
-- 🔀 **Unified router** - Single OpenAI-compatible endpoint for all models with automatic routing
+- 🔀 **Unified router** - Single OpenAI-compatible endpoint for all models with automatic routing and request logging
 - 🤖 **Model downloads** - Pull GGUF models from Hugging Face
+- 📦 **Models Management TUI** - Browse, search, and delete models without leaving the TUI. Search HuggingFace, download with progress tracking, manage local models
 - ⚙️ **Smart defaults** - Auto-configure threads, context size, and GPU layers based on model size
 - 🔌 **Auto port assignment** - Automatically find available ports (9000-9999)
 - 📊 **Real-time monitoring TUI** - Multi-server dashboard with drill-down details, live GPU/CPU/memory metrics, token generation speeds, and animated loading states
@@ -75,8 +76,9 @@ llamacpp ls
 # Create and start a server (auto-assigns port, uses smart defaults)
 llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf
 
-# View running servers
+# View running servers (TUI with Models Management)
 llamacpp ps
+# Press 'M' to access Models Management TUI
 
 # View log sizes for all servers
 llamacpp logs
@@ -162,7 +164,8 @@ llamacpp router start       # Start the router service
 llamacpp router stop        # Stop the router service
 llamacpp router status      # Show router status and available models
 llamacpp router restart     # Restart the router
-llamacpp router config      # Update router settings (--port, --host, --timeout, --health-interval)
+llamacpp router config      # Update router settings (--port, --host, --timeout, --health-interval, --verbose)
+llamacpp router logs        # View router logs (with --follow, --verbose, --clear options)
 ```
 
 ### Usage Example
@@ -207,9 +210,89 @@ llamacpp router config --health-interval 3000 --restart
 
 # Change bind address (for remote access)
 llamacpp router config --host 0.0.0.0 --restart
+
+# Enable verbose logging (saves detailed JSON logs)
+llamacpp router config --verbose true --restart
+
+# Disable verbose logging
+llamacpp router config --verbose false --restart
 ```
 
 **Note:** Changes require a restart to take effect. Use `--restart` flag to apply immediately.
+
+### Logging
+
+The router uses separate log streams for different purposes (nginx-style):
+
+| Log File | Purpose | Content |
+|----------|---------|---------|
+| `router.stdout` | Request activity | Model routing, status codes, timing, prompts |
+| `router.stderr` | System messages | Startup, shutdown, errors, proxy failures |
+| `router.log` | Structured JSON | Detailed entries for programmatic parsing (verbose mode) |
+
+**View recent logs:**
+```bash
+# Show activity logs (default - stdout)
+llamacpp router logs
+
+# Show system logs (errors, startup messages)
+llamacpp router logs --stderr
+
+# Follow activity in real-time
+llamacpp router logs --follow
+
+# Show last 10 lines
+llamacpp router logs --lines 10
+```
+
+**Log formats:**
+
+Activity logs (stdout):
+```
+200 POST /v1/chat/completions → llama-3.2-3b-instruct-q4_k_m.gguf (127.0.0.1:9001) 1234ms | "What is..."
+404 POST /v1/chat/completions → unknown-model 3ms | "test" | Error: No server found
+```
+
+System logs (stderr):
+```
+[Router] Listening on http://127.0.0.1:9100
+[Router] PID: 12345
+[Router] Proxy request failed: ECONNREFUSED
+```
+
+Verbose JSON logs (router.log) - enable with `--verbose true`:
+```bash
+llamacpp router logs --verbose
+```
+
+**Log management:**
+```bash
+# Clear activity log
+llamacpp router logs --clear
+
+# Clear all router logs (stdout, stderr, verbose)
+llamacpp router logs --clear-all
+
+# Rotate log files with timestamp
+llamacpp router logs --rotate
+
+# View system logs instead of activity
+llamacpp router logs --stderr
+```
+
+**What's logged (activity):**
+- ✅ Model name used
+- ✅ HTTP status code (color-coded)
+- ✅ Request duration (ms)
+- ✅ Backend server (host:port)
+- ✅ First 50 chars of prompt
+- ✅ Error messages (if failed)
+
+**Verbose mode benefits:**
+- Detailed JSON logs for LLM/script parsing
+- Stored in `~/.llamacpp/logs/router.log`
+- Automatic rotation when exceeding 100MB
+- Machine-readable format with timestamps
 
 ### How It Works
 
@@ -386,6 +469,47 @@ llamacpp logs --rotate
 - `--rotate` - Archives all current logs with timestamps
 
 **Use case:** Quickly see which servers are accumulating large logs, or clean up all logs at once.
+
+## Models Management TUI
+
+The Models Management TUI is accessible by pressing `M` from the `llamacpp ps` list view. It provides a full-featured interface for managing local models and searching/downloading new ones.
+
+**Features:**
+- **Browse local models** - View all GGUF files with size, modification date, and server usage
+- **Delete models** - Remove models with automatic cleanup of associated servers
+- **Search HuggingFace** - Find and browse models from Hugging Face repository
+- **Download with progress** - Real-time progress tracking for model downloads
+- **Seamless navigation** - Switch between monitoring and models management
+
+**Quick Access:**
+```bash
+# Launch TUI and press 'M' to open Models Management
+llamacpp ps
+```
+
+**Models View:**
+- View all installed models in scrollable table
+- See which servers are using each model
+- Color-coded status (green = safe to delete, yellow/gray = servers using)
+- Delete models with Enter or D key
+- Cascade deletion: automatically removes associated servers
+
+**Search View (press 'S' from Models view):**
+- Search HuggingFace models by name
+- Browse search results with download counts and likes
+- Expand models to show available GGUF files
+- Download files with real-time progress tracking
+- Cancel downloads with ESC (cleans up partial files)
+
+**Keyboard Controls:**
+- **M** - Switch to Models view (from monitor list view)
+- **↑/↓** or **k/j** - Navigate lists
+- **Enter** - Select/download/delete
+- **S** - Open search view (from models view)
+- **/** or **I** - Focus search input (in search view)
+- **R** - Refresh view
+- **ESC** - Back/cancel
+- **Q** - Quit
 
 ## Server Management
 

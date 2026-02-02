@@ -14,12 +14,19 @@ interface ServerMonitorData {
   error: string | null;
 }
 
+export interface MonitorUIControls {
+  pause: () => void;
+  resume: () => void;
+  getServers: () => ServerConfig[];
+}
+
 export async function createMultiServerMonitorUI(
   screen: blessed.Widgets.Screen,
   servers: ServerConfig[],
-  _fromPs: boolean = false,
-  directJumpIndex?: number
-): Promise<void> {
+  skipConnectingMessage: boolean = false,
+  directJumpIndex?: number,
+  onModels?: (controls: MonitorUIControls) => void
+): Promise<MonitorUIControls> {
   let updateInterval = 2000;
   let intervalId: NodeJS.Timeout | null = null;
   let viewMode: ViewMode = directJumpIndex !== undefined ? 'detail' : 'list';
@@ -386,7 +393,7 @@ export async function createMultiServerMonitorUI(
 
     // Footer
     content += '\n' + divider + '\n';
-    content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | [H]istory [Q]uit{/gray-fg}`;
+    content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | [M]odels [H]istory [Q]uit{/gray-fg}`;
 
     return content;
   }
@@ -669,117 +676,176 @@ export async function createMultiServerMonitorUI(
     intervalId = setInterval(fetchData, updateInterval);
   }
 
-  // Keyboard shortcuts - List view navigation with arrow keys
-  screen.key(['up', 'k'], () => {
-    if (viewMode === 'list') {
-      selectedRowIndex = Math.max(0, selectedRowIndex - 1);
-      // Re-render immediately for responsive feel
-      const content = renderListView(lastSystemMetrics);
-      contentBox.setContent(content);
-      screen.render();
-    }
-  });
+  // Store key handler references for cleanup when switching views
+  const keyHandlers = {
+    up: () => {
+      if (viewMode === 'list') {
+        selectedRowIndex = Math.max(0, selectedRowIndex - 1);
+        // Re-render immediately for responsive feel
+        const content = renderListView(lastSystemMetrics);
+        contentBox.setContent(content);
+        screen.render();
+      }
+    },
+    down: () => {
+      if (viewMode === 'list') {
+        selectedRowIndex = Math.min(servers.length - 1, selectedRowIndex + 1);
+        // Re-render immediately for responsive feel
+        const content = renderListView(lastSystemMetrics);
+        contentBox.setContent(content);
+        screen.render();
+      }
+    },
+    enter: () => {
+      if (viewMode === 'list') {
+        showLoading();
+        selectedServerIndex = selectedRowIndex;
+        viewMode = 'detail';
+        fetchData();
+      }
+    },
+    escape: () => {
+      // Don't handle ESC if we're in historical view - let historical view handle it
+      if (inHistoricalView) return;
 
-  screen.key(['down', 'j'], () => {
-    if (viewMode === 'list') {
-      selectedRowIndex = Math.min(servers.length - 1, selectedRowIndex + 1);
-      // Re-render immediately for responsive feel
-      const content = renderListView(lastSystemMetrics);
-      contentBox.setContent(content);
-      screen.render();
-    }
-  });
+      if (viewMode === 'detail') {
+        showLoading();
+        viewMode = 'list';
+        cameFromDirectJump = false; // Clear direct jump flag when returning to list
+        fetchData();
+      } else if (viewMode === 'list') {
+        // ESC in list view - exit
+        showLoading();
+        if (intervalId) clearInterval(intervalId);
+        if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+        setTimeout(() => {
+          screen.destroy();
+          process.exit(0);
+        }, 100);
+      }
+    },
+    models: async () => {
+      if (onModels && viewMode === 'list' && !inHistoricalView) {
+        // Pause monitor (don't destroy - we'll resume when returning)
+        controls.pause();
+        await onModels(controls);
+      }
+    },
+    history: async () => {
+      // Prevent entering historical view if already there
+      if (inHistoricalView) return;
 
-  // Enter key to view details for selected server
-  screen.key(['enter'], () => {
-    if (viewMode === 'list') {
-      showLoading();
-      selectedServerIndex = selectedRowIndex;
-      viewMode = 'detail';
-      fetchData();
-    }
-  });
+      // Keep polling in background for live historical updates
+      // Stop spinner if running
+      if (spinnerIntervalId) clearInterval(spinnerIntervalId);
 
-  // Keyboard shortcuts - Detail view
-  screen.key(['escape'], () => {
-    // Don't handle ESC if we're in historical view - let historical view handle it
-    if (inHistoricalView) return;
+      // Remove current content box
+      screen.remove(contentBox);
 
-    if (viewMode === 'detail') {
-      showLoading();
-      viewMode = 'list';
-      cameFromDirectJump = false; // Clear direct jump flag when returning to list
-      fetchData();
-    } else if (viewMode === 'list') {
-      // ESC in list view - exit
+      // Mark that we're in historical view
+      inHistoricalView = true;
+
+      if (viewMode === 'list') {
+        // Show multi-server historical view
+        await createMultiServerHistoricalUI(screen, servers, selectedServerIndex, () => {
+          // Mark that we've left historical view
+          inHistoricalView = false;
+          // Re-attach content box when returning from history
+          screen.append(contentBox);
+          // Re-render the list view
+          const content = renderListView(lastSystemMetrics);
+          contentBox.setContent(content);
+          screen.render();
+        });
+      } else {
+        // Show single-server historical view for selected server
+        const selectedServer = servers[selectedServerIndex];
+        await createHistoricalUI(screen, selectedServer, () => {
+          // Mark that we've left historical view
+          inHistoricalView = false;
+          // Re-attach content box when returning from history
+          screen.append(contentBox);
+          // Re-render the detail view
+          const content = renderDetailView(lastSystemMetrics);
+          contentBox.setContent(content);
+          screen.render();
+        });
+      }
+    },
+    quit: () => {
       showLoading();
       if (intervalId) clearInterval(intervalId);
       if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+      // Small delay to show the loading state before exit
       setTimeout(() => {
         screen.destroy();
         process.exit(0);
       }, 100);
-    }
-  });
+    },
+  };
 
-  // Keyboard shortcuts - Common
+  // Unregister all keyboard handlers
+  function unregisterHandlers() {
+    screen.unkey('up', keyHandlers.up);
+    screen.unkey('k', keyHandlers.up);
+    screen.unkey('down', keyHandlers.down);
+    screen.unkey('j', keyHandlers.down);
+    screen.unkey('enter', keyHandlers.enter);
+    screen.unkey('escape', keyHandlers.escape);
+    screen.unkey('m', keyHandlers.models);
+    screen.unkey('M', keyHandlers.models);
+    screen.unkey('h', keyHandlers.history);
+    screen.unkey('H', keyHandlers.history);
+    screen.unkey('q', keyHandlers.quit);
+    screen.unkey('Q', keyHandlers.quit);
+    screen.unkey('C-c', keyHandlers.quit);
+  }
 
-  screen.key(['h', 'H'], async () => {
-    // Prevent entering historical view if already there
-    if (inHistoricalView) return;
+  // Register keyboard handlers
+  function registerHandlers() {
+    screen.key(['up', 'k'], keyHandlers.up);
+    screen.key(['down', 'j'], keyHandlers.down);
+    screen.key(['enter'], keyHandlers.enter);
+    screen.key(['escape'], keyHandlers.escape);
+    screen.key(['m', 'M'], keyHandlers.models);
+    screen.key(['h', 'H'], keyHandlers.history);
+    screen.key(['q', 'Q', 'C-c'], keyHandlers.quit);
+  }
 
-    // Keep polling in background for live historical updates
-    // Stop spinner if running
-    if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+  // Controls object for pause/resume from other views
+  const controls: MonitorUIControls = {
+    pause: () => {
+      unregisterHandlers();
+      if (intervalId) clearInterval(intervalId);
+      if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+      screen.remove(contentBox);
+    },
+    resume: () => {
+      screen.append(contentBox);
+      registerHandlers();
+      // Re-render with last known data (instant, no loading)
+      let content = '';
+      if (viewMode === 'list') {
+        content = renderListView(lastSystemMetrics);
+      } else {
+        content = renderDetailView(lastSystemMetrics);
+      }
+      contentBox.setContent(content);
+      screen.render();
+      // Resume polling
+      startPolling();
+    },
+    getServers: () => servers,
+  };
 
-    // Remove current content box
-    screen.remove(contentBox);
+  // Initial registration
+  registerHandlers();
 
-    // Mark that we're in historical view
-    inHistoricalView = true;
-
-    if (viewMode === 'list') {
-      // Show multi-server historical view
-      await createMultiServerHistoricalUI(screen, servers, selectedServerIndex, () => {
-        // Mark that we've left historical view
-        inHistoricalView = false;
-        // Re-attach content box when returning from history
-        screen.append(contentBox);
-        // Re-render the list view
-        const content = renderListView(lastSystemMetrics);
-        contentBox.setContent(content);
-        screen.render();
-      });
-    } else {
-      // Show single-server historical view for selected server
-      const selectedServer = servers[selectedServerIndex];
-      await createHistoricalUI(screen, selectedServer, () => {
-        // Mark that we've left historical view
-        inHistoricalView = false;
-        // Re-attach content box when returning from history
-        screen.append(contentBox);
-        // Re-render the detail view
-        const content = renderDetailView(lastSystemMetrics);
-        contentBox.setContent(content);
-        screen.render();
-      });
-    }
-  });
-
-  screen.key(['q', 'Q', 'C-c'], () => {
-    showLoading();
-    if (intervalId) clearInterval(intervalId);
-    if (spinnerIntervalId) clearInterval(spinnerIntervalId);
-    // Small delay to show the loading state before exit
-    setTimeout(() => {
-      screen.destroy();
-      process.exit(0);
-    }, 100);
-  });
-
-  // Initial display
-  contentBox.setContent('{cyan-fg}⏳ Connecting to servers...{/cyan-fg}');
-  screen.render();
+  // Initial display - skip "Connecting" message when returning from another view
+  if (!skipConnectingMessage) {
+    contentBox.setContent('{cyan-fg}⏳ Connecting to servers...{/cyan-fg}');
+    screen.render();
+  }
 
   startPolling();
 
@@ -789,4 +855,6 @@ export async function createMultiServerMonitorUI(
     // Note: macmon child processes will automatically die when parent exits
     // since they're spawned with detached: false
   });
+
+  return controls;
 }

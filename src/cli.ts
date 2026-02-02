@@ -24,6 +24,7 @@ import { routerStopCommand } from './commands/router/stop';
 import { routerStatusCommand } from './commands/router/status';
 import { routerRestartCommand } from './commands/router/restart';
 import { routerConfigCommand } from './commands/router/config';
+import { routerLogsCommand } from './commands/router/logs';
 import packageJson from '../package.json';
 
 const program = new Command();
@@ -378,10 +379,31 @@ router
   .option('-h, --host <address>', 'Update bind address')
   .option('--timeout <ms>', 'Update request timeout (milliseconds)', parseInt)
   .option('--health-interval <ms>', 'Update health check interval (milliseconds)', parseInt)
+  .option('-v, --verbose [boolean]', 'Enable/disable verbose logging to file (true/false)', (val) => val === 'true' || val === '1')
   .option('-r, --restart', 'Automatically restart router if running')
   .action(async (options) => {
     try {
       await routerConfigCommand(options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Router logs
+router
+  .command('logs')
+  .description('View router logs')
+  .option('-f, --follow', 'Follow logs in real-time (like tail -f)')
+  .option('-n, --lines <number>', 'Number of lines to show (default: 50)', parseInt)
+  .option('--stderr', 'Show system logs (stderr) instead of activity logs (stdout)')
+  .option('-v, --verbose', 'Show verbose JSON log file (if enabled)')
+  .option('--clear', 'Clear the log file')
+  .option('--rotate', 'Rotate the log file with timestamp')
+  .option('--clear-all', 'Clear all router logs (activity, system, verbose)')
+  .action(async (options) => {
+    try {
+      await routerLogsCommand(options);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);

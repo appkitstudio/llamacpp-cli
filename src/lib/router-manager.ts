@@ -56,6 +56,7 @@ export class RouterManager {
       stderrPath: path.join(this.logsDir, 'router.stderr'),
       healthCheckInterval: 5000,
       requestTimeout: 120000,
+      verbose: false,
       status: 'stopped',
       createdAt: new Date().toISOString(),
     };

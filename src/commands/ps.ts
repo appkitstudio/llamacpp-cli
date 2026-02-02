@@ -5,7 +5,7 @@ import { stateManager } from '../lib/state-manager';
 import { statusChecker } from '../lib/status-checker';
 import { formatUptime, formatBytes } from '../utils/format-utils';
 import { getProcessMemory } from '../utils/process-utils';
-import { createMultiServerMonitorUI } from '../tui/MultiServerMonitorApp.js';
+import { createRootNavigator } from '../tui/RootNavigator.js';
 import { ServerConfig } from '../types/server-config.js';
 
 async function showStaticTable(): Promise<void> {
@@ -135,7 +135,7 @@ export async function psCommand(identifier?: string, options?: { table?: boolean
       fullUnicode: true,
     });
 
-    await createMultiServerMonitorUI(screen, updated, true, serverIndex); // fromPs = true, directJumpIndex
+    await createRootNavigator(screen, updated, serverIndex);
     return;
   }
 
@@ -149,7 +149,7 @@ export async function psCommand(identifier?: string, options?: { table?: boolean
     fullUnicode: true,
   });
 
-  await createMultiServerMonitorUI(screen, updated, true); // fromPs = true
+  await createRootNavigator(screen, updated);
 }
 
 // Helper function to find server by identifier
