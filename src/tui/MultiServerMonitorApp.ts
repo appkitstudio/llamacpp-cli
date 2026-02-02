@@ -1,11 +1,23 @@
 import blessed from 'blessed';
-import { ServerConfig } from '../types/server-config.js';
+import * as path from 'path';
+import * as fs from 'fs/promises';
+import { ServerConfig, sanitizeModelName } from '../types/server-config.js';
 import { MetricsAggregator } from '../lib/metrics-aggregator.js';
 import { SystemCollector } from '../lib/system-collector.js';
 import { MonitorData, SystemMetrics } from '../types/monitor-types.js';
 import { HistoryManager } from '../lib/history-manager.js';
 import { createHistoricalUI, createMultiServerHistoricalUI } from './HistoricalMonitorApp.js';
 import { createConfigUI } from './ConfigApp.js';
+import { stateManager } from '../lib/state-manager.js';
+import { launchctlManager } from '../lib/launchctl-manager.js';
+import { statusChecker } from '../lib/status-checker.js';
+import { modelScanner } from '../lib/model-scanner.js';
+import { portManager } from '../lib/port-manager.js';
+import { configGenerator, ServerOptions } from '../lib/config-generator.js';
+import { ModelInfo } from '../types/model-info.js';
+import { getLogsDir, getLaunchAgentsDir, ensureDir, parseMetalMemoryFromLog } from '../utils/file-utils.js';
+import { formatBytes } from '../utils/format-utils.js';
+import { isPortInUse } from '../utils/process-utils.js';
 
 type ViewMode = 'list' | 'detail';
 
@@ -143,7 +155,7 @@ export async function createMultiServerMonitorUI(
   function renderAggregateModelResources(): string {
     let content = '';
 
-    content += '{bold}Model Resources{/bold}\n';
+    content += '{bold}Server Resources{/bold}\n';
     const termWidth = (screen.width as number) || 80;
     const divider = '─'.repeat(termWidth - 2);
     content += divider + '\n';
@@ -191,7 +203,7 @@ export async function createMultiServerMonitorUI(
   function renderModelResources(data: MonitorData): string {
     let content = '';
 
-    content += '{bold}Model Resources{/bold}\n';
+    content += '{bold}Server Resources{/bold}\n';
     const termWidth = (screen.width as number) || 80;
     const divider = '─'.repeat(termWidth - 2);
     content += divider + '\n';
@@ -396,7 +408,7 @@ export async function createMultiServerMonitorUI(
 
     // Footer
     content += '\n' + divider + '\n';
-    content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | [M]odels [H]istory [Q]uit{/gray-fg}`;
+    content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | [N]ew [M]odels [H]istory [Q]uit{/gray-fg}`;
 
     return content;
   }
@@ -414,47 +426,17 @@ export async function createMultiServerMonitorUI(
 
     // Check if server is stopped
     if (server.status !== 'running') {
-      // Show stopped server configuration (no metrics)
+      // Show minimal stopped server info
       content += '{bold}Server Information{/bold}\n';
       content += divider + '\n';
       content += `Status:   {gray-fg}○ STOPPED{/gray-fg}\n`;
       content += `Model:    ${server.modelName}\n`;
       const displayHost = server.host || '127.0.0.1';
       content += `Endpoint: http://${displayHost}:${server.port}\n`;
-      content += '\n';
 
-      content += '{bold}Configuration{/bold}\n';
-      content += divider + '\n';
-      content += `Threads:    ${server.threads}\n`;
-      content += `Context:    ${server.ctxSize} tokens\n`;
-      content += `GPU Layers: ${server.gpuLayers}\n`;
-      if (server.verbose) {
-        content += `Verbose:    Enabled\n`;
-      }
-      if (server.customFlags && server.customFlags.length > 0) {
-        content += `Flags:      ${server.customFlags.join(', ')}\n`;
-      }
-      content += '\n';
-
-      if (server.lastStarted) {
-        content += '{bold}Last Activity{/bold}\n';
-        content += divider + '\n';
-        content += `Started:  ${new Date(server.lastStarted).toLocaleString()}\n`;
-        if (server.lastStopped) {
-          content += `Stopped:  ${new Date(server.lastStopped).toLocaleString()}\n`;
-        }
-        content += '\n';
-      }
-
-      content += '{bold}Quick Actions{/bold}\n';
-      content += divider + '\n';
-      content += `{dim}Start server:  llamacpp server start ${server.port}{/dim}\n`;
-      content += `{dim}Update config: llamacpp server config ${server.port} [options]{/dim}\n`;
-      content += `{dim}View logs:     llamacpp server logs ${server.port}{/dim}\n`;
-
-      // Footer
+      // Footer - show [S]tart for stopped servers
       content += '\n' + divider + '\n';
-      content += `{gray-fg}[C]onfig [H]istory [ESC] Back [Q]uit{/gray-fg}`;
+      content += `{gray-fg}[S]tart [C]onfig [R]emove [H]istory [ESC] Back [Q]uit{/gray-fg}`;
 
       return content;
     }
@@ -544,9 +526,9 @@ export async function createMultiServerMonitorUI(
       }
     }
 
-    // Footer
+    // Footer - show [S]top for running servers
     content += divider + '\n';
-    content += `{gray-fg}Updated: ${data.lastUpdated.toLocaleTimeString()} | [C]onfig [H]istory [ESC] Back [Q]uit{/gray-fg}`;
+    content += `{gray-fg}[S]top [C]onfig [R]emove [H]istory [ESC] Back [Q]uit{/gray-fg}`;
 
     return content;
   }
@@ -690,6 +672,774 @@ export async function createMultiServerMonitorUI(
     intervalId = setInterval(fetchData, updateInterval);
   }
 
+  // Parse context size with k/K suffix support (e.g., "4k" -> 4096, "64K" -> 65536)
+  function parseContextSize(input: string): number | null {
+    const trimmed = input.trim().toLowerCase();
+    const match = trimmed.match(/^(\d+(?:\.\d+)?)(k)?$/);
+    if (!match) return null;
+
+    const num = parseFloat(match[1]);
+    const hasK = match[2] === 'k';
+
+    if (isNaN(num) || num <= 0) return null;
+
+    return hasK ? Math.round(num * 1024) : Math.round(num);
+  }
+
+  // Format context size for display (e.g., 4096 -> "4k", 65536 -> "64k")
+  function formatContextSize(value: number): string {
+    if (value >= 1024 && value % 1024 === 0) {
+      return `${value / 1024}k`;
+    }
+    return value.toLocaleString();
+  }
+
+  // Helper to create modal boxes
+  function createModal(title: string, height: number | string = 'shrink', borderColor: string = 'cyan'): blessed.Widgets.BoxElement {
+    return blessed.box({
+      parent: screen,
+      top: 'center',
+      left: 'center',
+      width: '70%',
+      height,
+      border: { type: 'line' },
+      style: {
+        border: { fg: borderColor },
+        fg: 'white',
+      },
+      tags: true,
+      label: ` ${title} `,
+    });
+  }
+
+  // Show progress modal
+  function showProgressModal(message: string): blessed.Widgets.BoxElement {
+    const modal = createModal('Working', 6);
+    modal.setContent(`\n  {cyan-fg}${message}{/cyan-fg}`);
+    screen.render();
+    return modal;
+  }
+
+  // Show error modal
+  async function showErrorModal(message: string): Promise<void> {
+    return new Promise((resolve) => {
+      const modal = createModal('Error', 8, 'red');
+      modal.setContent(`\n  {red-fg}❌ ${message}{/red-fg}\n\n  {gray-fg}[Enter] Close{/gray-fg}`);
+      screen.render();
+      modal.focus();
+      modal.key(['enter', 'escape'], () => {
+        screen.remove(modal);
+        resolve();
+      });
+    });
+  }
+
+  // Remove server dialog
+  async function showRemoveServerDialog(server: ServerConfig): Promise<void> {
+    // Pause the monitor
+    if (intervalId) clearInterval(intervalId);
+    if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+    unregisterHandlers();
+
+    // Check if other servers use the same model
+    const allServers = await stateManager.getAllServers();
+    const otherServersWithSameModel = allServers.filter(
+      s => s.id !== server.id && s.modelPath === server.modelPath
+    );
+
+    let deleteModelOption = false;
+    const showDeleteModelOption = otherServersWithSameModel.length === 0;
+    // 0 = checkbox (delete model), 1 = confirm button
+    let selectedOption = showDeleteModelOption ? 0 : 1;
+
+    const modal = createModal('Remove Server', showDeleteModelOption ? 18 : 14, 'red');
+
+    function renderDialog(): void {
+      let content = '\n';
+      content += `  {bold}Remove server: ${server.id}{/bold}\n\n`;
+      content += `  Model: ${server.modelName}\n`;
+      content += `  Port:  ${server.port}\n`;
+      content += `  Status: ${server.status === 'running' ? '{green-fg}running{/green-fg}' : '{gray-fg}stopped{/gray-fg}'}\n\n`;
+
+      if (server.status === 'running') {
+        content += `  {yellow-fg}⚠ Server will be stopped{/yellow-fg}\n\n`;
+      }
+
+      if (showDeleteModelOption) {
+        const checkbox = deleteModelOption ? '☑' : '☐';
+        const isCheckboxSelected = selectedOption === 0;
+        if (isCheckboxSelected) {
+          content += `  {cyan-bg}{15-fg}${checkbox} Also delete model file{/15-fg}{/cyan-bg}\n`;
+        } else {
+          content += `  ${checkbox} Also delete model file\n`;
+        }
+        content += `     {gray-fg}${server.modelPath}{/gray-fg}\n\n`;
+      } else {
+        content += `  {gray-fg}Model is used by ${otherServersWithSameModel.length} other server(s) - cannot delete{/gray-fg}\n\n`;
+      }
+
+      const isConfirmSelected = selectedOption === 1 || !showDeleteModelOption;
+      if (isConfirmSelected) {
+        content += `  {cyan-bg}{15-fg}[ Confirm Remove ]{/15-fg}{/cyan-bg}\n\n`;
+      } else {
+        content += `  [ Confirm Remove ]\n\n`;
+      }
+
+      content += `  {gray-fg}[↑/↓] Select  [Space] Toggle  [Enter] Confirm  [ESC] Cancel{/gray-fg}`;
+      modal.setContent(content);
+      screen.render();
+    }
+
+    renderDialog();
+    modal.focus();
+
+    return new Promise((resolve) => {
+      modal.key(['up', 'k'], () => {
+        if (showDeleteModelOption && selectedOption === 1) {
+          selectedOption = 0;
+          renderDialog();
+        }
+      });
+
+      modal.key(['down', 'j'], () => {
+        if (showDeleteModelOption && selectedOption === 0) {
+          selectedOption = 1;
+          renderDialog();
+        }
+      });
+
+      modal.key(['space'], () => {
+        if (showDeleteModelOption && selectedOption === 0) {
+          deleteModelOption = !deleteModelOption;
+          renderDialog();
+        }
+      });
+
+      modal.key(['escape'], () => {
+        screen.remove(modal);
+        registerHandlers();
+        startPolling();
+        resolve();
+      });
+
+      modal.key(['enter'], async () => {
+        screen.remove(modal);
+
+        // Show progress
+        const progressModal = showProgressModal('Removing server...');
+
+        try {
+          // Stop and unload service if running
+          if (server.status === 'running') {
+            progressModal.setContent('\n  {cyan-fg}Stopping server...{/cyan-fg}');
+            screen.render();
+            try {
+              await launchctlManager.unloadService(server.plistPath);
+              await launchctlManager.waitForServiceStop(server.label, 5000);
+            } catch (err) {
+              // Continue even if unload fails
+            }
+          } else {
+            // Still try to unload in case it's in a weird state
+            try {
+              await launchctlManager.unloadService(server.plistPath);
+            } catch (err) {
+              // Ignore
+            }
+          }
+
+          // Delete plist
+          progressModal.setContent('\n  {cyan-fg}Removing configuration...{/cyan-fg}');
+          screen.render();
+          await launchctlManager.deletePlist(server.plistPath);
+
+          // Delete server config
+          await stateManager.deleteServerConfig(server.id);
+
+          // Delete model if requested
+          if (deleteModelOption && showDeleteModelOption) {
+            progressModal.setContent('\n  {cyan-fg}Deleting model file...{/cyan-fg}');
+            screen.render();
+            await fs.unlink(server.modelPath);
+          }
+
+          screen.remove(progressModal);
+
+          // Remove server from our arrays
+          const idx = servers.findIndex(s => s.id === server.id);
+          if (idx !== -1) {
+            servers.splice(idx, 1);
+            aggregators.delete(server.id);
+            historyManagers.delete(server.id);
+            serverDataMap.delete(server.id);
+          }
+
+          // Go back to list view
+          viewMode = 'list';
+          selectedRowIndex = Math.min(selectedRowIndex, Math.max(0, servers.length - 1));
+          selectedServerIndex = selectedRowIndex;
+
+          registerHandlers();
+          startPolling();
+          resolve();
+
+        } catch (err) {
+          screen.remove(progressModal);
+          await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
+          registerHandlers();
+          startPolling();
+          resolve();
+        }
+      });
+    });
+  }
+
+  // Create server flow
+  async function showCreateServerFlow(): Promise<void> {
+    // Pause the monitor
+    if (intervalId) clearInterval(intervalId);
+    if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+    unregisterHandlers();
+
+    // Step 1: Model selection
+    const models = await modelScanner.scanModels();
+    if (models.length === 0) {
+      await showErrorModal('No models found in ~/models directory.\nUse [M]odels → [S]earch to download models.');
+      // Immediately render with cached data for instant feedback
+      const content = renderListView(lastSystemMetrics);
+      contentBox.setContent(content);
+      screen.render();
+      registerHandlers();
+      startPolling();
+      return;
+    }
+
+    // Check which models already have servers
+    const allServers = await stateManager.getAllServers();
+    const modelsWithServers = new Set(allServers.map(s => s.modelPath));
+
+    let selectedModelIndex = 0;
+    let scrollOffset = 0;
+    const maxVisible = 8;
+
+    const modelModal = createModal('Create Server - Select Model', maxVisible + 8);
+
+    function renderModelPicker(): void {
+      // Adjust scroll offset
+      if (selectedModelIndex < scrollOffset) {
+        scrollOffset = selectedModelIndex;
+      } else if (selectedModelIndex >= scrollOffset + maxVisible) {
+        scrollOffset = selectedModelIndex - maxVisible + 1;
+      }
+
+      let content = '\n';
+      content += '  {bold}Select a model to create a server for:{/bold}\n\n';
+
+      const visibleModels = models.slice(scrollOffset, scrollOffset + maxVisible);
+
+      for (let i = 0; i < visibleModels.length; i++) {
+        const model = visibleModels[i];
+        const actualIndex = scrollOffset + i;
+        const isSelected = actualIndex === selectedModelIndex;
+        const hasServer = modelsWithServers.has(model.path);
+        const indicator = isSelected ? '►' : ' ';
+
+        // Truncate filename if too long
+        let displayName = model.filename;
+        const maxLen = 40;
+        if (displayName.length > maxLen) {
+          displayName = displayName.substring(0, maxLen - 3) + '...';
+        }
+        displayName = displayName.padEnd(maxLen);
+
+        const size = model.sizeFormatted.padStart(8);
+        const serverIndicator = hasServer ? ' {yellow-fg}(has server){/yellow-fg}' : '';
+        const serverIndicatorPlain = hasServer ? ' (has server)' : '';
+
+        if (isSelected) {
+          content += `  {cyan-bg}{15-fg}${indicator} ${displayName} ${size}${serverIndicatorPlain}{/15-fg}{/cyan-bg}\n`;
+        } else {
+          content += `  ${indicator} ${displayName} {gray-fg}${size}{/gray-fg}${serverIndicator}\n`;
+        }
+      }
+
+      // Scroll indicator
+      if (models.length > maxVisible) {
+        const scrollInfo = `${selectedModelIndex + 1}/${models.length}`;
+        content += `\n  {gray-fg}${scrollInfo}{/gray-fg}`;
+      }
+
+      content += '\n\n  {gray-fg}[↑/↓] Navigate  [Enter] Select  [ESC] Cancel{/gray-fg}';
+      modelModal.setContent(content);
+      screen.render();
+    }
+
+    renderModelPicker();
+    modelModal.focus();
+
+    const selectedModel = await new Promise<ModelInfo | null>((resolve) => {
+      modelModal.key(['up', 'k'], () => {
+        selectedModelIndex = Math.max(0, selectedModelIndex - 1);
+        renderModelPicker();
+      });
+
+      modelModal.key(['down', 'j'], () => {
+        selectedModelIndex = Math.min(models.length - 1, selectedModelIndex + 1);
+        renderModelPicker();
+      });
+
+      modelModal.key(['escape'], () => {
+        screen.remove(modelModal);
+        resolve(null);
+      });
+
+      modelModal.key(['enter'], () => {
+        screen.remove(modelModal);
+        resolve(models[selectedModelIndex]);
+      });
+    });
+
+    if (!selectedModel) {
+      // Immediately render with cached data for instant feedback
+      const content = renderListView(lastSystemMetrics);
+      contentBox.setContent(content);
+      screen.render();
+      registerHandlers();
+      startPolling();
+      return;
+    }
+
+    // Create a non-null reference for closures
+    const model = selectedModel;
+
+    // Check if server already exists for this model
+    const existingServer = allServers.find(s => s.modelPath === model.path);
+    if (existingServer) {
+      await showErrorModal(`Server already exists for this model.\nServer ID: ${existingServer.id}\nPort: ${existingServer.port}`);
+      // Immediately render with cached data for instant feedback
+      const content = renderListView(lastSystemMetrics);
+      contentBox.setContent(content);
+      screen.render();
+      registerHandlers();
+      startPolling();
+      return;
+    }
+
+    // Step 2: Configuration
+    interface CreateConfig {
+      host: string;
+      port: number;
+      threads: number;
+      ctxSize: number;
+      gpuLayers: number;
+      verbose: boolean;
+    }
+
+    // Generate smart defaults
+    const defaultPort = await portManager.findAvailablePort();
+    const modelSize = model.size;
+
+    // Smart context size based on model size
+    let defaultCtxSize = 4096;
+    if (modelSize < 1024 * 1024 * 1024) { // < 1GB
+      defaultCtxSize = 2048;
+    } else if (modelSize < 3 * 1024 * 1024 * 1024) { // < 3GB
+      defaultCtxSize = 4096;
+    } else if (modelSize < 6 * 1024 * 1024 * 1024) { // < 6GB
+      defaultCtxSize = 8192;
+    } else {
+      defaultCtxSize = 16384;
+    }
+
+    const os = await import('os');
+    const defaultThreads = Math.max(1, Math.floor(os.cpus().length / 2));
+
+    const config: CreateConfig = {
+      host: '127.0.0.1',
+      port: defaultPort,
+      threads: defaultThreads,
+      ctxSize: defaultCtxSize,
+      gpuLayers: 60,
+      verbose: true,
+    };
+
+    // Configuration fields
+    const fields = [
+      { key: 'host', label: 'Host', type: 'select', options: ['127.0.0.1', '0.0.0.0'] },
+      { key: 'port', label: 'Port', type: 'number' },
+      { key: 'threads', label: 'Threads', type: 'number' },
+      { key: 'ctxSize', label: 'Context Size', type: 'number' },
+      { key: 'gpuLayers', label: 'GPU Layers', type: 'number' },
+      { key: 'verbose', label: 'Verbose Logs', type: 'toggle' },
+    ];
+
+    let selectedFieldIndex = 0;
+    const configModal = createModal('Create Server - Configuration', 20);
+
+    function formatConfigValue(key: string, value: any): string {
+      if (key === 'verbose') return value ? 'Enabled' : 'Disabled';
+      if (key === 'ctxSize') return formatContextSize(value);
+      return String(value);
+    }
+
+    function renderConfigScreen(): void {
+      let content = '\n';
+      content += `  {bold}Model:{/bold} ${model.filename}\n`;
+      content += `  {bold}Size:{/bold}  ${model.sizeFormatted}\n\n`;
+
+      content += '  {bold}Server Configuration:{/bold}\n';
+      content += '  ─'.repeat(30) + '\n';
+
+      for (let i = 0; i < fields.length; i++) {
+        const field = fields[i];
+        const isSelected = i === selectedFieldIndex;
+        const indicator = isSelected ? '►' : ' ';
+        const label = field.label.padEnd(14);
+        const value = formatConfigValue(field.key, (config as any)[field.key]);
+
+        if (isSelected) {
+          content += `  {cyan-bg}{15-fg}${indicator} ${label}${value}{/15-fg}{/cyan-bg}\n`;
+        } else {
+          content += `  ${indicator} ${label}{cyan-fg}${value}{/cyan-fg}\n`;
+        }
+      }
+
+      content += '\n';
+      const createSelected = selectedFieldIndex === fields.length;
+      if (createSelected) {
+        content += `  {green-bg}{15-fg}[ Create Server ]{/15-fg}{/green-bg}\n`;
+      } else {
+        content += `  {green-fg}[ Create Server ]{/green-fg}\n`;
+      }
+
+      content += '\n  {gray-fg}[↑/↓] Navigate  [Enter] Edit/Create  [ESC] Cancel{/gray-fg}';
+      configModal.setContent(content);
+      screen.render();
+    }
+
+    renderConfigScreen();
+    configModal.focus();
+
+    const shouldCreate = await new Promise<boolean>((resolve) => {
+      configModal.key(['up', 'k'], () => {
+        selectedFieldIndex = Math.max(0, selectedFieldIndex - 1);
+        renderConfigScreen();
+      });
+
+      configModal.key(['down', 'j'], () => {
+        selectedFieldIndex = Math.min(fields.length, selectedFieldIndex + 1);
+        renderConfigScreen();
+      });
+
+      configModal.key(['escape'], () => {
+        screen.remove(configModal);
+        resolve(false);
+      });
+
+      configModal.key(['enter'], async () => {
+        if (selectedFieldIndex === fields.length) {
+          // Create button selected
+          screen.remove(configModal);
+          resolve(true);
+        } else {
+          // Edit field
+          const field = fields[selectedFieldIndex];
+
+          if (field.type === 'select') {
+            // Show select dialog
+            const options = field.options!;
+            let optionIndex = options.indexOf((config as any)[field.key]);
+            if (optionIndex < 0) optionIndex = 0;
+
+            const selectModal = createModal(field.label, options.length + 6);
+
+            function renderSelectOptions(): void {
+              let content = '\n';
+              for (let i = 0; i < options.length; i++) {
+                const isOpt = i === optionIndex;
+                const ind = isOpt ? '●' : '○';
+                if (isOpt) {
+                  content += `  {cyan-fg}${ind} ${options[i]}{/cyan-fg}\n`;
+                } else {
+                  content += `  {gray-fg}${ind} ${options[i]}{/gray-fg}\n`;
+                }
+              }
+              if (field.key === 'host' && options[optionIndex] === '0.0.0.0') {
+                content += '\n  {yellow-fg}⚠ Warning: Exposes server to network{/yellow-fg}';
+              }
+              content += '\n\n  {gray-fg}[↑/↓] Select  [Enter] Confirm{/gray-fg}';
+              selectModal.setContent(content);
+              screen.render();
+            }
+
+            renderSelectOptions();
+            selectModal.focus();
+
+            await new Promise<void>((resolveSelect) => {
+              selectModal.key(['up', 'k'], () => {
+                optionIndex = Math.max(0, optionIndex - 1);
+                renderSelectOptions();
+              });
+              selectModal.key(['down', 'j'], () => {
+                optionIndex = Math.min(options.length - 1, optionIndex + 1);
+                renderSelectOptions();
+              });
+              selectModal.key(['enter'], () => {
+                (config as any)[field.key] = options[optionIndex];
+                screen.remove(selectModal);
+                resolveSelect();
+              });
+              selectModal.key(['escape'], () => {
+                screen.remove(selectModal);
+                resolveSelect();
+              });
+            });
+
+            renderConfigScreen();
+            configModal.focus();
+
+          } else if (field.type === 'toggle') {
+            (config as any)[field.key] = !(config as any)[field.key];
+            renderConfigScreen();
+
+          } else if (field.type === 'number') {
+            // Number input
+            const isCtxSize = field.key === 'ctxSize';
+            const inputModal = createModal(`Edit ${field.label}`, isCtxSize ? 11 : 10);
+
+            const currentDisplay = isCtxSize
+              ? formatContextSize((config as any)[field.key])
+              : (config as any)[field.key];
+
+            const infoText = blessed.text({
+              parent: inputModal,
+              top: 1,
+              left: 2,
+              content: `Current: ${currentDisplay}`,
+              tags: true,
+            });
+
+            // Add hint for context size
+            if (isCtxSize) {
+              blessed.text({
+                parent: inputModal,
+                top: 2,
+                left: 2,
+                content: '{gray-fg}Accepts: 4096, 4k, 8k, 16k, 32k, 64k, 128k{/gray-fg}',
+                tags: true,
+              });
+            }
+
+            const inputBox = blessed.textbox({
+              parent: inputModal,
+              top: isCtxSize ? 4 : 3,
+              left: 2,
+              right: 2,
+              height: 3,
+              inputOnFocus: true,
+              border: { type: 'line' },
+              style: {
+                border: { fg: 'white' },
+                focus: { border: { fg: 'green' } },
+              },
+            });
+
+            blessed.text({
+              parent: inputModal,
+              bottom: 1,
+              left: 2,
+              content: '{gray-fg}[Enter] Confirm  [ESC] Cancel{/gray-fg}',
+              tags: true,
+            });
+
+            // Pre-fill with k notation for context size
+            const initialValue = isCtxSize
+              ? formatContextSize((config as any)[field.key])
+              : String((config as any)[field.key]);
+            inputBox.setValue(initialValue);
+            screen.render();
+            inputBox.focus();
+
+            await new Promise<void>((resolveInput) => {
+              inputBox.on('submit', (value: string) => {
+                let numValue: number | null;
+
+                if (isCtxSize) {
+                  numValue = parseContextSize(value);
+                } else {
+                  numValue = parseInt(value, 10);
+                  if (isNaN(numValue)) numValue = null;
+                }
+
+                if (numValue !== null && numValue > 0) {
+                  (config as any)[field.key] = numValue;
+                }
+                screen.remove(inputModal);
+                resolveInput();
+              });
+
+              inputBox.on('cancel', () => {
+                screen.remove(inputModal);
+                resolveInput();
+              });
+
+              inputBox.key(['escape'], () => {
+                screen.remove(inputModal);
+                resolveInput();
+              });
+            });
+
+            renderConfigScreen();
+            configModal.focus();
+          }
+        }
+      });
+    });
+
+    if (!shouldCreate) {
+      // Immediately render with cached data for instant feedback
+      const content = renderListView(lastSystemMetrics);
+      contentBox.setContent(content);
+      screen.render();
+      registerHandlers();
+      startPolling();
+      return;
+    }
+
+    // Step 3: Create the server
+    const progressModal = showProgressModal('Creating server...');
+
+    try {
+      // Generate full server config
+      const serverOptions: ServerOptions = {
+        port: config.port,
+        host: config.host,
+        threads: config.threads,
+        ctxSize: config.ctxSize,
+        gpuLayers: config.gpuLayers,
+        verbose: config.verbose,
+      };
+
+      progressModal.setContent('\n  {cyan-fg}Generating configuration...{/cyan-fg}');
+      screen.render();
+
+      const serverConfig = await configGenerator.generateConfig(
+        model.path,
+        model.filename,
+        model.size,
+        config.port,
+        serverOptions
+      );
+
+      // Ensure log directory exists
+      await ensureDir(path.dirname(serverConfig.stdoutPath));
+
+      // Create plist
+      progressModal.setContent('\n  {cyan-fg}Creating launchctl service...{/cyan-fg}');
+      screen.render();
+      await launchctlManager.createPlist(serverConfig);
+
+      // Load service
+      try {
+        await launchctlManager.loadService(serverConfig.plistPath);
+      } catch (error) {
+        await launchctlManager.deletePlist(serverConfig.plistPath);
+        throw new Error(`Failed to load service: ${(error as Error).message}`);
+      }
+
+      // Start service
+      progressModal.setContent('\n  {cyan-fg}Starting server...{/cyan-fg}');
+      screen.render();
+      try {
+        await launchctlManager.startService(serverConfig.label);
+      } catch (error) {
+        await launchctlManager.unloadService(serverConfig.plistPath);
+        await launchctlManager.deletePlist(serverConfig.plistPath);
+        throw new Error(`Failed to start service: ${(error as Error).message}`);
+      }
+
+      // Wait for startup
+      progressModal.setContent('\n  {cyan-fg}Waiting for server to start...{/cyan-fg}');
+      screen.render();
+      const started = await launchctlManager.waitForServiceStart(serverConfig.label, 5000);
+
+      if (!started) {
+        await launchctlManager.unloadService(serverConfig.plistPath);
+        await launchctlManager.deletePlist(serverConfig.plistPath);
+        throw new Error('Server failed to start. Check logs.');
+      }
+
+      // Wait for port to be ready (server may take a moment to bind)
+      progressModal.setContent('\n  {cyan-fg}Waiting for server to be ready...{/cyan-fg}');
+      screen.render();
+      const portTimeout = 10000; // 10 seconds
+      const portStartTime = Date.now();
+      let portReady = false;
+      while (Date.now() - portStartTime < portTimeout) {
+        if (await isPortInUse(serverConfig.port)) {
+          portReady = true;
+          break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      if (!portReady) {
+        await launchctlManager.unloadService(serverConfig.plistPath);
+        await launchctlManager.deletePlist(serverConfig.plistPath);
+        throw new Error('Server started but port not responding. Check logs.');
+      }
+
+      // Update config with running status
+      let updatedConfig = await statusChecker.updateServerStatus(serverConfig);
+
+      // Parse Metal memory allocation (wait a bit for model to load)
+      progressModal.setContent('\n  {cyan-fg}Detecting GPU memory allocation...{/cyan-fg}');
+      screen.render();
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      const metalMemoryMB = await parseMetalMemoryFromLog(updatedConfig.stderrPath);
+      if (metalMemoryMB) {
+        updatedConfig = { ...updatedConfig, metalMemoryMB };
+      }
+
+      // Save server config
+      await stateManager.saveServerConfig(updatedConfig);
+
+      // Show success message briefly
+      progressModal.setContent('\n  {green-fg}✓ Server created successfully!{/green-fg}');
+      screen.render();
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      screen.remove(progressModal);
+
+      // Add to our arrays
+      servers.push(updatedConfig);
+      aggregators.set(updatedConfig.id, new MetricsAggregator(updatedConfig));
+      historyManagers.set(updatedConfig.id, new HistoryManager(updatedConfig.id));
+      serverDataMap.set(updatedConfig.id, {
+        server: updatedConfig,
+        data: null,
+        error: null,
+      });
+
+      // Select the new server in list view
+      selectedRowIndex = servers.length - 1;
+      selectedServerIndex = selectedRowIndex;
+
+      registerHandlers();
+      startPolling();
+
+    } catch (err) {
+      screen.remove(progressModal);
+      await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
+      // Immediately render with cached data for instant feedback
+      const content = renderListView(lastSystemMetrics);
+      contentBox.setContent(content);
+      screen.render();
+      registerHandlers();
+      startPolling();
+    }
+  }
+
   // Store key handler references for cleanup when switching views
   const keyHandlers = {
     up: () => {
@@ -824,6 +1574,165 @@ export async function createMultiServerMonitorUI(
         controls.resume();
       });
     },
+    remove: async () => {
+      // Only available from detail view and not in historical view
+      if (viewMode !== 'detail' || inHistoricalView) return;
+
+      const selectedServer = servers[selectedServerIndex];
+
+      // Show remove server dialog
+      await showRemoveServerDialog(selectedServer);
+    },
+    startStop: async () => {
+      // Only available from detail view and not in historical view
+      if (viewMode !== 'detail' || inHistoricalView) return;
+
+      const selectedServer = servers[selectedServerIndex];
+
+      // If running, stop it. If stopped, start it.
+      if (selectedServer.status === 'running') {
+        // Stop the server
+        if (intervalId) clearInterval(intervalId);
+        if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+        unregisterHandlers();
+
+        const progressModal = showProgressModal('Stopping server...');
+
+        try {
+          // Unload service (this stops and unregisters it)
+          progressModal.setContent('\n  {cyan-fg}Stopping server...{/cyan-fg}');
+          screen.render();
+          await launchctlManager.unloadService(selectedServer.plistPath);
+
+          // Wait for shutdown
+          progressModal.setContent('\n  {cyan-fg}Waiting for server to stop...{/cyan-fg}');
+          screen.render();
+          await launchctlManager.waitForServiceStop(selectedServer.label, 5000);
+
+          // Update server status
+          const updatedServer = await statusChecker.updateServerStatus(selectedServer);
+          servers[selectedServerIndex] = updatedServer;
+          serverDataMap.set(updatedServer.id, {
+            server: updatedServer,
+            data: null,
+            error: null,
+          });
+
+          // Save updated config
+          await stateManager.saveServerConfig(updatedServer);
+
+          // Show success briefly
+          progressModal.setContent('\n  {green-fg}✓ Server stopped successfully!{/green-fg}');
+          screen.render();
+          await new Promise(resolve => setTimeout(resolve, 800));
+
+          screen.remove(progressModal);
+          registerHandlers();
+          startPolling();
+
+        } catch (err) {
+          screen.remove(progressModal);
+          await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
+          registerHandlers();
+          startPolling();
+        }
+        return;
+      }
+
+      // Start the server
+
+      // Pause the monitor
+      if (intervalId) clearInterval(intervalId);
+      if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+      unregisterHandlers();
+
+      const progressModal = showProgressModal('Starting server...');
+
+      try {
+        // Recreate plist if needed
+        const plistExists = await fs.access(selectedServer.plistPath).then(() => true).catch(() => false);
+        if (!plistExists) {
+          progressModal.setContent('\n  {cyan-fg}Recreating plist...{/cyan-fg}');
+          screen.render();
+          await launchctlManager.createPlist(selectedServer);
+        }
+
+        // Load service
+        progressModal.setContent('\n  {cyan-fg}Loading service...{/cyan-fg}');
+        screen.render();
+        try {
+          await launchctlManager.loadService(selectedServer.plistPath);
+        } catch (err) {
+          // May already be loaded, continue
+        }
+
+        // Start service
+        progressModal.setContent('\n  {cyan-fg}Starting server...{/cyan-fg}');
+        screen.render();
+        await launchctlManager.startService(selectedServer.label);
+
+        // Wait for startup
+        progressModal.setContent('\n  {cyan-fg}Waiting for server to start...{/cyan-fg}');
+        screen.render();
+        const started = await launchctlManager.waitForServiceStart(selectedServer.label, 5000);
+
+        if (!started) {
+          throw new Error('Server failed to start. Check logs.');
+        }
+
+        // Wait for port to be ready
+        progressModal.setContent('\n  {cyan-fg}Waiting for server to be ready...{/cyan-fg}');
+        screen.render();
+        const portTimeout = 10000;
+        const portStartTime = Date.now();
+        let portReady = false;
+        while (Date.now() - portStartTime < portTimeout) {
+          if (await isPortInUse(selectedServer.port)) {
+            portReady = true;
+            break;
+          }
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        if (!portReady) {
+          throw new Error('Server started but port not responding. Check logs.');
+        }
+
+        // Update server status
+        const updatedServer = await statusChecker.updateServerStatus(selectedServer);
+        servers[selectedServerIndex] = updatedServer;
+        serverDataMap.set(updatedServer.id, {
+          server: updatedServer,
+          data: null,
+          error: null,
+        });
+
+        // Save updated config
+        await stateManager.saveServerConfig(updatedServer);
+
+        // Show success briefly
+        progressModal.setContent('\n  {green-fg}✓ Server started successfully!{/green-fg}');
+        screen.render();
+        await new Promise(resolve => setTimeout(resolve, 800));
+
+        screen.remove(progressModal);
+        registerHandlers();
+        startPolling();
+
+      } catch (err) {
+        screen.remove(progressModal);
+        await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
+        registerHandlers();
+        startPolling();
+      }
+    },
+    create: async () => {
+      // Only available from list view and not in historical view
+      if (viewMode !== 'list' || inHistoricalView) return;
+
+      // Show create server flow
+      await showCreateServerFlow();
+    },
     quit: () => {
       showLoading();
       if (intervalId) clearInterval(intervalId);
@@ -850,6 +1759,12 @@ export async function createMultiServerMonitorUI(
     screen.unkey('H', keyHandlers.history);
     screen.unkey('c', keyHandlers.config);
     screen.unkey('C', keyHandlers.config);
+    screen.unkey('r', keyHandlers.remove);
+    screen.unkey('R', keyHandlers.remove);
+    screen.unkey('s', keyHandlers.startStop);
+    screen.unkey('S', keyHandlers.startStop);
+    screen.unkey('n', keyHandlers.create);
+    screen.unkey('N', keyHandlers.create);
     screen.unkey('q', keyHandlers.quit);
     screen.unkey('Q', keyHandlers.quit);
     screen.unkey('C-c', keyHandlers.quit);
@@ -864,6 +1779,9 @@ export async function createMultiServerMonitorUI(
     screen.key(['m', 'M'], keyHandlers.models);
     screen.key(['h', 'H'], keyHandlers.history);
     screen.key(['c', 'C'], keyHandlers.config);
+    screen.key(['r', 'R'], keyHandlers.remove);
+    screen.key(['s', 'S'], keyHandlers.startStop);
+    screen.key(['n', 'N'], keyHandlers.create);
     screen.key(['q', 'Q', 'C-c'], keyHandlers.quit);
   }
 

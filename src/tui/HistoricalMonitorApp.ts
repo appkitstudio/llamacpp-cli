@@ -12,6 +12,9 @@ import {
 
 type ViewMode = 'recent' | 'hour';
 
+// Shared view mode across both history screens - persists for the session
+let sharedViewMode: ViewMode = 'recent';
+
 interface ChartStats {
   avg: number;
   max: number;
@@ -155,7 +158,6 @@ export async function createHistoricalUI(
   const REFRESH_INTERVAL = 1000;
   let lastGoodRender: string | null = null;
   let consecutiveErrors = 0;
-  let viewMode: ViewMode = 'recent';
 
   const contentBox = createContentBox();
   screen.append(contentBox);
@@ -163,21 +165,21 @@ export async function createHistoricalUI(
   // Chart configurations
   const chartConfigs: Record<string, ChartConfig> = {
     tokenSpeed: {
-      title: 'Model Token Generation Speed (tok/s)',
+      title: 'Server Token Generation Speed (tok/s)',
       color: asciichart.cyan,
       formatValue: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
       isPercentage: false,
       noDataMessage: 'No generation activity in this time window',
     },
     cpu: {
-      title: 'Model CPU Usage (%)',
+      title: 'Server CPU Usage (%)',
       color: asciichart.blue,
       formatValue: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
       isPercentage: true,
       noDataMessage: 'No CPU data in this time window',
     },
     memory: {
-      title: 'Model Memory Usage (GB)',
+      title: 'Server Memory Usage (GB)',
       color: asciichart.magenta,
       formatValue: (x: number) => x.toFixed(2).padStart(6, ' '),
       isPercentage: false,
@@ -206,8 +208,8 @@ export async function createHistoricalUI(
       }
 
       // Header
-      const modeLabel = viewMode === 'recent' ? 'Minute' : 'Hour';
-      const modeColor = viewMode === 'recent' ? 'cyan' : 'magenta';
+      const modeLabel = sharedViewMode === 'recent' ? 'Minute' : 'Hour';
+      const modeColor = sharedViewMode === 'recent' ? 'cyan' : 'magenta';
       let content = `{bold}{blue-fg}\u2550\u2550\u2550 ${server.modelName} (${server.port}) {/blue-fg} `;
       content += `{${modeColor}-fg}[${modeLabel}]{/${modeColor}-fg}{/bold}\n\n`;
 
@@ -218,14 +220,14 @@ export async function createHistoricalUI(
         content += 'Historical data is collected when you run the monitor command.\n';
         content += 'Start monitoring to begin collecting history.\n\n';
         content += divider + '\n';
-        content += '{gray-fg}ESC = Back  Q = Quit{/gray-fg}';
+        content += '{gray-fg}[ESC] Back [Q]uit{/gray-fg}';
         contentBox.setContent(content);
         screen.render();
         return;
       }
 
       const maxChartPoints = Math.min(chartWidth, 80);
-      const displaySnapshots = viewMode === 'recent' && snapshots.length > maxChartPoints
+      const displaySnapshots = sharedViewMode === 'recent' && snapshots.length > maxChartPoints
         ? snapshots.slice(-maxChartPoints)
         : snapshots;
 
@@ -249,7 +251,7 @@ export async function createHistoricalUI(
       }
 
       // Apply downsampling based on view mode
-      const useDownsampling = viewMode === 'hour';
+      const useDownsampling = sharedViewMode === 'hour';
       const values = {
         tokenSpeed: useDownsampling
           ? downsampleMaxTimeWithFullHour(rawData.tokenSpeed, maxChartPoints)
@@ -273,7 +275,7 @@ export async function createHistoricalUI(
 
       // Footer
       content += divider + '\n';
-      content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | H = Toggle Hour View  ESC = Back  Q = Quit{/gray-fg}`;
+      content += `{gray-fg}[T]oggle Hour View [ESC] Back [Q]uit{/gray-fg}`;
 
       contentBox.setContent(content);
       screen.render();
@@ -290,7 +292,7 @@ export async function createHistoricalUI(
           '{bold}{red-fg}Render Error{/red-fg}{/bold}\n\n' +
           `{red-fg}${errorMsg}{/red-fg}\n\n` +
           `Consecutive errors: ${consecutiveErrors}\n\n` +
-          '{gray-fg}ESC = Back  Q = Quit{/gray-fg}'
+          '{gray-fg}[ESC] Back [Q]uit{/gray-fg}'
         );
       }
       screen.render();
@@ -302,24 +304,43 @@ export async function createHistoricalUI(
       clearInterval(refreshIntervalId);
       refreshIntervalId = null;
     }
+    unregisterHandlers();
   }
 
-  screen.key(['h', 'H'], () => {
-    viewMode = viewMode === 'recent' ? 'hour' : 'recent';
-    render();
-  });
+  // Key handler functions (stored for unregistration)
+  const keyHandlers = {
+    toggle: () => {
+      sharedViewMode = sharedViewMode === 'recent' ? 'hour' : 'recent';
+      render();
+    },
+    escape: () => {
+      cleanup();
+      screen.remove(contentBox);
+      onBack();
+    },
+    quit: () => {
+      cleanup();
+      screen.destroy();
+      process.exit(0);
+    },
+  };
 
-  screen.key(['escape'], () => {
-    cleanup();
-    screen.remove(contentBox);
-    onBack();
-  });
+  function registerHandlers(): void {
+    screen.key(['t', 'T'], keyHandlers.toggle);
+    screen.key(['escape'], keyHandlers.escape);
+    screen.key(['q', 'Q', 'C-c'], keyHandlers.quit);
+  }
 
-  screen.key(['q', 'Q', 'C-c'], () => {
-    cleanup();
-    screen.destroy();
-    process.exit(0);
-  });
+  function unregisterHandlers(): void {
+    screen.unkey('t', keyHandlers.toggle);
+    screen.unkey('T', keyHandlers.toggle);
+    screen.unkey('escape', keyHandlers.escape);
+    screen.unkey('q', keyHandlers.quit);
+    screen.unkey('Q', keyHandlers.quit);
+    screen.unkey('C-c', keyHandlers.quit);
+  }
+
+  registerHandlers();
 
   contentBox.setContent('{cyan-fg}\u23f3 Loading historical data...{/cyan-fg}');
   screen.render();
@@ -339,7 +360,6 @@ export async function createMultiServerHistoricalUI(
   const REFRESH_INTERVAL = 3000;
   let lastGoodRender: string | null = null;
   let consecutiveErrors = 0;
-  let viewMode: ViewMode = 'recent';
 
   const contentBox = createContentBox();
   screen.append(contentBox);
@@ -347,21 +367,21 @@ export async function createMultiServerHistoricalUI(
   // Chart configurations for multi-server view
   const chartConfigs: Record<string, ChartConfig> = {
     tokenSpeed: {
-      title: 'Total Model Token Generation Speed (tok/s)',
+      title: 'Total Server Token Generation Speed (tok/s)',
       color: asciichart.cyan,
       formatValue: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
       isPercentage: false,
       noDataMessage: 'No generation activity in this time window',
     },
     cpu: {
-      title: 'Total Model CPU Usage (%)',
+      title: 'Total Server CPU Usage (%)',
       color: asciichart.blue,
       formatValue: (x: number) => Math.round(x).toFixed(0).padStart(6, ' '),
       isPercentage: true,
       noDataMessage: 'No CPU data in this time window',
     },
     memory: {
-      title: 'Total Model Memory Usage (GB)',
+      title: 'Total Server Memory Usage (GB)',
       color: asciichart.magenta,
       formatValue: (x: number) => x.toFixed(2).padStart(6, ' '),
       isPercentage: false,
@@ -384,8 +404,8 @@ export async function createMultiServerHistoricalUI(
       const chartHeight = 5;
 
       // Header
-      const modeLabel = viewMode === 'recent' ? 'Minute' : 'Hour';
-      const modeColor = viewMode === 'recent' ? 'cyan' : 'magenta';
+      const modeLabel = sharedViewMode === 'recent' ? 'Minute' : 'Hour';
+      const modeColor = sharedViewMode === 'recent' ? 'cyan' : 'magenta';
       let content = `{bold}{blue-fg}\u2550\u2550\u2550 All servers (${servers.length}){/blue-fg} `;
       content += `{${modeColor}-fg}[${modeLabel}]{/${modeColor}-fg}{/bold}\n\n`;
 
@@ -453,11 +473,11 @@ export async function createMultiServerHistoricalUI(
 
       if (aggregatedData.length > 0) {
         const maxPoints = Math.min(chartWidth, 80);
-        const displayData = viewMode === 'recent' && aggregatedData.length > maxPoints
+        const displayData = sharedViewMode === 'recent' && aggregatedData.length > maxPoints
           ? aggregatedData.slice(-maxPoints)
           : aggregatedData;
 
-        const useDownsampling = viewMode === 'hour';
+        const useDownsampling = sharedViewMode === 'hour';
 
         // Extract time-series data
         const rawData = {
@@ -492,7 +512,7 @@ export async function createMultiServerHistoricalUI(
 
       // Footer
       content += divider + '\n';
-      content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | H = Toggle Hour View  ESC = Back  Q = Quit{/gray-fg}`;
+      content += `{gray-fg}[T]oggle Hour View [ESC] Back [Q]uit{/gray-fg}`;
 
       contentBox.setContent(content);
       screen.render();
@@ -509,7 +529,7 @@ export async function createMultiServerHistoricalUI(
           '{bold}{red-fg}Render Error{/red-fg}{/bold}\n\n' +
           `{red-fg}${errorMsg}{/red-fg}\n\n` +
           `Consecutive errors: ${consecutiveErrors}\n\n` +
-          '{gray-fg}ESC = Back  Q = Quit{/gray-fg}'
+          '{gray-fg}[ESC] Back [Q]uit{/gray-fg}'
         );
       }
       screen.render();
@@ -521,24 +541,43 @@ export async function createMultiServerHistoricalUI(
       clearInterval(refreshIntervalId);
       refreshIntervalId = null;
     }
+    unregisterHandlers();
   }
 
-  screen.key(['h', 'H'], () => {
-    viewMode = viewMode === 'recent' ? 'hour' : 'recent';
-    render();
-  });
+  // Key handler functions (stored for unregistration)
+  const keyHandlers = {
+    toggle: () => {
+      sharedViewMode = sharedViewMode === 'recent' ? 'hour' : 'recent';
+      render();
+    },
+    escape: () => {
+      cleanup();
+      screen.remove(contentBox);
+      onBack();
+    },
+    quit: () => {
+      cleanup();
+      screen.destroy();
+      process.exit(0);
+    },
+  };
 
-  screen.key(['escape'], () => {
-    cleanup();
-    screen.remove(contentBox);
-    onBack();
-  });
+  function registerHandlers(): void {
+    screen.key(['t', 'T'], keyHandlers.toggle);
+    screen.key(['escape'], keyHandlers.escape);
+    screen.key(['q', 'Q', 'C-c'], keyHandlers.quit);
+  }
 
-  screen.key(['q', 'Q', 'C-c'], () => {
-    cleanup();
-    screen.destroy();
-    process.exit(0);
-  });
+  function unregisterHandlers(): void {
+    screen.unkey('t', keyHandlers.toggle);
+    screen.unkey('T', keyHandlers.toggle);
+    screen.unkey('escape', keyHandlers.escape);
+    screen.unkey('q', keyHandlers.quit);
+    screen.unkey('Q', keyHandlers.quit);
+    screen.unkey('C-c', keyHandlers.quit);
+  }
+
+  registerHandlers();
 
   contentBox.setContent('{cyan-fg}\u23f3 Loading historical data...{/cyan-fg}');
   screen.render();
