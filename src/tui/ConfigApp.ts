@@ -149,6 +149,28 @@ export async function createConfigUI(
     });
   }
 
+  // Parse context size with k/K suffix support (e.g., "4k" -> 4096, "64K" -> 65536)
+  function parseContextSize(input: string): number | null {
+    const trimmed = input.trim().toLowerCase();
+    const match = trimmed.match(/^(\d+(?:\.\d+)?)(k)?$/);
+    if (!match) return null;
+
+    const num = parseFloat(match[1]);
+    const hasK = match[2] === 'k';
+
+    if (isNaN(num) || num <= 0) return null;
+
+    return hasK ? Math.round(num * 1024) : Math.round(num);
+  }
+
+  // Format context size for display (e.g., 4096 -> "4k", 65536 -> "64k")
+  function formatContextSize(value: number): string {
+    if (value >= 1024 && value % 1024 === 0) {
+      return `${value / 1024}k`;
+    }
+    return value.toLocaleString();
+  }
+
   // Format display value for a field
   function formatValue(field: ConfigField): string {
     if (field.type === 'toggle') {
@@ -161,6 +183,10 @@ export async function createConfigUI(
       // Don't use commas for port numbers
       if (field.key === 'port') {
         return String(field.value);
+      }
+      // Use k notation for context size
+      if (field.key === 'ctxSize') {
+        return formatContextSize(field.value);
       }
       return field.value.toLocaleString();
     }
@@ -252,19 +278,35 @@ export async function createConfigUI(
   async function editNumber(field: ConfigField): Promise<void> {
     unregisterHandlers();
     return new Promise((resolve) => {
-      const modal = createModal(`Edit ${field.label}`, 10);
+      const isCtxSize = field.key === 'ctxSize';
+      const modal = createModal(`Edit ${field.label}`, isCtxSize ? 11 : 10);
+
+      const currentDisplay = isCtxSize
+        ? formatContextSize(field.value)
+        : field.value;
 
       const infoText = blessed.text({
         parent: modal,
         top: 1,
         left: 2,
-        content: `Current: ${field.value}`,
+        content: `Current: ${currentDisplay}`,
         tags: true,
       });
 
+      // Add hint for context size
+      if (isCtxSize) {
+        blessed.text({
+          parent: modal,
+          top: 2,
+          left: 2,
+          content: '{gray-fg}Accepts: 4096, 4k, 8k, 16k, 32k, 64k, 128k{/gray-fg}',
+          tags: true,
+        });
+      }
+
       const inputBox = blessed.textbox({
         parent: modal,
-        top: 3,
+        top: isCtxSize ? 4 : 3,
         left: 2,
         right: 2,
         height: 3,
@@ -276,7 +318,7 @@ export async function createConfigUI(
         },
       });
 
-      const helpText = blessed.text({
+      blessed.text({
         parent: modal,
         bottom: 1,
         left: 2,
@@ -284,13 +326,25 @@ export async function createConfigUI(
         tags: true,
       });
 
-      inputBox.setValue(String(field.value));
+      // Pre-fill with k notation for context size
+      const initialValue = isCtxSize
+        ? formatContextSize(field.value)
+        : String(field.value);
+      inputBox.setValue(initialValue);
       screen.render();
       inputBox.focus();
 
       inputBox.on('submit', (value: string) => {
-        const numValue = parseInt(value, 10);
-        if (!isNaN(numValue)) {
+        let numValue: number | null;
+
+        if (isCtxSize) {
+          numValue = parseContextSize(value);
+        } else {
+          numValue = parseInt(value, 10);
+          if (isNaN(numValue)) numValue = null;
+        }
+
+        if (numValue !== null) {
           if (field.validation) {
             const error = field.validation(numValue);
             if (error) {
@@ -687,10 +741,10 @@ export async function createConfigUI(
     });
   }
 
-  // Show saving progress
+  // Show progress modal
   function showProgress(message: string): blessed.Widgets.BoxElement {
-    const modal = createModal('Saving', 5);
-    modal.setContent(`\n  {cyan-fg}⏳ ${message}{/cyan-fg}`);
+    const modal = createModal('Working', 6);
+    modal.setContent(`\n  {cyan-fg}${message}{/cyan-fg}`);
     screen.render();
     return modal;
   }
@@ -780,13 +834,13 @@ export async function createConfigUI(
       if (isModelMigration && newServerId && newModelPath && newModelName) {
         // Model migration path
         if (wasRunning) {
-          progressModal.setContent('\n  {cyan-fg}⏳ Stopping old server...{/cyan-fg}');
+          progressModal.setContent('\n  {cyan-fg}Stopping old server...{/cyan-fg}');
           screen.render();
           await launchctlManager.unloadService(server.plistPath);
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        progressModal.setContent('\n  {cyan-fg}⏳ Removing old configuration...{/cyan-fg}');
+        progressModal.setContent('\n  {cyan-fg}Removing old configuration...{/cyan-fg}');
         screen.render();
 
         try {
@@ -821,14 +875,14 @@ export async function createConfigUI(
           lastStopped: new Date().toISOString(),
         };
 
-        progressModal.setContent('\n  {cyan-fg}⏳ Creating new configuration...{/cyan-fg}');
+        progressModal.setContent('\n  {cyan-fg}Creating new configuration...{/cyan-fg}');
         screen.render();
 
         await stateManager.saveServerConfig(newConfig);
         await launchctlManager.createPlist(newConfig);
 
         if (shouldRestart) {
-          progressModal.setContent('\n  {cyan-fg}⏳ Starting new server...{/cyan-fg}');
+          progressModal.setContent('\n  {cyan-fg}Starting new server...{/cyan-fg}');
           screen.render();
 
           await launchctlManager.loadService(newConfig.plistPath);
@@ -845,7 +899,7 @@ export async function createConfigUI(
       } else {
         // Normal config update (no migration)
         if (wasRunning && shouldRestart) {
-          progressModal.setContent('\n  {cyan-fg}⏳ Stopping server...{/cyan-fg}');
+          progressModal.setContent('\n  {cyan-fg}Stopping server...{/cyan-fg}');
           screen.render();
           await launchctlManager.unloadService(server.plistPath);
           await new Promise(resolve => setTimeout(resolve, 1000));
@@ -866,7 +920,7 @@ export async function createConfigUI(
           updatedConfig.modelName = newModelName;
         }
 
-        progressModal.setContent('\n  {cyan-fg}⏳ Updating configuration...{/cyan-fg}');
+        progressModal.setContent('\n  {cyan-fg}Updating configuration...{/cyan-fg}');
         screen.render();
 
         await stateManager.updateServerConfig(server.id, updatedConfig);
@@ -884,7 +938,7 @@ export async function createConfigUI(
               // Non-fatal
             }
 
-            progressModal.setContent('\n  {cyan-fg}⏳ Starting server...{/cyan-fg}');
+            progressModal.setContent('\n  {cyan-fg}Starting server...{/cyan-fg}');
             screen.render();
 
             await launchctlManager.loadService(fullConfig.plistPath);

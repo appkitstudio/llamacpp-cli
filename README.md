@@ -76,18 +76,15 @@ llamacpp ls
 # Create and start a server (auto-assigns port, uses smart defaults)
 llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf
 
-# View running servers (TUI with Models Management)
-llamacpp ps
+# Open interactive TUI dashboard (multi-server monitoring)
+llamacpp
 # Press 'M' to access Models Management TUI
+
+# List all servers (static table)
+llamacpp ps
 
 # View log sizes for all servers
 llamacpp logs
-
-# Monitor all servers (multi-server dashboard)
-llamacpp server monitor
-
-# Or monitor a specific server
-llamacpp server monitor llama-3.2-3b
 
 # Chat with your model interactively
 llamacpp server run llama-3.2-3b
@@ -352,6 +349,15 @@ Assistant: The capital of France is Paris...
 
 ## Commands
 
+### `llamacpp`
+Launch the interactive TUI dashboard for monitoring and managing servers.
+
+```bash
+llamacpp
+```
+
+See [Interactive TUI Dashboard](#interactive-tui-dashboard) for full details.
+
 ### `llamacpp ls`
 List all GGUF models in ~/models directory.
 
@@ -472,7 +478,7 @@ llamacpp logs --rotate
 
 ## Models Management TUI
 
-The Models Management TUI is accessible by pressing `M` from the `llamacpp ps` list view. It provides a full-featured interface for managing local models and searching/downloading new ones.
+The Models Management TUI is accessible by pressing `M` from the `llamacpp` list view. It provides a full-featured interface for managing local models and searching/downloading new ones.
 
 **Features:**
 - **Browse local models** - View all GGUF files with size, modification date, and server usage
@@ -484,7 +490,7 @@ The Models Management TUI is accessible by pressing `M` from the `llamacpp ps` l
 **Quick Access:**
 ```bash
 # Launch TUI and press 'M' to open Models Management
-llamacpp ps
+llamacpp
 ```
 
 **Models View:**
@@ -502,7 +508,7 @@ llamacpp ps
 - Cancel downloads with ESC (cleans up partial files)
 
 **Keyboard Controls:**
-- **M** - Switch to Models view (from monitor list view)
+- **M** - Switch to Models view (from TUI list view)
 - **↑/↓** or **k/j** - Navigate lists
 - **Enter** - Select/download/delete
 - **S** - Open search view (from models view)
@@ -727,30 +733,23 @@ The compact format shows one line per HTTP request and includes:
 
 Use `--http` to see full request/response JSON, or `--verbose` option to see all internal server logs.
 
-### `llamacpp server monitor [identifier]`
-Real-time monitoring TUI showing server metrics, GPU/CPU usage, and active inference slots.
+## Interactive TUI Dashboard
+
+The main way to monitor and manage servers is through the interactive TUI dashboard, launched by running `llamacpp` with no arguments.
+
+```bash
+llamacpp
+```
 
 ![Server Monitoring TUI](https://raw.githubusercontent.com/dweaver/llamacpp-cli/main/docs/images/monitor-detail.png)
 
-**Two Modes:**
-
-**1. Multi-Server Dashboard (no identifier):**
-```bash
-llamacpp server monitor
-```
-Shows overview of all servers with system resources. Use arrow keys (↑/↓) or vim keys (k/j) to navigate, then press Enter to view server details.
-
-**2. Single-Server Monitor (with identifier):**
-```bash
-# Monitor by partial name
-llamacpp server monitor llama-3.2-3b
-
-# Monitor by port
-llamacpp server monitor 9000
-
-# Monitor by server ID
-llamacpp server monitor llama-3-2-3b
-```
+**Features:**
+- Multi-server dashboard with real-time metrics
+- Drill-down to single-server detail view
+- Create, start, stop, and remove servers without leaving the TUI
+- Edit server configuration inline
+- Access Models Management (press `M`)
+- Historical metrics with time-series charts
 
 **Multi-Server Dashboard:**
 ```
@@ -775,19 +774,21 @@ llamacpp server monitor llama-3-2-3b
 - **System Resources** - GPU/CPU/ANE utilization, memory usage, temperature
 
 **Keyboard Shortcuts:**
-- **Multi-Server Mode:**
+- **List View (Multi-Server):**
   - `↑/↓` or `k/j` - Navigate server list
   - `Enter` - View details for selected server
-  - `ESC` - Back to list (from detail view)
-  - `H` - View historical metrics
-  - `R` - Force refresh now
-  - `+/-` - Adjust update speed
-  - `Q` - Quit
-- **Single-Server Mode:**
-  - `H` - View historical metrics
-  - `R` - Force refresh now
-  - `+/-` - Adjust update speed
-  - `Q` - Quit
+  - `N` - Create new server
+  - `M` - Switch to Models Management
+  - `H` - View historical metrics (all servers)
+  - `ESC` - Exit TUI
+  - `Q` - Quit immediately
+- **Detail View (Single-Server):**
+  - `S` - Start/Stop server (toggles based on status)
+  - `C` - Open configuration screen
+  - `R` - Remove server (with confirmation)
+  - `H` - View historical metrics (this server)
+  - `ESC` - Back to list view
+  - `Q` - Quit immediately
 - **Historical View:**
   - `H` - Toggle Hour View (Recent ↔ Hour)
   - `ESC` - Back to live monitoring
@@ -825,7 +826,7 @@ Press `H` from any live monitoring view to see historical time-series charts. Th
 
 **Data Collection:**
 
-Historical data is automatically collected whenever you run the monitor command. Data is retained for 24 hours in `~/.llamacpp/history/<server-id>.json` files, then automatically pruned.
+Historical data is automatically collected whenever you run the TUI (`llamacpp`). Data is retained for 24 hours in `~/.llamacpp/history/<server-id>.json` files, then automatically pruned.
 
 **Multi-Server Historical View:**
 
@@ -847,13 +848,15 @@ For GPU and CPU utilization metrics, install macmon:
 brew install vladkens/tap/macmon
 ```
 
-Without macmon, the monitor still shows:
+Without macmon, the TUI still shows:
 - ✅ Server status and uptime
 - ✅ Active slots and token generation speeds
 - ✅ Memory usage (via built-in vm_stat)
 - ❌ GPU/CPU/ANE utilization (requires macmon)
 
-**Identifiers:** Port number, server ID, or partial model name
+### Deprecated: `llamacpp server monitor`
+
+The `llamacpp server monitor` command is deprecated. Use `llamacpp` instead to launch the TUI dashboard.
 
 ## Configuration
 
@@ -939,7 +942,9 @@ llamacpp server logs <identifier> --errors
 npm install
 
 # Run in development mode
-npm run dev -- ps
+npm run dev              # Launch TUI
+npm run dev -- ps        # List servers (static table)
+npm run dev -- ls        # List models
 
 # Build for production
 npm run build

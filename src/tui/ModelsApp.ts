@@ -139,7 +139,7 @@ export async function createModelsUI(
 
     // Footer
     content += '\n' + divider + '\n';
-    content += '{gray-fg}[↑/↓] Navigate [Enter/D]elete [S]earch [R]efresh [ESC] Back [Q]uit{/gray-fg}';
+    content += '{gray-fg}[↑/↓] Navigate [D]elete [S]earch [R]efresh [ESC] Back [Q]uit{/gray-fg}';
 
     contentBox.setContent(content);
     screen.render();
@@ -336,7 +336,6 @@ export async function createModelsUI(
     screen.unkey('k', keyHandlers.up);
     screen.unkey('down', keyHandlers.down);
     screen.unkey('j', keyHandlers.down);
-    screen.unkey('enter', keyHandlers.delete);
     screen.unkey('d', keyHandlers.delete);
     screen.unkey('D', keyHandlers.delete);
     screen.unkey('s', keyHandlers.search);
@@ -354,7 +353,7 @@ export async function createModelsUI(
   function registerHandlers() {
     screen.key(['up', 'k'], keyHandlers.up);
     screen.key(['down', 'j'], keyHandlers.down);
-    screen.key(['enter', 'd', 'D'], keyHandlers.delete);
+    screen.key(['d', 'D'], keyHandlers.delete);
     screen.key(['s', 'S'], keyHandlers.search);
     screen.key(['r', 'R'], keyHandlers.refresh);
     screen.key(['escape'], keyHandlers.escape);

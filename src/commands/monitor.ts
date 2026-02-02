@@ -31,7 +31,7 @@ export async function monitorCommand(identifier?: string): Promise<void> {
       screen.destroy();
       throw new Error(
         `Server not found: ${identifier}\n\n` +
-          `Use: llamacpp ps\n` +
+          `Use: llamacpp ps (to list servers)\n` +
           `Or create a new server: llamacpp server create <model>`
       );
     }

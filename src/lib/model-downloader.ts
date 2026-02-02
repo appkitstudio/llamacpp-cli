@@ -13,6 +13,11 @@ export interface DownloadProgress {
   speed: string;
 }
 
+export interface DownloadOptions {
+  silent?: boolean;  // Suppress console output (for TUI)
+  signal?: AbortSignal;  // Abort signal for cancellation
+}
+
 export class ModelDownloader {
   private modelsDir?: string;
   private getModelsDirFn?: () => Promise<string>;
@@ -68,7 +73,8 @@ export class ModelDownloader {
   private downloadFile(
     url: string,
     destPath: string,
-    onProgress?: (downloaded: number, total: number) => void
+    onProgress?: (downloaded: number, total: number) => void,
+    signal?: AbortSignal
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const file = fs.createWriteStream(destPath);
@@ -77,6 +83,7 @@ export class ModelDownloader {
       let lastUpdateTime = Date.now();
       let lastDownloadedBytes = 0;
       let completed = false;
+      let request: ReturnType<typeof https.get> | null = null;
 
       const cleanup = (sigintHandler?: () => void) => {
         if (sigintHandler) {
@@ -95,22 +102,37 @@ export class ModelDownloader {
       };
 
       const sigintHandler = () => {
-        request.destroy();
+        if (request) request.destroy();
         handleError(new Error('Download interrupted by user'), sigintHandler);
       };
 
-      const request = https.get(url, { agent: new https.Agent({ keepAlive: false }) }, (response) => {
+      // Handle abort signal
+      const abortHandler = () => {
+        if (request) request.destroy();
+        handleError(new Error('Download cancelled'), sigintHandler);
+      };
+
+      if (signal) {
+        if (signal.aborted) {
+          handleError(new Error('Download cancelled'), sigintHandler);
+          return;
+        }
+        signal.addEventListener('abort', abortHandler, { once: true });
+      }
+
+      request = https.get(url, { agent: new https.Agent({ keepAlive: false }) }, (response) => {
         // Handle redirects (301, 302, 307, 308)
         if (response.statusCode === 301 || response.statusCode === 302 ||
             response.statusCode === 307 || response.statusCode === 308) {
           const redirectUrl = response.headers.location;
           if (redirectUrl) {
             cleanup(sigintHandler);
+            if (signal) signal.removeEventListener('abort', abortHandler);
             // Wait for file to close before starting new download
             file.close(() => {
               fs.unlink(destPath, () => {
                 // Start recursive download only after cleanup is complete
-                this.downloadFile(redirectUrl, destPath, onProgress)
+                this.downloadFile(redirectUrl, destPath, onProgress, signal)
                   .then(resolve)
                   .catch(reject);
               });
@@ -154,6 +176,7 @@ export class ModelDownloader {
           // Use callback to ensure close completes before resolving
           file.close((err) => {
             cleanup(sigintHandler);
+            if (signal) signal.removeEventListener('abort', abortHandler);
             if (err) reject(err);
             else resolve();
           });
@@ -161,10 +184,12 @@ export class ModelDownloader {
       });
 
       request.on('error', (err) => {
+        if (signal) signal.removeEventListener('abort', abortHandler);
         handleError(err, sigintHandler);
       });
 
       file.on('error', (err) => {
+        if (signal) signal.removeEventListener('abort', abortHandler);
         handleError(err, sigintHandler);
       });
 
@@ -200,15 +225,21 @@ export class ModelDownloader {
     repoId: string,
     filename: string,
     onProgress?: (progress: DownloadProgress) => void,
-    modelsDir?: string
+    modelsDir?: string,
+    options?: DownloadOptions
   ): Promise<string> {
+    const silent = options?.silent ?? false;
+    const signal = options?.signal;
+
     // Use provided models directory or get from config
     const targetDir = modelsDir || await this.getModelsDirectory();
 
-    console.log(chalk.blue(`📥 Downloading ${filename} from Hugging Face...`));
-    console.log(chalk.dim(`Repository: ${repoId}`));
-    console.log(chalk.dim(`Destination: ${targetDir}`));
-    console.log();
+    if (!silent) {
+      console.log(chalk.blue(`📥 Downloading ${filename} from Hugging Face...`));
+      console.log(chalk.dim(`Repository: ${repoId}`));
+      console.log(chalk.dim(`Destination: ${targetDir}`));
+      console.log();
+    }
 
     // Build download URL
     const url = this.buildDownloadUrl(repoId, filename);
@@ -216,8 +247,10 @@ export class ModelDownloader {
 
     // Check if file already exists
     if (fs.existsSync(destPath)) {
-      console.log(chalk.yellow(`⚠️  File already exists: ${filename}`));
-      console.log(chalk.dim('   Remove it first or choose a different filename'));
+      if (!silent) {
+        console.log(chalk.yellow(`⚠️  File already exists: ${filename}`));
+        console.log(chalk.dim('   Remove it first or choose a different filename'));
+      }
       throw new Error('File already exists');
     }
 
@@ -237,8 +270,10 @@ export class ModelDownloader {
       lastTime = now;
       lastDownloaded = downloaded;
 
-      // Display progress bar
-      this.displayProgress(downloaded, total, filename);
+      // Display progress bar (only if not silent)
+      if (!silent) {
+        this.displayProgress(downloaded, total, filename);
+      }
 
       // Call user progress callback if provided
       if (onProgress) {
@@ -250,15 +285,17 @@ export class ModelDownloader {
           speed: `${formatBytes(speed)}/s`,
         });
       }
-    });
+    }, signal);
 
-    // Clear progress line and show completion
-    process.stdout.write('\r\x1b[K');
-    console.log(chalk.green('✅ Download complete!'));
+    if (!silent) {
+      // Clear progress line and show completion
+      process.stdout.write('\r\x1b[K');
+      console.log(chalk.green('✅ Download complete!'));
 
-    const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(chalk.dim(`   Time: ${totalTime}s`));
-    console.log(chalk.dim(`   Location: ${destPath}`));
+      const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(chalk.dim(`   Time: ${totalTime}s`));
+      console.log(chalk.dim(`   Location: ${destPath}`));
+    }
 
     return destPath;
   }

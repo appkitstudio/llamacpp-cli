@@ -32,7 +32,17 @@ const program = new Command();
 program
   .name('llamacpp')
   .description('CLI tool to manage local llama.cpp servers on macOS')
-  .version(packageJson.version, '-v, --version', 'Output the version number');
+  .version(packageJson.version, '-v, --version', 'Output the version number')
+  .action(async () => {
+    // Default action: launch TUI when no command provided
+    try {
+      const { tuiCommand } = await import('./commands/tui');
+      await tuiCommand();
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
 
 // List models
 program
@@ -47,14 +57,13 @@ program
     }
   });
 
-// List running servers
+// List servers (static table)
 program
-  .command('ps [identifier]')
-  .description('Interactive server monitoring dashboard')
-  .option('--table', 'Show static table instead of TUI (for scripting)')
-  .action(async (identifier?: string, options?: { table?: boolean }) => {
+  .command('ps')
+  .description('List all servers with status (static table)')
+  .action(async () => {
     try {
-      await psCommand(identifier, options);
+      await psCommand();
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);
@@ -299,14 +308,14 @@ server
     }
   });
 
-// Monitor server (deprecated - redirects to ps)
+// Monitor server (deprecated - redirects to TUI)
 server
   .command('monitor [identifier]')
-  .description('Monitor server with real-time metrics TUI (deprecated: use "llamacpp ps" instead)')
+  .description('Monitor server with real-time metrics TUI (deprecated: use "llamacpp" instead)')
   .action(async (identifier?: string) => {
     try {
       console.log(chalk.yellow('⚠️  The "monitor" command is deprecated and will be removed in a future version.'));
-      console.log(chalk.dim('   Please use "llamacpp ps" instead for the same functionality.\n'));
+      console.log(chalk.dim('   Please use "llamacpp" instead for the same functionality.\n'));
       await monitorCommand(identifier);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);

@@ -306,10 +306,13 @@ export async function createSearchUI(
       tags: true,
     });
 
+    // Create abort controller for cancellation
+    const abortController = new AbortController();
     let downloadCancelled = false;
 
     // Update progress display
     function updateProgress(progress: DownloadProgress) {
+      if (downloadCancelled) return;
       const percentage = progress.percentage.toFixed(1);
       const barLength = 40;
       const filled = Math.round((progress.percentage / 100) * barLength);
@@ -335,11 +338,24 @@ export async function createSearchUI(
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
+    // Temporarily unregister main handlers during download
+    screen.unkey('escape', keyHandlers.escape);
+    screen.unkey('C-c', keyHandlers.quit);
+
     // Handle cancel
     const cancelHandler = () => {
       downloadCancelled = true;
+      abortController.abort();  // Actually abort the download
+    };
+
+    // Cleanup function to restore handlers
+    const cleanup = () => {
+      screen.unkey('escape', cancelHandler);
+      screen.unkey('C-c', cancelHandler);
       screen.remove(progressBox);
-      render();
+      // Re-register main handlers
+      screen.key(['escape'], keyHandlers.escape);
+      screen.key(['C-c'], keyHandlers.quit);
     };
 
     screen.append(progressBox);
@@ -348,7 +364,7 @@ export async function createSearchUI(
     screen.render();
 
     try {
-      // Start download
+      // Start download with silent mode and abort signal
       await modelDownloader.downloadModel(
         model.modelId,
         filename,
@@ -357,11 +373,14 @@ export async function createSearchUI(
             updateProgress(progress);
           }
         },
-        modelsDir
+        modelsDir,
+        { silent: true, signal: abortController.signal }
       );
 
       if (!downloadCancelled) {
         // Show success message
+        cleanup();
+
         const successBox = blessed.message({
           parent: screen,
           top: 'center',
@@ -377,19 +396,18 @@ export async function createSearchUI(
         });
 
         successBox.display(
-          `{bold}✅ Download complete!{/bold}\n\nFile: ${filename}\nLocation: ${modelsDir}\n\nPress any key to continue`,
+          `{bold}Download complete!{/bold}\n\nFile: ${filename}\nLocation: ${modelsDir}\n\nPress any key to continue`,
           () => {
             screen.remove(successBox);
-            screen.remove(progressBox);
-            screen.unkey('escape', cancelHandler);
-            screen.unkey('C-c', cancelHandler);
             render();
           }
         );
       }
     } catch (error) {
+      cleanup();
+
       if (!downloadCancelled) {
-        // Show error message
+        // Show error message (not cancelled by user)
         const errorBox = blessed.message({
           parent: screen,
           top: 'center',
@@ -407,11 +425,11 @@ export async function createSearchUI(
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         errorBox.display(`{bold}Download failed{/bold}\n\n${errorMsg}\n\nPress any key to continue`, () => {
           screen.remove(errorBox);
-          screen.remove(progressBox);
-          screen.unkey('escape', cancelHandler);
-          screen.unkey('C-c', cancelHandler);
           render();
         });
+      } else {
+        // Cancelled by user - just render
+        render();
       }
     }
   }
