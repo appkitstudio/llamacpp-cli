@@ -26,7 +26,8 @@ export async function createMultiServerMonitorUI(
   servers: ServerConfig[],
   skipConnectingMessage: boolean = false,
   directJumpIndex?: number,
-  onModels?: (controls: MonitorUIControls) => void
+  onModels?: (controls: MonitorUIControls) => void,
+  onFirstRender?: () => void
 ): Promise<MonitorUIControls> {
   let updateInterval = 2000;
   let intervalId: NodeJS.Timeout | null = null;
@@ -37,6 +38,7 @@ export async function createMultiServerMonitorUI(
   let lastSystemMetrics: SystemMetrics | null = null;
   let cameFromDirectJump = directJumpIndex !== undefined; // Track if we entered via ps <id>
   let inHistoricalView = false; // Track whether we're in historical view to prevent key conflicts
+  let hasCalledFirstRender = false; // Track if we've called onFirstRender callback
 
   // Spinner animation
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -655,6 +657,13 @@ export async function createMultiServerMonitorUI(
       }
 
       contentBox.setContent(content);
+
+      // Call onFirstRender callback before first render (to clean up splash screen)
+      if (!hasCalledFirstRender && onFirstRender) {
+        hasCalledFirstRender = true;
+        onFirstRender();
+      }
+
       screen.render();
 
       // Clear loading state

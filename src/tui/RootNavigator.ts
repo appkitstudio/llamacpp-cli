@@ -2,6 +2,7 @@ import blessed from 'blessed';
 import { ServerConfig } from '../types/server-config.js';
 import { createMultiServerMonitorUI, MonitorUIControls } from './MultiServerMonitorApp.js';
 import { createModelsUI } from './ModelsApp.js';
+import { createSplashScreen } from './SplashScreen.js';
 
 type RootView = 'monitor' | 'models';
 
@@ -15,6 +16,22 @@ export async function createRootNavigator(
 ): Promise<void> {
   let currentView: RootView = 'monitor';
   let isExiting = false;
+
+  // Show splash screen with loading sequence
+  const cleanupSplash = await createSplashScreen(screen, {
+    onLoadConfigs: async () => {
+      // Configs are already loaded (passed in), but simulate brief work
+      await new Promise(resolve => setTimeout(resolve, 150));
+    },
+    onCheckServices: async () => {
+      // Services already checked by ps command, but simulate brief work
+      await new Promise(resolve => setTimeout(resolve, 150));
+    },
+    onInitMetrics: async () => {
+      // Metrics collectors initialize on first poll, but simulate brief work
+      await new Promise(resolve => setTimeout(resolve, 150));
+    },
+  });
 
   // Callback to switch to Models view (receives controls from Monitor)
   const switchToModels = async (monitorControls: MonitorUIControls) => {
@@ -39,13 +56,15 @@ export async function createRootNavigator(
     );
   };
 
-  // Start with Monitor view
+  // Start with Monitor view (skip connecting message since splash already showed loading)
+  // Pass cleanupSplash as onFirstRender callback - splash stays until monitor data is ready
   await createMultiServerMonitorUI(
     screen,
     servers,
-    false, // Show "Connecting to servers..." on initial load
+    true, // Skip "Connecting to servers..." since splash screen showed loading
     directJumpToServer,
-    switchToModels
+    switchToModels,
+    cleanupSplash
   );
 
   // Handle cleanup on exit
