@@ -2,6 +2,7 @@ import blessed from 'blessed';
 import { modelSearch, HFModelResult } from '../lib/model-search.js';
 import { modelDownloader, DownloadProgress } from '../lib/model-downloader.js';
 import { stateManager } from '../lib/state-manager.js';
+import { formatBytes } from '../utils/format-utils.js';
 
 interface SearchState {
   query: string;
@@ -327,15 +328,6 @@ export async function createSearchUI(
 
       progressBox.setContent(content);
       screen.render();
-    }
-
-    // Format bytes helper
-    function formatBytes(bytes: number): string {
-      if (bytes === 0) return '0 B';
-      const k = 1024;
-      const sizes = ['B', 'KB', 'MB', 'GB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
     // Temporarily unregister main handlers during download

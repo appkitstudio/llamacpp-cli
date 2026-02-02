@@ -1,11 +1,10 @@
 import chalk from 'chalk';
 import blessed from 'blessed';
-import { stateManager } from '../lib/state-manager';
-import { statusChecker } from '../lib/status-checker';
+import { stateManager } from '../lib/state-manager.js';
+import { statusChecker } from '../lib/status-checker.js';
 import { createRootNavigator } from '../tui/RootNavigator.js';
 
 export async function tuiCommand(): Promise<void> {
-  // Get all servers and update their statuses
   const servers = await stateManager.getAllServers();
 
   if (servers.length === 0) {
@@ -14,15 +13,13 @@ export async function tuiCommand(): Promise<void> {
     return;
   }
 
-  // Update all server statuses
-  const updated = await statusChecker.updateAllServerStatuses();
+  const serversWithStatus = await statusChecker.updateAllServerStatuses();
 
-  // Launch multi-server TUI
   const screen = blessed.screen({
     smartCSR: true,
-    title: 'llama.cpp Multi-Server Monitor',
+    title: 'llama.cpp Server Monitor',
     fullUnicode: true,
   });
 
-  await createRootNavigator(screen, updated);
+  await createRootNavigator(screen, serversWithStatus);
 }
