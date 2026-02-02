@@ -5,6 +5,7 @@ import { SystemCollector } from '../lib/system-collector.js';
 import { MonitorData, SystemMetrics } from '../types/monitor-types.js';
 import { HistoryManager } from '../lib/history-manager.js';
 import { createHistoricalUI, createMultiServerHistoricalUI } from './HistoricalMonitorApp.js';
+import { createConfigUI } from './ConfigApp.js';
 
 type ViewMode = 'list' | 'detail';
 
@@ -449,6 +450,10 @@ export async function createMultiServerMonitorUI(
       content += `{dim}Update config: llamacpp server config ${server.port} [options]{/dim}\n`;
       content += `{dim}View logs:     llamacpp server logs ${server.port}{/dim}\n`;
 
+      // Footer
+      content += '\n' + divider + '\n';
+      content += `{gray-fg}[C]onfig [H]istory [ESC] Back [Q]uit{/gray-fg}`;
+
       return content;
     }
 
@@ -539,7 +544,7 @@ export async function createMultiServerMonitorUI(
 
     // Footer
     content += divider + '\n';
-    content += `{gray-fg}Updated: ${data.lastUpdated.toLocaleTimeString()} | [H]istory [ESC] Back [Q]uit{/gray-fg}`;
+    content += `{gray-fg}Updated: ${data.lastUpdated.toLocaleTimeString()} | [C]onfig [H]istory [ESC] Back [Q]uit{/gray-fg}`;
 
     return content;
   }
@@ -772,6 +777,44 @@ export async function createMultiServerMonitorUI(
         });
       }
     },
+    config: async () => {
+      // Only available from detail view and not in historical view
+      if (viewMode !== 'detail' || inHistoricalView) return;
+
+      // Pause monitor
+      controls.pause();
+
+      const selectedServer = servers[selectedServerIndex];
+      await createConfigUI(screen, selectedServer, (updatedServer) => {
+        if (updatedServer) {
+          // Check if server ID changed (model migration)
+          if (updatedServer.id !== selectedServer.id) {
+            // Replace server in array and update aggregator/history manager
+            servers[selectedServerIndex] = updatedServer;
+            aggregators.delete(selectedServer.id);
+            historyManagers.delete(selectedServer.id);
+            serverDataMap.delete(selectedServer.id);
+            aggregators.set(updatedServer.id, new MetricsAggregator(updatedServer));
+            historyManagers.set(updatedServer.id, new HistoryManager(updatedServer.id));
+            serverDataMap.set(updatedServer.id, {
+              server: updatedServer,
+              data: null,
+              error: null,
+            });
+          } else {
+            // Update server in place
+            servers[selectedServerIndex] = updatedServer;
+            serverDataMap.set(updatedServer.id, {
+              server: updatedServer,
+              data: null,
+              error: null,
+            });
+          }
+        }
+        // Resume monitor
+        controls.resume();
+      });
+    },
     quit: () => {
       showLoading();
       if (intervalId) clearInterval(intervalId);
@@ -796,6 +839,8 @@ export async function createMultiServerMonitorUI(
     screen.unkey('M', keyHandlers.models);
     screen.unkey('h', keyHandlers.history);
     screen.unkey('H', keyHandlers.history);
+    screen.unkey('c', keyHandlers.config);
+    screen.unkey('C', keyHandlers.config);
     screen.unkey('q', keyHandlers.quit);
     screen.unkey('Q', keyHandlers.quit);
     screen.unkey('C-c', keyHandlers.quit);
@@ -809,6 +854,7 @@ export async function createMultiServerMonitorUI(
     screen.key(['escape'], keyHandlers.escape);
     screen.key(['m', 'M'], keyHandlers.models);
     screen.key(['h', 'H'], keyHandlers.history);
+    screen.key(['c', 'C'], keyHandlers.config);
     screen.key(['q', 'Q', 'C-c'], keyHandlers.quit);
   }
 
