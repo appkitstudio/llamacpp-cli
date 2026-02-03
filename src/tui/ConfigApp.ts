@@ -84,7 +84,7 @@ export async function createConfigUI(
         originalValue: server.ctxSize,
         validation: (value: number) => {
           if (value < 512) return 'Must be at least 512';
-          if (value > 131072) return 'Must be at most 131072';
+          if (value > 2097152) return 'Must be at most 2097152 (2M)';
           return null;
         },
       },
