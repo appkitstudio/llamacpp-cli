@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.10.1](https://github.com/appkitstudio/llamacpp-cli/compare/v1.10.0...v1.10.1) (2026-02-04)
+
+
+### Features
+
+* increase max context size limit from 128k to 2M ([c3a810c](https://github.com/appkitstudio/llamacpp-cli/commit/c3a810c782f9fd2146bfb9cfb8ac3dcbbf8b8abf))
+
+
+### Bug Fixes
+
+* support both old and new llama.cpp log formats in log parser ([002c97e](https://github.com/appkitstudio/llamacpp-cli/commit/002c97e0f67cba51bc31c34980a9cb91c5e09cd9))
+
 ## [1.10.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.9.0...v1.10.0) (2026-02-02)
 
 
