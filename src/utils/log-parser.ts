@@ -19,12 +19,26 @@ export class LogParser {
   private isBuffering = false;
 
   /**
+   * Check if line is a request status line (contains method/endpoint/status, no JSON)
+   * Handles both old and new formats:
+   * - Old: log_server_r: request: POST /v1/chat/completions 127.0.0.1 200
+   * - New: log_server_r: done request: POST /v1/messages 172.16.0.114 200
+   */
+  private isRequestStatusLine(line: string): boolean {
+    return (
+      (line.includes('log_server_r: request:') || line.includes('log_server_r: done request:')) &&
+      !line.includes('{') &&
+      /(?:done )?request: (POST|GET|PUT|DELETE)/.test(line)
+    );
+  }
+
+  /**
    * Process log lines and output compact format
    */
   processLine(line: string, callback: (compactLine: string) => void): void {
-    // Check if this is a simple single-line format (no JSON, non-verbose mode)
-    // Format: srv  log_server_r: request: POST /v1/chat/completions 127.0.0.1 200
-    if (line.includes('log_server_r: request:') && !line.includes('{')) {
+    // Check if this is a request status line (no JSON, has method/endpoint/status)
+    // Handles both old format (request:) and new format (done request:)
+    if (this.isRequestStatusLine(line)) {
       // Check if this is the start of verbose format (status line before JSON)
       // or a simple single-line log
       if (this.isBuffering) {
@@ -79,12 +93,15 @@ export class LogParser {
 
   /**
    * Parse simple single-line format (non-verbose mode)
-   * Format: srv  log_server_r: request: POST /v1/chat/completions 127.0.0.1 200
+   * Handles both old and new formats:
+   * - Old: srv  log_server_r: request: POST /v1/chat/completions 127.0.0.1 200
+   * - New: srv  log_server_r: done request: POST /v1/messages 172.16.0.114 200
    */
   private parseSimpleFormat(line: string): string | null {
     try {
       const timestamp = this.extractTimestamp(line);
-      const requestMatch = line.match(/request: (POST|GET|PUT|DELETE) ([^\s]+) ([^\s]+) (\d+)/);
+      // Match both "request:" and "done request:" formats
+      const requestMatch = line.match(/(?:done )?request: (POST|GET|PUT|DELETE) ([^\s]+) ([^\s]+) (\d+)/);
       if (!requestMatch) return null;
 
       const [, method, endpoint, ip, status] = requestMatch;
@@ -98,40 +115,46 @@ export class LogParser {
 
   /**
    * Consolidate buffered request/response lines into single line
+   * Handles both old and new llama.cpp log formats
    */
   private consolidateRequest(lines: string[]): string | null {
     try {
       // Parse first line: timestamp and request info
+      // Match both "request:" and "done request:" formats
       const firstLine = lines[0];
       const timestamp = this.extractTimestamp(firstLine);
-      const requestMatch = firstLine.match(/request: (POST|GET|PUT|DELETE) (\/[^\s]+) ([^\s]+) (\d+)/);
+      const requestMatch = firstLine.match(/(?:done )?request: (POST|GET|PUT|DELETE) (\/[^\s]+) ([^\s]+) (\d+)/);
       if (!requestMatch) return null;
 
       const [, method, endpoint, ip, status] = requestMatch;
 
-      // Parse request JSON (second line)
+      // Parse request JSON (line with JSON body)
       const requestLine = lines.find((l) => l.includes('log_server_r: request:') && l.includes('{'));
-      if (!requestLine) return null;
 
-      const requestJson = this.extractJson(requestLine);
-      if (!requestJson) return null;
+      let userMessage = '';
+      if (requestLine) {
+        const requestJson = this.extractJson(requestLine);
+        if (requestJson) {
+          userMessage = this.extractUserMessage(requestJson);
+        }
+      }
 
-      const userMessage = this.extractUserMessage(requestJson);
-
-      // Parse response JSON (last line)
+      // Parse response JSON (may be empty in new format)
       const responseLine = lines.find((l) => l.includes('log_server_r: response:'));
-      if (!responseLine) return null;
+      let tokensIn = 0;
+      let tokensOut = 0;
+      let responseTimeMs = 0;
 
-      const responseJson = this.extractJson(responseLine);
-      if (!responseJson) return null;
+      if (responseLine) {
+        const responseJson = this.extractJson(responseLine);
+        if (responseJson) {
+          tokensIn = responseJson.usage?.prompt_tokens || 0;
+          tokensOut = responseJson.usage?.completion_tokens || 0;
+          responseTimeMs = this.extractResponseTime(responseJson);
+        }
+      }
 
-      const tokensIn = responseJson.usage?.prompt_tokens || 0;
-      const tokensOut = responseJson.usage?.completion_tokens || 0;
-
-      // Extract response time from verbose timings
-      const responseTimeMs = this.extractResponseTime(responseJson);
-
-      // Format compact line
+      // Format compact line (works even without response data)
       return this.formatCompactLine({
         timestamp,
         method,
@@ -179,14 +202,27 @@ export class LogParser {
 
   /**
    * Extract first user message from request JSON
+   * Handles both string content and array content formats:
+   * - String: {"role":"user","content":"Hello"}
+   * - Array: {"role":"user","content":[{"type":"text","text":"Hello"}]}
    */
   private extractUserMessage(requestJson: any): string {
     const messages = requestJson.messages || [];
     const userMsg = messages.find((m: any) => m.role === 'user');
     if (!userMsg || !userMsg.content) return '';
 
-    // Truncate to first 50 characters
-    const content = userMsg.content.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    let content: string;
+
+    // Handle array format (e.g., Claude/Anthropic API style)
+    if (Array.isArray(userMsg.content)) {
+      const textPart = userMsg.content.find((p: any) => p.type === 'text');
+      content = textPart?.text || '';
+    } else {
+      content = userMsg.content;
+    }
+
+    // Clean and truncate to first 50 characters
+    content = content.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
     return content.length > 50 ? content.substring(0, 47) + '...' : content;
   }
 
