@@ -78,3 +78,21 @@ export function truncate(str: string, maxLength: number): string {
 export function pad(str: string, length: number, char = ' '): string {
   return str.padEnd(length, char);
 }
+
+/**
+ * Format context size to human-readable format
+ * Uses "k" suffix for clean multiples of 1024 (e.g., 32768 → "32k")
+ * Falls back to full number with "tokens" for non-standard sizes
+ */
+export function formatContextSize(tokens: number): string {
+  // Check if it's a clean multiple of 1024
+  if (tokens % 1024 === 0) {
+    const k = tokens / 1024;
+    // Only use "k" format for reasonable sizes (1k to 1024k i.e., up to 1M)
+    if (k >= 1 && k <= 1024) {
+      return `${k}k`;
+    }
+  }
+  // For non-standard sizes or very large values, show full number
+  return `${tokens.toLocaleString()} tokens`;
+}

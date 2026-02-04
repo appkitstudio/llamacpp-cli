@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { stateManager } from '../lib/state-manager';
 import { statusChecker } from '../lib/status-checker';
-import { formatUptime, formatBytes } from '../utils/format-utils';
+import { formatUptime, formatBytes, formatContextSize } from '../utils/format-utils';
 import { getProcessMemory } from '../utils/process-utils';
 import { getFileSize, formatFileSize, getArchivedLogInfo } from '../utils/log-utils';
 import { fileExists } from '../utils/file-utils';
@@ -89,7 +89,7 @@ export async function serverShowCommand(identifier: string): Promise<void> {
   console.log(chalk.bold('Configuration:'));
   console.log('─'.repeat(70));
   console.log(`${chalk.bold('Threads:')}        ${updatedServer.threads}`);
-  console.log(`${chalk.bold('Context Size:')}   ${updatedServer.ctxSize.toLocaleString()}`);
+  console.log(`${chalk.bold('Context Size:')}   ${formatContextSize(updatedServer.ctxSize)} (total)`);
   console.log(`${chalk.bold('GPU Layers:')}     ${updatedServer.gpuLayers}`);
   console.log(`${chalk.bold('Embeddings:')}     ${updatedServer.embeddings ? 'enabled' : 'disabled'}`);
   console.log(`${chalk.bold('Jinja:')}          ${updatedServer.jinja ? 'enabled' : 'disabled'}`);

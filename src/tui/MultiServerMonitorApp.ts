@@ -16,7 +16,7 @@ import { portManager } from '../lib/port-manager.js';
 import { configGenerator, ServerOptions } from '../lib/config-generator.js';
 import { ModelInfo } from '../types/model-info.js';
 import { getLogsDir, getLaunchAgentsDir, ensureDir, parseMetalMemoryFromLog } from '../utils/file-utils.js';
-import { formatBytes } from '../utils/format-utils.js';
+import { formatBytes, formatContextSize } from '../utils/format-utils.js';
 import { isPortInUse } from '../utils/process-utils.js';
 
 type ViewMode = 'list' | 'detail';
@@ -467,7 +467,7 @@ export async function createMultiServerMonitorUI(
 
     content += `Model:    ${server.modelName}`;
     if (data.server.contextSize) {
-      content += `    Context: ${data.server.contextSize} tokens`;
+      content += `    Context: ${formatContextSize(data.server.contextSize)}/slot`;
     }
     content += '\n';
 
