@@ -1,6 +1,6 @@
 {
   "name": "@appkit/llamacpp-cli",
-  "version": "1.10.1",
+  "version": "1.11.0",
   "description": "CLI tool to manage local llama.cpp servers on macOS",
   "main": "dist/cli.js",
   "bin": {
