@@ -1,0 +1,358 @@
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
+import { useServers, useStartServer, useStopServer, useDeleteServer } from '../hooks/useApi';
+import { Play, Square, Trash2, Clock, Cpu, Database, Loader2, Settings, Plus, FileText } from 'lucide-react';
+import { ServerConfigModal } from '../components/ServerConfigModal';
+import { CreateServerModal } from '../components/CreateServerModal';
+import type { Server } from '../types/api';
+
+export function Servers() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { data: serversData, isLoading } = useServers();
+  const startServer = useStartServer();
+  const stopServer = useStopServer();
+  const deleteServer = useDeleteServer();
+
+  const [actionLoading, setActionLoading] = useState<{ id: string; action: 'start' | 'stop' | 'delete' } | null>(null);
+  const [configServer, setConfigServer] = useState<Server | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // Track pending action to clear spinner when status actually changes
+  const pendingAction = useRef<{ id: string; expectedStatus: 'running' | 'stopped' | 'deleted' } | null>(null);
+
+  const servers = serversData?.servers || [];
+
+  // Clear spinner when server status actually changes to expected value
+  useEffect(() => {
+    if (pendingAction.current && actionLoading) {
+      const { id, expectedStatus } = pendingAction.current;
+
+      if (expectedStatus === 'deleted') {
+        // For delete, check if server is gone from list
+        const serverStillExists = servers.some(s => s.id === id);
+        if (!serverStillExists) {
+          pendingAction.current = null;
+          setActionLoading(null);
+        }
+      } else {
+        // For start/stop, check if status matches expected
+        const server = servers.find(s => s.id === id);
+        if (server && server.status === expectedStatus) {
+          pendingAction.current = null;
+          setActionLoading(null);
+        }
+      }
+    }
+  }, [servers, actionLoading]);
+
+  const handleStart = async (id: string) => {
+    setActionLoading({ id, action: 'start' });
+    pendingAction.current = { id, expectedStatus: 'running' };
+    try {
+      await startServer.mutateAsync(id);
+      await queryClient.refetchQueries({ queryKey: ['servers'] });
+    } catch {
+      // On error, clear immediately
+      pendingAction.current = null;
+      setActionLoading(null);
+    }
+  };
+
+  const handleStop = async (id: string) => {
+    setActionLoading({ id, action: 'stop' });
+    pendingAction.current = { id, expectedStatus: 'stopped' };
+    try {
+      await stopServer.mutateAsync(id);
+      await queryClient.refetchQueries({ queryKey: ['servers'] });
+    } catch {
+      // On error, clear immediately
+      pendingAction.current = null;
+      setActionLoading(null);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm(`Delete server ${id}? This will stop the server and remove its configuration.`)) return;
+    setActionLoading({ id, action: 'delete' });
+    pendingAction.current = { id, expectedStatus: 'deleted' };
+    try {
+      await deleteServer.mutateAsync(id);
+      await queryClient.refetchQueries({ queryKey: ['servers'] });
+    } catch {
+      // On error, clear immediately
+      pendingAction.current = null;
+      setActionLoading(null);
+    }
+  };
+
+  // Render status badge with transitional states
+  const renderStatusBadge = (server: Server) => {
+    const serverId = server.id;
+
+    if (actionLoading?.id === serverId) {
+      if (actionLoading.action === 'stop') {
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-orange-50 text-orange-700 border border-orange-200">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Stopping
+          </span>
+        );
+      }
+      if (actionLoading.action === 'start') {
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Starting
+          </span>
+        );
+      }
+      if (actionLoading.action === 'delete') {
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Deleting
+          </span>
+        );
+      }
+    }
+
+    if (server.status === 'running') {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+          Running
+        </span>
+      );
+    }
+
+    if (server.status === 'crashed') {
+      return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-50 text-red-700 border border-red-200">
+          Crashed
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+        Stopped
+      </span>
+    );
+  };
+
+  const formatContextSize = (size: number) => {
+    if (size >= 1024) return `${(size / 1024).toFixed(0)}K`;
+    return size.toString();
+  };
+
+  if (isLoading) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-12">
+        <p className="text-gray-500 text-center">Loading...</p>
+      </div>
+    );
+  }
+
+  const runningServers = servers.filter(s => s.status === 'running');
+  const stoppedServers = servers.filter(s => s.status !== 'running');
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="text-sm text-gray-500">
+          {servers.length} server{servers.length !== 1 ? 's' : ''}
+          {runningServers.length > 0 && ` · ${runningServers.length} running`}
+        </div>
+        <button
+          onClick={() => setShowCreateModal(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+          Create Server
+        </button>
+      </div>
+
+      {/* Running Servers */}
+      {runningServers.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-4">
+            Running
+          </h2>
+          <div className="space-y-2">
+            {runningServers.map((server) => (
+              <div
+                key={server.id}
+                className="bg-white border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-medium text-gray-900 truncate">
+                      {server.modelName.replace('.gguf', '')}
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Port {server.port}
+                    </p>
+                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <Cpu className="w-3.5 h-3.5" />
+                        {server.threads} threads
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Database className="w-3.5 h-3.5" />
+                        {formatContextSize(server.ctxSize)} ctx
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" />
+                        {server.gpuLayers} GPU layers
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 ml-4">
+                    {renderStatusBadge(server)}
+                    <button
+                      onClick={() => navigate(`/servers/${server.id}/logs`)}
+                      disabled={actionLoading?.id === server.id}
+                      className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                      title="View Logs"
+                    >
+                      <FileText className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setConfigServer(server)}
+                      disabled={actionLoading?.id === server.id}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                      title="Configure"
+                    >
+                      <Settings className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleStop(server.id)}
+                      disabled={actionLoading?.id === server.id}
+                      className="p-1.5 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                      title="Stop"
+                    >
+                      <Square className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(server.id)}
+                      disabled={actionLoading?.id === server.id}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Stopped Servers */}
+      {stoppedServers.length > 0 && (
+        <div>
+          <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-4">
+            Stopped
+          </h2>
+          <div className="space-y-2">
+            {stoppedServers.map((server) => (
+              <div
+                key={server.id}
+                className="bg-white border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-base font-medium text-gray-900 truncate">
+                      {server.modelName.replace('.gguf', '')}
+                    </h3>
+                    <p className="text-sm text-gray-500 mt-0.5">
+                      Port {server.port}
+                    </p>
+                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <Cpu className="w-3.5 h-3.5" />
+                        {server.threads} threads
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Database className="w-3.5 h-3.5" />
+                        {formatContextSize(server.ctxSize)} ctx
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 ml-4">
+                    {renderStatusBadge(server)}
+                    <button
+                      onClick={() => navigate(`/servers/${server.id}/logs`)}
+                      disabled={actionLoading?.id === server.id}
+                      className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                      title="View Logs"
+                    >
+                      <FileText className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setConfigServer(server)}
+                      disabled={actionLoading?.id === server.id}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                      title="Configure"
+                    >
+                      <Settings className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleStart(server.id)}
+                      disabled={actionLoading?.id === server.id}
+                      className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                      title="Start"
+                    >
+                      <Play className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(server.id)}
+                      disabled={actionLoading?.id === server.id}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                      title="Delete"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {servers.length === 0 && (
+        <div className="text-center py-12">
+          <p className="text-gray-500">No servers configured</p>
+          <p className="text-sm text-gray-400 mt-2">
+            Click "Create Server" to get started
+          </p>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Create Server
+          </button>
+        </div>
+      )}
+
+      {/* Config Modal */}
+      <ServerConfigModal
+        server={configServer}
+        isOpen={configServer !== null}
+        onClose={() => setConfigServer(null)}
+      />
+
+      {/* Create Modal */}
+      <CreateServerModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+      />
+    </div>
+  );
+}
