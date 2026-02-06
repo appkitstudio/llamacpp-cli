@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.12.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.11.0...v1.12.0) (2026-02-06)
+
+
+### Features
+
+* add filtering functionality for models and servers in the admin interface ([fb8eb57](https://github.com/appkitstudio/llamacpp-cli/commit/fb8eb573311470b7e4e20a204af1df81bafef86d))
+* add Router and RouterLogs pages with functionality to manage router service ([6efda90](https://github.com/appkitstudio/llamacpp-cli/commit/6efda906f224997476a75507f97916b2b00e4cbf))
+* filter health check logs and improve log viewer UX ([ab42b2b](https://github.com/appkitstudio/llamacpp-cli/commit/ab42b2bd7c42c4f146ae51b9bc9060685844301e))
+* initialize web application with React, TypeScript, and Tailwind CSS ([f30e0d7](https://github.com/appkitstudio/llamacpp-cli/commit/f30e0d7f106b7633ed716083e35abf098efbb10b))
+
 ## [1.10.1](https://github.com/appkitstudio/llamacpp-cli/compare/v1.10.0...v1.10.1) (2026-02-04)
 
 
