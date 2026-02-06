@@ -6,12 +6,19 @@
   "bin": {
     "llamacpp": "./bin/llamacpp"
   },
+  "files": [
+    "dist/",
+    "bin/",
+    "web/dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "tsx src/cli.ts",
     "build": "tsc",
     "start": "node dist/cli.js",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run build && cd web && npm install && npm run build && cd ..",
     "release": "commit-and-tag-version",
     "release:minor": "commit-and-tag-version --release-as minor",
     "release:major": "commit-and-tag-version --release-as major",
