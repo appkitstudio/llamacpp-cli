@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.12.1](https://github.com/appkitstudio/llamacpp-cli/compare/v1.12.0...v1.12.1) (2026-02-06)
+
+
+### Features
+
+* add monitor detail image to documentation ([9acf4ec](https://github.com/appkitstudio/llamacpp-cli/commit/9acf4ec74c84e9bc78d429add8c90865c2437066))
+
+
+### Bug Fixes
+
+* correct GitHub image URLs to use appkitstudio repository ([5f19e51](https://github.com/appkitstudio/llamacpp-cli/commit/5f19e511cf6c0195839f7a5e75661377d9ded287))
+* include web UI dist files in npm package ([54fd673](https://github.com/appkitstudio/llamacpp-cli/commit/54fd673d1042a3f4bf233c79a22b61690d81d4b8))
+
 ## [1.12.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.11.0...v1.12.0) (2026-02-06)
 
 
