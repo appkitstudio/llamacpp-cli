@@ -13,6 +13,7 @@ CLI tool to manage local llama.cpp servers on macOS. Provides an Ollama-like exp
 
 - 🚀 **Easy server management** - Start, stop, and monitor llama.cpp servers
 - 🔀 **Unified router** - Single OpenAI-compatible endpoint for all models with automatic routing and request logging
+- 🌐 **Admin Interface** - REST API + modern web UI for remote management and automation
 - 🤖 **Model downloads** - Pull GGUF models from Hugging Face
 - 📦 **Models Management TUI** - Browse, search, and delete models without leaving the TUI. Search HuggingFace, download with progress tracking, manage local models
 - ⚙️ **Smart defaults** - Auto-configure threads, context size, and GPU layers based on model size
@@ -46,6 +47,21 @@ Ollama is great, but it adds a wrapper layer that introduces latency. llamacpp-c
 | Transparency | Standard Unix tools | Black box |
 
 If you need raw speed and full control, llamacpp-cli is the better choice.
+
+### Management Options
+
+llamacpp-cli offers three ways to manage your servers:
+
+| Interface | Best For | Access | Key Features |
+|-----------|----------|--------|--------------|
+| **CLI** | Local development, automation scripts | Terminal | Full control, shell scripting, fastest for local tasks |
+| **Router** | Single endpoint for all models | Any OpenAI client | Model-based routing, streaming, zero config |
+| **Admin** | Remote management, team access | REST API + Web browser | Full CRUD, web UI, API automation, remote control |
+
+**When to use each:**
+- **CLI** - Local development, scripting, full terminal control
+- **Router** - Using with LLM frameworks (LangChain, LlamaIndex), multi-model apps
+- **Admin** - Remote access, team collaboration, browser-based management, CI/CD pipelines
 
 ## Installation
 
@@ -100,6 +116,10 @@ llamacpp server start llama-3.2-3b
 
 # View logs
 llamacpp server logs llama-3.2-3b -f
+
+# Start admin interface (REST API + Web UI)
+llamacpp admin start
+# Access web UI at http://localhost:9200
 ```
 
 ## Using Your Server
@@ -300,7 +320,274 @@ llamacpp router logs --stderr
 
 If the requested model's server is not running, the router returns a 503 error with a helpful message.
 
+## Admin Interface (REST API + Web UI)
+
+The admin interface provides full remote management of llama.cpp servers through both a REST API and a modern web UI. Perfect for programmatic control, automation, and browser-based management.
+
+### Quick Start
+
+```bash
+# Start the admin service (generates API key automatically)
+llamacpp admin start
+
+# View status and API key
+llamacpp admin status
+
+# Access web UI
+open http://localhost:9200
+```
+
+### Commands
+
+```bash
+llamacpp admin start       # Start admin service
+llamacpp admin stop        # Stop admin service
+llamacpp admin status      # Show status and API key
+llamacpp admin restart     # Restart service
+llamacpp admin config      # Update settings (--port, --host, --regenerate-key, --verbose)
+llamacpp admin logs        # View admin logs (with --follow, --clear, --rotate options)
+```
+
+### REST API
+
+The Admin API provides full CRUD operations for servers and models via HTTP.
+
+**Base URL:** `http://localhost:9200`
+
+**Authentication:** Bearer token (API key auto-generated on first start)
+
+#### Server Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/servers` | List all servers with status |
+| GET | `/api/servers/:id` | Get server details |
+| POST | `/api/servers` | Create new server |
+| PATCH | `/api/servers/:id` | Update server config |
+| DELETE | `/api/servers/:id` | Remove server |
+| POST | `/api/servers/:id/start` | Start stopped server |
+| POST | `/api/servers/:id/stop` | Stop running server |
+| POST | `/api/servers/:id/restart` | Restart server |
+| GET | `/api/servers/:id/logs?type=stdout\|stderr&lines=100` | Get server logs |
+
+#### Model Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/models` | List available models |
+| GET | `/api/models/:name` | Get model details |
+| DELETE | `/api/models/:name?cascade=true` | Delete model (cascade removes servers) |
+| GET | `/api/models/search?q=query` | Search HuggingFace |
+| POST | `/api/models/download` | Download model from HF |
+
+#### System Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/health` | Health check (no auth) |
+| GET | `/api/status` | System status |
+
+#### Example Usage
+
+**Create a server:**
+```bash
+curl -X POST http://localhost:9200/api/servers \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama-3.2-3b-instruct-q4_k_m.gguf",
+    "port": 9001,
+    "threads": 8,
+    "ctxSize": 8192
+  }'
+```
+
+**Start a server:**
+```bash
+curl -X POST http://localhost:9200/api/servers/llama-3-2-3b/start \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+**List all servers:**
+```bash
+curl http://localhost:9200/api/servers \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+**Delete model with cascade:**
+```bash
+curl -X DELETE "http://localhost:9200/api/models/llama-3.2-3b-instruct-q4_k_m.gguf?cascade=true" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+### Web UI
+
+The web UI provides a modern, browser-based interface for managing servers and models.
+
+![Web UI - Servers Page](https://raw.githubusercontent.com/dweaver/llamacpp-cli/main/docs/images/web-ui-servers.png)
+
+**Access:** `http://localhost:9200` (same port as API)
+
+**Features:**
+- **Dashboard** - System overview with stats and running servers
+- **Servers Page** - Full CRUD operations (create, start, stop, restart, delete)
+- **Models Page** - Browse models, view usage, delete with cascade
+- **Real-time updates** - Auto-refresh every 5 seconds
+- **Dark theme** - Modern, clean interface
+
+**Pages:**
+
+| Page | Path | Description |
+|------|------|-------------|
+| Dashboard | `/dashboard` | System overview and quick stats |
+| Servers | `/servers` | Manage all servers (list, start/stop, configure) |
+| Models | `/models` | Browse models, view server usage, delete |
+
+**Building Web UI:**
+
+The web UI is built with React + Vite + TypeScript. To build:
+
+```bash
+cd web
+npm install
+npm run build
+```
+
+This generates static files in `web/dist/` which are automatically served by the admin service.
+
+**Development:**
+
+```bash
+cd web
+npm install
+npm run dev  # Starts dev server on localhost:5173 with API proxy
+```
+
+See `web/README.md` for detailed web development documentation.
+
+### Configuration
+
+Configure the admin service with various options:
+
+```bash
+# Change port
+llamacpp admin config --port 9300 --restart
+
+# Enable remote access (WARNING: security implications)
+llamacpp admin config --host 0.0.0.0 --restart
+
+# Regenerate API key (invalidates old key)
+llamacpp admin config --regenerate-key --restart
+
+# Enable verbose logging
+llamacpp admin config --verbose true --restart
+```
+
+**Note:** Changes require a restart to take effect. Use `--restart` flag to apply immediately.
+
+### Security
+
+**Default Security Posture:**
+- **Host:** `127.0.0.1` (localhost only - secure by default)
+- **API Key:** Auto-generated 32-character hex string
+- **Storage:** API key stored in `~/.llamacpp/admin.json` (file permissions 600)
+
+**Remote Access:**
+
+⚠️ **Warning:** Changing host to `0.0.0.0` allows remote access from your network and potentially the internet.
+
+If you need remote access:
+
+```bash
+# Enable remote access
+llamacpp admin config --host 0.0.0.0 --restart
+
+# Ensure you use strong API key
+llamacpp admin config --regenerate-key --restart
+```
+
+**Best Practices:**
+- Keep default `127.0.0.1` for local development
+- Use HTTPS reverse proxy (nginx/Caddy) for remote access
+- Rotate API keys regularly if exposed
+- Monitor admin logs for suspicious activity
+
+### Logging
+
+The admin service maintains separate log streams:
+
+| Log File | Purpose | Content |
+|----------|---------|---------|
+| `admin.stdout` | Request activity | Endpoint, status, duration |
+| `admin.stderr` | System messages | Startup, shutdown, errors |
+
+**View logs:**
+```bash
+# Show activity logs (default - stdout)
+llamacpp admin logs
+
+# Show system logs (errors, startup)
+llamacpp admin logs --stderr
+
+# Follow in real-time
+llamacpp admin logs --follow
+
+# Clear all logs
+llamacpp admin logs --clear
+
+# Rotate logs with timestamp
+llamacpp admin logs --rotate
+```
+
 ### Example Output
+
+**Starting the admin service:**
+```
+$ llamacpp admin start
+
+✓ Admin service started successfully!
+
+  Port:    9200
+  Host:    127.0.0.1
+  API Key: a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
+
+  API:     http://localhost:9200/api
+  Web UI:  http://localhost:9200
+  Health:  http://localhost:9200/health
+
+Quick Commands:
+  llamacpp admin status        # View status
+  llamacpp admin logs -f       # Follow logs
+  llamacpp admin config --help # Configure options
+```
+
+**Admin status:**
+```
+$ llamacpp admin status
+
+Admin Service Status
+────────────────────
+
+Status:     ✅ RUNNING
+PID:        98765
+Uptime:     2h 15m
+Port:       9200
+Host:       127.0.0.1
+
+API Key:    a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
+API:        http://localhost:9200/api
+Web UI:     http://localhost:9200
+
+Configuration:
+  Config:   ~/.llamacpp/admin.json
+  Plist:    ~/Library/LaunchAgents/com.llama.admin.plist
+  Logs:     ~/.llamacpp/logs/admin.{stdout,stderr}
+
+Quick Commands:
+  llamacpp admin stop          # Stop service
+  llamacpp admin restart       # Restart service
+  llamacpp admin logs -f       # Follow logs
+```
 
 Creating a server:
 ```
@@ -865,11 +1152,17 @@ llamacpp-cli stores its configuration in `~/.llamacpp/`:
 ```
 ~/.llamacpp/
 ├── config.json           # Global settings
+├── router.json           # Router configuration
+├── admin.json            # Admin service configuration (includes API key)
 ├── servers/              # Server configurations
 │   └── <server-id>.json
-└── logs/                 # Server logs
-    ├── <server-id>.stdout
-    └── <server-id>.stderr
+├── logs/                 # Server logs
+│   ├── <server-id>.stdout
+│   ├── <server-id>.stderr
+│   ├── router.{stdout,stderr,log}
+│   └── admin.{stdout,stderr}
+└── history/              # Historical metrics (TUI)
+    └── <server-id>.json
 ```
 
 ## Smart Defaults
@@ -900,6 +1193,11 @@ Services are named `com.llama.<model-id>`.
 - When you **start** a server, it's registered with launchd and will auto-restart on crash
 - When you **stop** a server, it's unloaded from launchd and stays stopped (no auto-restart)
 - Crashed servers will automatically restart (when loaded)
+
+**Router and Admin Services:**
+- The **Router** (`com.llama.router`) provides a unified OpenAI-compatible endpoint for all models
+- The **Admin** (`com.llama.admin`) provides REST API + web UI for remote management
+- Both run as launchctl services similar to individual model servers
 
 ## Known Limitations
 
@@ -935,7 +1233,33 @@ Check the logs for errors:
 llamacpp server logs <identifier> --errors
 ```
 
+### Admin web UI not loading
+Check that static files are built:
+```bash
+cd web
+npm install
+npm run build
+```
+
+Then restart the admin service:
+```bash
+llamacpp admin restart
+```
+
+### API authentication failing
+Get your current API key:
+```bash
+llamacpp admin status  # Shows API key
+```
+
+Or regenerate a new one:
+```bash
+llamacpp admin config --regenerate-key --restart
+```
+
 ## Development
+
+### CLI Development
 
 ```bash
 # Install dependencies
@@ -952,6 +1276,27 @@ npm run build
 # Clean build artifacts
 npm run clean
 ```
+
+### Web UI Development
+
+```bash
+# Navigate to web directory
+cd web
+
+# Install dependencies
+npm install
+
+# Run dev server (with API proxy to localhost:9200)
+npm run dev
+
+# Build for production
+npm run build
+
+# Clean build artifacts
+rm -rf dist
+```
+
+The web UI dev server runs on `http://localhost:5173` with automatic API proxying to the admin service. See `web/README.md` for detailed documentation.
 
 ### Releasing
 
@@ -1024,11 +1369,19 @@ Contributions are welcome! If you'd like to contribute:
 
 ### Development Tips
 
+**CLI Development:**
 - Use `npm run dev -- <command>` to test commands without building
 - Check logs with `llamacpp server logs <server> --errors` when debugging
 - Test launchctl integration with `launchctl list | grep com.llama`
 - All server configs are in `~/.llamacpp/servers/`
 - Test interactive chat with `npm run dev -- server run <model>`
+
+**Web UI Development:**
+- Navigate to `web/` directory and run `npm run dev` for hot reload
+- API proxy automatically configured for `localhost:9200`
+- Update types in `web/src/types/api.ts` when API changes
+- Build with `npm run build` and test with admin service
+- See `web/README.md` for detailed web development guide
 
 ## Acknowledgments
 
