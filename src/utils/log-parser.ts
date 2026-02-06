@@ -19,6 +19,19 @@ export class LogParser {
   private isBuffering = false;
 
   /**
+   * Health check endpoints to filter out by default
+   * These are polled frequently by the TUI and generate excessive log noise
+   */
+  private static readonly HEALTH_CHECK_ENDPOINTS = ['/health', '/slots', '/props'];
+
+  /**
+   * Check if a log line represents a health check request
+   */
+  isHealthCheckRequest(line: string): boolean {
+    return LogParser.HEALTH_CHECK_ENDPOINTS.some(ep => line.includes(`GET ${ep} `));
+  }
+
+  /**
    * Check if line is a request status line (contains method/endpoint/status, no JSON)
    * Handles both old and new formats:
    * - Old: log_server_r: request: POST /v1/chat/completions 127.0.0.1 200

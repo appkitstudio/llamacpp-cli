@@ -25,6 +25,12 @@ import { routerStatusCommand } from './commands/router/status';
 import { routerRestartCommand } from './commands/router/restart';
 import { routerConfigCommand } from './commands/router/config';
 import { routerLogsCommand } from './commands/router/logs';
+import { adminStartCommand } from './commands/admin/start';
+import { adminStopCommand } from './commands/admin/stop';
+import { adminStatusCommand } from './commands/admin/status';
+import { adminRestartCommand } from './commands/admin/restart';
+import { adminConfigCommand } from './commands/admin/config';
+import { adminLogsCommand } from './commands/admin/logs';
 import packageJson from '../package.json';
 
 const program = new Command();
@@ -299,6 +305,7 @@ server
   .option('--clear-archived', 'Delete only archived logs (preserves current logs)')
   .option('--clear-all', 'Clear current logs AND delete all archived logs')
   .option('--rotate', 'Rotate log file with timestamp (preserves old logs)')
+  .option('--include-health', 'Include health check requests (/health, /slots, /props) - filtered by default')
   .action(async (identifier: string, options) => {
     try {
       await logsCommand(identifier, options);
@@ -413,6 +420,99 @@ router
   .action(async (options) => {
     try {
       await routerLogsCommand(options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Admin management commands
+const admin = program
+  .command('admin')
+  .description('Manage the admin REST API service');
+
+// Start admin
+admin
+  .command('start')
+  .description('Start the admin service')
+  .action(async () => {
+    try {
+      await adminStartCommand();
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Stop admin
+admin
+  .command('stop')
+  .description('Stop the admin service')
+  .action(async () => {
+    try {
+      await adminStopCommand();
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Show admin status
+admin
+  .command('status')
+  .description('Show admin service status and configuration')
+  .action(async () => {
+    try {
+      await adminStatusCommand();
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Restart admin
+admin
+  .command('restart')
+  .description('Restart the admin service')
+  .action(async () => {
+    try {
+      await adminRestartCommand();
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Configure admin
+admin
+  .command('config')
+  .description('Update admin service configuration')
+  .option('-p, --port <number>', 'Update port number', parseInt)
+  .option('-h, --host <address>', 'Update bind address')
+  .option('--regenerate-key', 'Generate a new API key')
+  .option('-v, --verbose [boolean]', 'Enable/disable verbose logging', (val) => val === 'true' || val === '1')
+  .option('-r, --restart', 'Automatically restart admin service if running')
+  .action(async (options) => {
+    try {
+      await adminConfigCommand(options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Admin logs
+admin
+  .command('logs')
+  .description('View admin service logs')
+  .option('-f, --follow', 'Follow logs in real-time (like tail -f)')
+  .option('-n, --lines <number>', 'Number of lines to show (default: 100)', parseInt)
+  .option('--stdout', 'Show activity logs (stdout)')
+  .option('--stderr', 'Show system logs (stderr)')
+  .option('--clear', 'Clear the log files')
+  .action(async (options) => {
+    try {
+      await adminLogsCommand(options);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);

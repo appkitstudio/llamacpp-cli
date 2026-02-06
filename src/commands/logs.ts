@@ -27,6 +27,7 @@ interface LogsOptions {
   rotate?: boolean;
   clearArchived?: boolean;
   clearAll?: boolean;
+  includeHealth?: boolean;
 }
 
 export async function logsCommand(identifier: string, options: LogsOptions): Promise<void> {
@@ -142,6 +143,9 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
   let filterDesc = '';
   let useCompactMode = false;
 
+  // Whether to include health check requests (filtered by default)
+  const includeHealth = options.includeHealth ?? false;
+
   if (options.verbose) {
     // Show everything (no filter)
     filterDesc = ' (all messages)';
@@ -195,7 +199,15 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
 
       rl.on('line', (line) => {
         if (line.includes('log_server_r')) {
+          // Skip health check requests unless --include-health is set
+          if (!includeHealth && logParser.isHealthCheckRequest(line)) {
+            return;
+          }
           logParser.processLine(line, (compactLine) => {
+            // Double-check the parsed line for health checks (in case buffered)
+            if (!includeHealth && logParser.isHealthCheckRequest(compactLine)) {
+              return;
+            }
             console.log(compactLine);
           });
         }
@@ -266,13 +278,25 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
 
         const compactLines: string[] = [];
         for (const line of logLines) {
+          // Skip health check requests unless --include-health is set
+          if (!includeHealth && logParser.isHealthCheckRequest(line)) {
+            continue;
+          }
           logParser.processLine(line, (compactLine) => {
+            // Double-check the parsed line for health checks (in case buffered)
+            if (!includeHealth && logParser.isHealthCheckRequest(compactLine)) {
+              return;
+            }
             compactLines.push(compactLine);
           });
         }
 
         // Flush any remaining buffered logs (handles simple format)
         logParser.flush((compactLine) => {
+          // Filter health checks from flushed lines too
+          if (!includeHealth && logParser.isHealthCheckRequest(compactLine)) {
+            return;
+          }
           compactLines.push(compactLine);
         });
 

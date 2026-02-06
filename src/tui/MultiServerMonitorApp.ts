@@ -41,7 +41,7 @@ export async function createMultiServerMonitorUI(
   onModels?: (controls: MonitorUIControls) => void,
   onFirstRender?: () => void
 ): Promise<MonitorUIControls> {
-  let updateInterval = 2000;
+  let updateInterval = 5000;
   let intervalId: NodeJS.Timeout | null = null;
   let viewMode: ViewMode = directJumpIndex !== undefined ? 'detail' : 'list';
   let selectedServerIndex = directJumpIndex ?? 0;
