@@ -17,59 +17,66 @@ export function Nav({ onLogout, searchQuery = '', onSearchChange }: NavProps) {
   };
 
   return (
-    <nav className="border-b border-gray-200 bg-white">
-      <div className="max-w-6xl mx-auto px-4">
-        <div className="flex items-center justify-between h-14">
+    <nav className="border-b border-neutral-200 bg-white">
+      <div className="max-w-7xl mx-auto px-6">
+        <div className="flex items-center justify-between h-16">
           {/* Logo and Nav Links */}
-          <div className="flex items-center space-x-8">
-            <Link to="/" className="flex items-center space-x-2">
-              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" fill="currentColor"/>
-              </svg>
-              <span className="text-lg font-medium text-gray-900">llama.cpp</span>
+          <div className="flex items-center space-x-10">
+            <Link to="/" className="flex items-center">
+              <span className="text-xl font-bold text-neutral-900 tracking-tight">LLAMA CPP</span>
             </Link>
 
-            <div className="flex items-center space-x-6">
+            <div className="flex items-center space-x-1">
               <Link
                 to="/servers"
-                className={`text-sm font-medium transition-colors ${
-                  location.pathname === '/servers'
-                    ? 'text-gray-900'
-                    : 'text-gray-600 hover:text-gray-900'
+                className={`px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                  location.pathname === '/servers' || location.pathname === '/'
+                    ? 'text-neutral-900 bg-neutral-100'
+                    : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
                 }`}
               >
                 Servers
               </Link>
               <Link
                 to="/models"
-                className={`text-sm font-medium transition-colors ${
+                className={`px-3 py-2 text-sm font-medium transition-colors rounded-md ${
                   location.pathname === '/models'
-                    ? 'text-gray-900'
-                    : 'text-gray-600 hover:text-gray-900'
+                    ? 'text-neutral-900 bg-neutral-100'
+                    : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
                 }`}
               >
                 Models
+              </Link>
+              <Link
+                to="/router"
+                className={`px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                  location.pathname === '/router'
+                    ? 'text-neutral-900 bg-neutral-100'
+                    : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+                }`}
+              >
+                Router
               </Link>
             </div>
           </div>
 
           {/* Search + Logout */}
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-3">
             {onSearchChange && (
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400 pointer-events-none" />
                 <input
-                  type="text"
-                  placeholder="Search..."
+                  type="search"
+                  placeholder="Search models..."
                   value={searchQuery}
                   onChange={(e) => onSearchChange(e.target.value)}
-                  className="w-64 pl-9 pr-4 py-1.5 text-sm border border-gray-200 rounded-lg bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent"
+                  className="w-72 pl-9 pr-4 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 border border-neutral-200 rounded-md bg-white hover:border-neutral-300 focus:outline-none focus:border-neutral-400 transition-colors"
                 />
               </div>
             )}
             <button
               onClick={handleLogout}
-              className="p-2 text-gray-500 hover:text-gray-700 transition-colors cursor-pointer"
+              className="p-2 text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 rounded-md transition-colors cursor-pointer"
               title="Logout"
             >
               <LogOut className="w-4 h-4" />

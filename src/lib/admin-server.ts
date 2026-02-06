@@ -16,6 +16,7 @@ import { statusChecker } from './status-checker';
 import { modelDownloader } from './model-downloader';
 import { modelSearch } from './model-search';
 import { downloadJobManager } from './download-job-manager';
+import { routerManager } from './router-manager';
 
 interface ErrorResponse {
   error: string;
@@ -173,6 +174,18 @@ class AdminServer {
         await this.handleDeleteModel(req, res, modelName, url);
       } else if (pathname === '/api/status' && method === 'GET') {
         await this.handleSystemStatus(req, res);
+      } else if (pathname === '/api/router' && method === 'GET') {
+        await this.handleGetRouter(req, res);
+      } else if (pathname === '/api/router/start' && method === 'POST') {
+        await this.handleStartRouter(req, res);
+      } else if (pathname === '/api/router/stop' && method === 'POST') {
+        await this.handleStopRouter(req, res);
+      } else if (pathname === '/api/router/restart' && method === 'POST') {
+        await this.handleRestartRouter(req, res);
+      } else if (pathname === '/api/router/logs' && method === 'GET') {
+        await this.handleGetRouterLogs(req, res, url);
+      } else if (pathname === '/api/router' && method === 'PATCH') {
+        await this.handleUpdateRouter(req, res);
       } else {
         // API endpoint not found
         this.sendError(res, 404, 'Not Found', `Unknown endpoint: ${method} ${pathname}`, 'NOT_FOUND');
@@ -878,6 +891,192 @@ class AdminServer {
       });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'STATUS_ERROR');
+    }
+  }
+
+  /**
+   * Get router status
+   */
+  private async handleGetRouter(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const routerStatus = await routerManager.getStatus();
+
+      if (!routerStatus) {
+        this.sendJson(res, 200, {
+          status: 'not_configured',
+          config: null,
+          isRunning: false,
+        });
+        return;
+      }
+
+      const { config, status } = routerStatus;
+
+      // Get available models from running servers
+      const servers = await stateManager.getAllServers();
+      const runningServers = [];
+
+      for (const server of servers) {
+        const serverStatus = await statusChecker.checkServer(server);
+        if (statusChecker.determineStatus(serverStatus, serverStatus.portListening) === 'running') {
+          runningServers.push({
+            id: server.id,
+            modelName: server.modelName,
+            port: server.port,
+          });
+        }
+      }
+
+      this.sendJson(res, 200, {
+        status: status.isRunning ? 'running' : 'stopped',
+        config: {
+          port: config.port,
+          host: config.host,
+          verbose: config.verbose,
+          requestTimeout: config.requestTimeout,
+          healthCheckInterval: config.healthCheckInterval,
+        },
+        pid: status.pid,
+        isRunning: status.isRunning,
+        availableModels: runningServers.map(s => s.modelName),
+        createdAt: config.createdAt,
+        lastStarted: config.lastStarted,
+        lastStopped: config.lastStopped,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_STATUS_ERROR');
+    }
+  }
+
+  /**
+   * Start router service
+   */
+  private async handleStartRouter(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      await routerManager.start();
+
+      const routerStatus = await routerManager.getStatus();
+      this.sendJson(res, 200, {
+        success: true,
+        status: 'running',
+        pid: routerStatus?.status.pid,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_START_ERROR');
+    }
+  }
+
+  /**
+   * Stop router service
+   */
+  private async handleStopRouter(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      await routerManager.stop();
+
+      this.sendJson(res, 200, {
+        success: true,
+        status: 'stopped',
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_STOP_ERROR');
+    }
+  }
+
+  /**
+   * Restart router service
+   */
+  private async handleRestartRouter(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      await routerManager.restart();
+
+      const routerStatus = await routerManager.getStatus();
+      this.sendJson(res, 200, {
+        success: true,
+        status: 'running',
+        pid: routerStatus?.status.pid,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_RESTART_ERROR');
+    }
+  }
+
+  /**
+   * Get router logs
+   */
+  private async handleGetRouterLogs(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
+    try {
+      const config = await routerManager.loadConfig();
+      if (!config) {
+        this.sendError(res, 404, 'Not Found', 'Router not configured', 'ROUTER_NOT_FOUND');
+        return;
+      }
+
+      const type = url.searchParams.get('type') || 'both'; // stdout, stderr, or both
+      const lines = parseInt(url.searchParams.get('lines') || '100');
+
+      let stdout = '';
+      let stderr = '';
+
+      if ((type === 'stdout' || type === 'both') && (await fileExists(config.stdoutPath))) {
+        const content = await fs.readFile(config.stdoutPath, 'utf-8');
+        const logLines = content.split('\n');
+        stdout = logLines.slice(-lines).join('\n');
+      }
+
+      if ((type === 'stderr' || type === 'both') && (await fileExists(config.stderrPath))) {
+        const content = await fs.readFile(config.stderrPath, 'utf-8');
+        const logLines = content.split('\n');
+        stderr = logLines.slice(-lines).join('\n');
+      }
+
+      this.sendJson(res, 200, { stdout, stderr });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_LOGS_ERROR');
+    }
+  }
+
+  /**
+   * Update router configuration
+   */
+  private async handleUpdateRouter(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.readBody(req);
+      const updates = JSON.parse(body);
+
+      const config = await routerManager.loadConfig();
+      if (!config) {
+        this.sendError(res, 404, 'Not Found', 'Router not configured', 'ROUTER_NOT_FOUND');
+        return;
+      }
+
+      // Validate updates
+      const allowedFields = ['port', 'host', 'verbose', 'requestTimeout', 'healthCheckInterval'];
+      const invalidFields = Object.keys(updates).filter(key => !allowedFields.includes(key));
+
+      if (invalidFields.length > 0) {
+        this.sendError(res, 400, 'Bad Request', `Invalid fields: ${invalidFields.join(', ')}`, 'INVALID_FIELDS');
+        return;
+      }
+
+      // Apply updates
+      const needsRestart = updates.port !== undefined || updates.host !== undefined;
+      await routerManager.updateConfig(updates);
+
+      // Regenerate plist if needed
+      if (needsRestart) {
+        const updatedConfig = await routerManager.loadConfig();
+        if (updatedConfig) {
+          await routerManager.createPlist(updatedConfig);
+        }
+      }
+
+      this.sendJson(res, 200, {
+        success: true,
+        needsRestart,
+        config: await routerManager.loadConfig(),
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_UPDATE_ERROR');
     }
   }
 

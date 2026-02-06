@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useModels, useDeleteModel, useDownloadJobs } from '../hooks/useApi';
-import { HardDrive, Server, Trash2, Clock, Plus, Loader2 } from 'lucide-react';
+import { HardDrive, Server, Trash2, Clock, Loader2, Download } from 'lucide-react';
 import { SearchModal } from '../components/SearchModal';
 import { DownloadProgress } from '../components/DownloadProgress';
 import { useQueryClient } from '@tanstack/react-query';
@@ -18,13 +18,11 @@ export function Models({ searchQuery = '' }: ModelsProps) {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showSearchModal, setShowSearchModal] = useState(false);
 
-  // Check if there are active downloads
   const hasActiveDownloads = (jobsData?.jobs || []).some(
     job => job.status === 'pending' || job.status === 'downloading'
   );
 
   const handleDownloadComplete = () => {
-    // Refresh models list when download completes
     queryClient.invalidateQueries({ queryKey: ['models'] });
   };
 
@@ -69,106 +67,120 @@ export function Models({ searchQuery = '' }: ModelsProps) {
 
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return `${diffDays} days ago`;
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
-    return date.toLocaleDateString();
+    if (diffDays < 7) return `${diffDays}d ago`;
+    if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   if (isLoading) {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-12">
-        <p className="text-gray-500 text-center">Loading...</p>
+      <div className="max-w-7xl mx-auto px-6 py-12">
+        <p className="text-neutral-500 text-center">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      {/* Header with Pull button */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="text-sm text-gray-500">
-          {models.length} model{models.length !== 1 ? 's' : ''}
+    <div className="max-w-7xl mx-auto px-6 py-8">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-semibold text-neutral-900 tracking-tight">Models</h1>
+          <p className="text-sm text-neutral-600 mt-1">
+            {models.length} model{models.length !== 1 ? 's' : ''} available
+          </p>
         </div>
         <button
           onClick={() => setShowSearchModal(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-neutral-900 hover:bg-neutral-800 rounded-md transition-colors cursor-pointer"
         >
-          <Plus className="w-4 h-4" />
+          <Download className="w-4 h-4" />
           Pull Model
         </button>
       </div>
 
       {filteredModels.length === 0 ? (
-        <div className="text-center py-12">
+        <div className="text-center py-16 bg-white border border-neutral-200 rounded-lg">
           {searchQuery ? (
             <>
-              <p className="text-gray-500">No models matching "{searchQuery}"</p>
-              <p className="text-sm text-gray-400 mt-1">Try a different search term</p>
+              <p className="text-neutral-600 text-base mb-2">No models matching "{searchQuery}"</p>
+              <p className="text-sm text-neutral-500">Try a different search term</p>
             </>
           ) : (
             <>
-              <p className="text-gray-500">No models found</p>
-              <p className="text-sm text-gray-400 mt-1">
-                Click "Pull Model" to download from Hugging Face
+              <p className="text-neutral-600 text-base mb-2">No models found</p>
+              <p className="text-sm text-neutral-500 mb-6">
+                Download models from Hugging Face to get started
               </p>
+              <button
+                onClick={() => setShowSearchModal(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-neutral-900 hover:bg-neutral-800 rounded-md transition-colors cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                Pull Model
+              </button>
             </>
           )}
         </div>
       ) : (
-        <div className="divide-y divide-gray-200">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredModels.map((model) => (
             <div
               key={model.filename}
-              className="py-5 hover:bg-gray-50 -mx-4 px-4 transition-colors group"
+              className="group bg-white border border-neutral-200 rounded-lg p-5 hover:border-neutral-300 hover:shadow-sm transition-all"
             >
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between mb-4">
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-base font-medium text-gray-900">
+                  <h3 className="text-base font-semibold text-neutral-900 truncate mb-2">
                     {model.filename.replace('.gguf', '')}
                   </h3>
-
-                  {/* Tags */}
-                  <div className="flex items-center gap-2 mt-2">
+                  <div className="flex flex-wrap gap-1.5">
                     {model.serversUsing > 0 && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded border border-green-200 bg-green-50 text-xs font-medium text-green-700">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-green-200/50 bg-green-50 text-xs font-medium text-green-700">
                         active
                       </span>
                     )}
-                    <span className="inline-flex items-center px-2 py-0.5 rounded border border-gray-200 text-xs font-medium text-gray-600">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-600">
                       gguf
                     </span>
                   </div>
-
-                  {/* Stats */}
-                  <div className="flex items-center gap-4 mt-3 text-sm text-gray-500">
-                    <span className="flex items-center gap-1.5">
-                      <HardDrive className="w-4 h-4" />
-                      {formatSize(model.size)}
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <Server className="w-4 h-4" />
-                      {model.serversUsing} server{model.serversUsing !== 1 ? 's' : ''}
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <Clock className="w-4 h-4" />
-                      {formatDate(model.modified)}
-                    </span>
-                  </div>
                 </div>
-
-                <button
-                  onClick={() => handleDelete(model.filename, model.serversUsing)}
-                  disabled={actionLoading === model.filename}
-                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded opacity-0 group-hover:opacity-100 transition-all disabled:opacity-100 cursor-pointer disabled:cursor-wait"
-                  title="Delete model"
-                >
-                  {actionLoading === model.filename ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-4 h-4" />
-                  )}
-                </button>
               </div>
+
+              {/* Stats */}
+              <div className="space-y-2 mb-4">
+                <div className="flex items-center gap-2 text-xs text-neutral-600">
+                  <HardDrive className="w-3.5 h-3.5 text-neutral-400" />
+                  <span>{formatSize(model.size)}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-neutral-600">
+                  <Server className="w-3.5 h-3.5 text-neutral-400" />
+                  <span>{model.serversUsing} server{model.serversUsing !== 1 ? 's' : ''}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-neutral-600">
+                  <Clock className="w-3.5 h-3.5 text-neutral-400" />
+                  <span>{formatDate(model.modified)}</span>
+                </div>
+              </div>
+
+              {/* Delete Action */}
+              <button
+                onClick={() => handleDelete(model.filename, model.serversUsing)}
+                disabled={actionLoading === model.filename}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-100 cursor-pointer disabled:cursor-wait"
+              >
+                {actionLoading === model.filename ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Deleting
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete
+                  </>
+                )}
+              </button>
             </div>
           ))}
         </div>

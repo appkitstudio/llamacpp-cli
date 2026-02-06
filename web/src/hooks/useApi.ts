@@ -1,6 +1,6 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import type { CreateServerRequest, UpdateServerRequest } from '../types/api';
+import type { CreateServerRequest, UpdateServerRequest, UpdateRouterRequest } from '../types/api';
 
 // System
 export function useSystemStatus() {
@@ -191,6 +191,69 @@ export function useCancelDownload() {
     mutationFn: (jobId: string) => api.cancelDownloadJob(jobId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['downloadJobs'] });
+    },
+  });
+}
+
+// Router
+export function useRouter() {
+  return useQuery({
+    queryKey: ['router'],
+    queryFn: () => api.getRouter(),
+    refetchInterval: 5000, // Auto-refresh every 5s
+    placeholderData: keepPreviousData, // Keep previous data during refetch to prevent flash
+  });
+}
+
+export function useStartRouter() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.startRouter(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['router'] });
+    },
+  });
+}
+
+export function useStopRouter() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.stopRouter(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['router'] });
+    },
+  });
+}
+
+export function useRestartRouter() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => api.restartRouter(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['router'] });
+    },
+  });
+}
+
+export function useRouterLogs(lines = 500) {
+  return useQuery({
+    queryKey: ['routerLogs', lines],
+    queryFn: () => api.getRouterLogs('both', lines),
+    refetchInterval: 2000, // Auto-refresh every 2s
+    placeholderData: keepPreviousData, // Keep previous data during refetch to prevent flash
+  });
+}
+
+export function useUpdateRouter() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: UpdateRouterRequest) => api.updateRouter(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['router'] });
     },
   });
 }

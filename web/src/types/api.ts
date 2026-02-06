@@ -110,3 +110,31 @@ export interface DownloadJob {
   createdAt: string;
   completedAt?: string;
 }
+
+// Router types
+export type RouterStatus = 'not_configured' | 'running' | 'stopped';
+
+export interface RouterInfo {
+  status: RouterStatus;
+  config: {
+    port: number;
+    host: string;
+    verbose: boolean;
+    requestTimeout: number;
+    healthCheckInterval: number;
+  } | null;
+  pid: number | null;
+  isRunning: boolean;
+  availableModels: string[];
+  createdAt?: string;
+  lastStarted?: string;
+  lastStopped?: string;
+}
+
+export interface UpdateRouterRequest {
+  port?: number;
+  host?: string;
+  verbose?: boolean;
+  requestTimeout?: number;
+  healthCheckInterval?: number;
+}

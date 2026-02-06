@@ -6,6 +6,8 @@ import { ApiKeyPrompt } from './components/ApiKeyPrompt';
 import { Servers } from './pages/Servers';
 import { ServerLogs } from './pages/ServerLogs';
 import { Models } from './pages/Models';
+import { Router } from './pages/Router';
+import { RouterLogs } from './pages/RouterLogs';
 import { api } from './lib/api';
 
 const queryClient = new QueryClient({
@@ -25,7 +27,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const showSearch = location.pathname === '/models';
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-neutral-50">
       <Nav
         onLogout={onLogout}
         searchQuery={showSearch ? searchQuery : undefined}
@@ -36,6 +38,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <Route path="/servers" element={<Servers />} />
         <Route path="/servers/:id/logs" element={<ServerLogs />} />
         <Route path="/models" element={<Models searchQuery={searchQuery} />} />
+        <Route path="/router" element={<Router />} />
+        <Route path="/router/logs" element={<RouterLogs />} />
       </Routes>
     </div>
   );
@@ -60,8 +64,8 @@ function App() {
 
   if (isAuthenticated === null) {
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-gray-400">Loading...</div>
+      <div className="min-h-screen bg-neutral-50 flex items-center justify-center">
+        <div className="text-neutral-400">Loading...</div>
       </div>
     );
   }

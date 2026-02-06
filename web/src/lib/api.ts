@@ -7,6 +7,8 @@ import type {
   ApiError,
   HFModelResult,
   DownloadJob,
+  RouterInfo,
+  UpdateRouterRequest,
 } from '../types/api';
 
 const API_BASE = '';  // Proxy handles routing
@@ -175,6 +177,48 @@ class ApiClient {
     return this.request<{ success: boolean; message: string }>(
       `/api/jobs/${jobId}`,
       { method: 'DELETE' }
+    );
+  }
+
+  // Router
+  async getRouter() {
+    return this.request<RouterInfo>('/api/router');
+  }
+
+  async startRouter() {
+    return this.request<{ success: boolean; status: string; pid: number | null }>(
+      '/api/router/start',
+      { method: 'POST' }
+    );
+  }
+
+  async stopRouter() {
+    return this.request<{ success: boolean; status: string }>(
+      '/api/router/stop',
+      { method: 'POST' }
+    );
+  }
+
+  async restartRouter() {
+    return this.request<{ success: boolean; status: string; pid: number | null }>(
+      '/api/router/restart',
+      { method: 'POST' }
+    );
+  }
+
+  async getRouterLogs(type: 'stdout' | 'stderr' | 'both' = 'both', lines = 100) {
+    return this.request<{ stdout: string; stderr: string }>(
+      `/api/router/logs?type=${type}&lines=${lines}`
+    );
+  }
+
+  async updateRouter(data: UpdateRouterRequest) {
+    return this.request<{ success: boolean; needsRestart: boolean; config: any }>(
+      '/api/router',
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
     );
   }
 }
