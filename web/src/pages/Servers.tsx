@@ -7,6 +7,8 @@ import { ServerConfigModal } from '../components/ServerConfigModal';
 import { CreateServerModal } from '../components/CreateServerModal';
 import type { Server } from '../types/api';
 
+type ServerFilter = 'all' | 'running' | 'stopped';
+
 export function Servers() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -17,6 +19,7 @@ export function Servers() {
   const [actionLoading, setActionLoading] = useState<{ id: string; action: 'start' | 'stop' } | null>(null);
   const [configServer, setConfigServer] = useState<Server | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [filter, setFilter] = useState<ServerFilter>('all');
 
   const pendingAction = useRef<{ id: string; expectedStatus: 'running' | 'stopped' } | null>(null);
 
@@ -119,12 +122,22 @@ export function Servers() {
   }
 
   const runningServers = servers.filter(s => s.status === 'running');
-  const stoppedServers = servers.filter(s => s.status !== 'running');
+
+  // Apply filter
+  const filteredServers = servers.filter(server => {
+    if (filter === 'all') return true;
+    if (filter === 'running') return server.status === 'running';
+    if (filter === 'stopped') return server.status !== 'running';
+    return true;
+  });
+
+  const displayRunning = filteredServers.filter(s => s.status === 'running');
+  const displayStopped = filteredServers.filter(s => s.status !== 'running');
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900 tracking-tight">Servers</h1>
           <p className="text-sm text-neutral-600 mt-1">
@@ -141,10 +154,44 @@ export function Servers() {
         </button>
       </div>
 
+      {/* Filter Buttons */}
+      <div className="flex items-center gap-2 mb-6">
+        <button
+          onClick={() => setFilter('all')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+            filter === 'all'
+              ? 'bg-neutral-900 text-white border-neutral-900'
+              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+          }`}
+        >
+          All
+        </button>
+        <button
+          onClick={() => setFilter('running')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+            filter === 'running'
+              ? 'bg-neutral-900 text-white border-neutral-900'
+              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+          }`}
+        >
+          Running
+        </button>
+        <button
+          onClick={() => setFilter('stopped')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+            filter === 'stopped'
+              ? 'bg-neutral-900 text-white border-neutral-900'
+              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+          }`}
+        >
+          Stopped
+        </button>
+      </div>
+
       {/* Grid Layout */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Running Servers */}
-        {runningServers.map((server) => (
+        {displayRunning.map((server) => (
           <div
             key={server.id}
             className="group bg-white border border-neutral-200 rounded-lg p-5 hover:border-neutral-300 hover:shadow-sm transition-all"
@@ -206,7 +253,7 @@ export function Servers() {
         ))}
 
         {/* Stopped Servers */}
-        {stoppedServers.map((server) => (
+        {displayStopped.map((server) => (
           <div
             key={server.id}
             className="group bg-white border border-neutral-200 rounded-lg p-5 hover:border-neutral-300 hover:shadow-sm transition-all opacity-60 hover:opacity-100"
@@ -269,6 +316,15 @@ export function Servers() {
       </div>
 
       {/* Empty State */}
+      {filteredServers.length === 0 && servers.length > 0 && (
+        <div className="text-center py-16 bg-white border border-neutral-200 rounded-lg">
+          <p className="text-neutral-600 text-base mb-2">No {filter} servers</p>
+          <p className="text-sm text-neutral-500">
+            Try a different filter or create a new server
+          </p>
+        </div>
+      )}
+
       {servers.length === 0 && (
         <div className="text-center py-16 bg-white border border-neutral-200 rounded-lg">
           <p className="text-neutral-600 text-base mb-2">No servers configured</p>

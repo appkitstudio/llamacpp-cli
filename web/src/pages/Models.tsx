@@ -9,6 +9,8 @@ interface ModelsProps {
   searchQuery?: string;
 }
 
+type ModelFilter = 'all' | 'active' | 'inactive';
+
 export function Models({ searchQuery = '' }: ModelsProps) {
   const queryClient = useQueryClient();
   const { data: modelsData, isLoading } = useModels();
@@ -17,6 +19,7 @@ export function Models({ searchQuery = '' }: ModelsProps) {
 
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [filter, setFilter] = useState<ModelFilter>('all');
 
   const hasActiveDownloads = (jobsData?.jobs || []).some(
     job => job.status === 'pending' || job.status === 'downloading'
@@ -29,12 +32,25 @@ export function Models({ searchQuery = '' }: ModelsProps) {
   const models = modelsData?.models || [];
 
   const filteredModels = useMemo(() => {
-    if (!searchQuery) return models;
-    const query = searchQuery.toLowerCase();
-    return models.filter(model =>
-      model.filename.toLowerCase().includes(query)
-    );
-  }, [models, searchQuery]);
+    let filtered = models;
+
+    // Apply search filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter(model =>
+        model.filename.toLowerCase().includes(query)
+      );
+    }
+
+    // Apply status filter
+    if (filter === 'active') {
+      filtered = filtered.filter(model => model.serversUsing > 0);
+    } else if (filter === 'inactive') {
+      filtered = filtered.filter(model => model.serversUsing === 0);
+    }
+
+    return filtered;
+  }, [models, searchQuery, filter]);
 
   const handleDelete = async (name: string, serversUsing: number) => {
     if (serversUsing > 0) {
@@ -80,14 +96,17 @@ export function Models({ searchQuery = '' }: ModelsProps) {
     );
   }
 
+  const activeModels = models.filter(m => m.serversUsing > 0);
+
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-semibold text-neutral-900 tracking-tight">Models</h1>
           <p className="text-sm text-neutral-600 mt-1">
             {models.length} model{models.length !== 1 ? 's' : ''} available
+            {activeModels.length > 0 && ` • ${activeModels.length} active`}
           </p>
         </div>
         <button
@@ -99,12 +118,51 @@ export function Models({ searchQuery = '' }: ModelsProps) {
         </button>
       </div>
 
+      {/* Filter Buttons */}
+      <div className="flex items-center gap-2 mb-6">
+        <button
+          onClick={() => setFilter('all')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+            filter === 'all'
+              ? 'bg-neutral-900 text-white border-neutral-900'
+              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+          }`}
+        >
+          All
+        </button>
+        <button
+          onClick={() => setFilter('active')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+            filter === 'active'
+              ? 'bg-neutral-900 text-white border-neutral-900'
+              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+          }`}
+        >
+          Active
+        </button>
+        <button
+          onClick={() => setFilter('inactive')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+            filter === 'inactive'
+              ? 'bg-neutral-900 text-white border-neutral-900'
+              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+          }`}
+        >
+          Inactive
+        </button>
+      </div>
+
       {filteredModels.length === 0 ? (
         <div className="text-center py-16 bg-white border border-neutral-200 rounded-lg">
           {searchQuery ? (
             <>
               <p className="text-neutral-600 text-base mb-2">No models matching "{searchQuery}"</p>
               <p className="text-sm text-neutral-500">Try a different search term</p>
+            </>
+          ) : filter !== 'all' && models.length > 0 ? (
+            <>
+              <p className="text-neutral-600 text-base mb-2">No {filter} models</p>
+              <p className="text-sm text-neutral-500">Try a different filter</p>
             </>
           ) : (
             <>
