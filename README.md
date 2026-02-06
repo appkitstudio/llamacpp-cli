@@ -424,7 +424,7 @@ curl -X DELETE "http://localhost:9200/api/models/llama-3.2-3b-instruct-q4_k_m.gg
 
 The web UI provides a modern, browser-based interface for managing servers and models.
 
-![Web UI - Servers Page](https://raw.githubusercontent.com/dweaver/llamacpp-cli/main/docs/images/web-ui-servers.png)
+![Web UI - Servers Page](https://raw.githubusercontent.com/appkitstudio/llamacpp-cli/main/docs/images/web-ui-servers.png)
 
 **Access:** `http://localhost:9200` (same port as API)
 
@@ -1028,7 +1028,7 @@ The main way to monitor and manage servers is through the interactive TUI dashbo
 llamacpp
 ```
 
-![Server Monitoring TUI](https://raw.githubusercontent.com/dweaver/llamacpp-cli/main/docs/images/monitor-detail.png)
+![Server Monitoring TUI](https://raw.githubusercontent.com/appkitstudio/llamacpp-cli/main/docs/images/monitor-detail.png)
 
 **Features:**
 - Multi-server dashboard with real-time metrics
