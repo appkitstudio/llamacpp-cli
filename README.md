@@ -160,6 +160,221 @@ curl http://localhost:9000/health
 
 The server is fully compatible with OpenAI's API format, so you can use it with any OpenAI-compatible client library.
 
+## Interactive TUI
+
+The primary way to manage and monitor your llama.cpp servers is through the interactive TUI dashboard. Launch it by running `llamacpp` with no arguments.
+
+```bash
+llamacpp
+```
+
+![Server Monitoring TUI](https://raw.githubusercontent.com/appkitstudio/llamacpp-cli/main/docs/images/monitor-detail.png)
+
+### Overview
+
+The TUI provides a comprehensive interface for:
+- **Monitoring** - Real-time metrics for all servers (GPU, CPU, memory, token generation)
+- **Server Management** - Create, start, stop, remove, and configure servers
+- **Model Management** - Browse, search, download, and delete models
+- **Historical Metrics** - View time-series charts of past performance
+
+### Multi-Server Dashboard
+
+The main view shows all your servers at a glance:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ System Resources                                         │
+│ GPU: [████░░░] 65%  CPU: [███░░░] 38%  Memory: 58%     │
+├─────────────────────────────────────────────────────────┤
+│ Servers (3 running, 0 stopped)                          │
+│   │ Server ID      │ Port │ Status │ Slots │ tok/s    │
+│───┼────────────────┼──────┼────────┼───────┼──────────┤
+│ ► │ llama-3-2-3b   │ 9000 │ ● RUN  │ 2/4   │ 245      │  (highlighted)
+│   │ qwen2-7b       │ 9001 │ ● RUN  │ 1/4   │ 198      │
+│   │ llama-3-1-8b   │ 9002 │ ○ IDLE │ 0/4   │ -        │
+└─────────────────────────────────────────────────────────┘
+↑/↓ Navigate | Enter for details | [N]ew [M]odels [H]istory [Q]uit
+```
+
+**Features:**
+- System resource overview (GPU, CPU, memory)
+- List of all servers (running and stopped)
+- Real-time status updates every 2 seconds
+- Color-coded status indicators
+- Navigate with arrow keys or vim keys (k/j)
+
+### Single-Server Detail View
+
+Press `Enter` on any server to see detailed information:
+
+**Running servers show:**
+- Server information (status, uptime, model name, endpoint)
+- Request metrics (active/idle slots, prompt speed, generation speed)
+- Active slots detail (per-slot token generation rates)
+- System resources (GPU/CPU/ANE utilization, memory usage)
+
+**Stopped servers show:**
+- Server configuration (threads, context, GPU layers)
+- Last activity timestamps
+- Quick action commands (start, config, logs)
+
+### Models Management
+
+Press `M` from the main view to access Models Management.
+
+**Features:**
+- Browse all installed models with size and modified date
+- View which servers are using each model
+- Delete models with cascade option (removes associated servers)
+- Search HuggingFace for new models
+- Download models with real-time progress tracking
+
+**Models View:**
+- View all GGUF files in scrollable table
+- Color-coded server usage (green = safe to delete, yellow = in use)
+- Delete selected model with `Enter` or `D` key
+- Confirmation dialog with cascade warning
+
+**Search View** (press `S` from Models view):
+- Search HuggingFace models by text input
+- Browse results with downloads, likes, and file counts
+- Expand model to show available GGUF files
+- Download with real-time progress, speed, and ETA
+- Cancel download with `ESC` (cleans up partial files)
+
+### Server Operations
+
+**Create Server** (press `N` from main view):
+1. Select model from list (shows existing servers per model)
+2. Edit configuration (threads, context size, GPU layers, port)
+3. Review smart defaults based on model size
+4. Create and automatically start server
+5. Return to main view with new server visible
+
+**Start/Stop Server** (press `S` from detail view):
+- Toggle server state with progress modal
+- Stays in detail view after operation
+- Shows updated status immediately
+
+**Remove Server** (press `R` from detail view):
+- Confirmation dialog with option to delete model file
+- Warns if other servers use the same model
+- Cascade deletion removes all associated data
+- Returns to main view after deletion
+
+**Configure Server** (press `C` from detail view):
+- Edit all server parameters inline
+- Modal dialogs for different field types
+- Model migration support (handles server ID changes)
+- Automatic restart prompts for running servers
+- Port conflict detection and validation
+
+### Historical Monitoring
+
+Press `H` from any view to see historical time-series charts.
+
+**Single-Server Historical View:**
+- Token generation speed over time
+- GPU usage (%) with avg/max/min stats
+- CPU usage (%) with avg/max/min
+- Memory usage (%) with avg/max/min
+- Auto-refresh every 3 seconds
+
+**Multi-Server Historical View:**
+- Aggregated metrics across all servers
+- Total token generation speed (sum)
+- System GPU usage (average)
+- Total CPU usage (sum of per-process)
+- Total memory usage (sum in GB)
+
+**View Modes** (toggle with `H` key):
+
+- **Recent View (default):**
+  - Shows last 40-80 samples (~1-3 minutes)
+  - Raw data with no downsampling - perfect accuracy
+  - Best for: "What's happening right now?"
+
+- **Hour View:**
+  - Shows all ~1,800 samples from last hour
+  - Absolute time-aligned downsampling (30:1 ratio)
+  - Bucket max for GPU/CPU/token speed (preserves peaks)
+  - Bucket mean for memory (shows average)
+  - Chart stays perfectly stable as data streams in
+  - Best for: "What happened over the last hour?"
+
+**Data Collection:**
+- Automatic during monitoring (piggyback on polling loop)
+- Stored in `~/.llamacpp/history/<server-id>.json` per server
+- Retention: Last 24 hours (circular buffer, auto-prune)
+- File size: ~21 MB per server for 24h @ 2s interval
+
+### Keyboard Shortcuts
+
+**List View (Multi-Server):**
+- `↑/↓` or `k/j` - Navigate server list
+- `Enter` - View details for selected server
+- `N` - Create new server
+- `M` - Switch to Models Management
+- `H` - View historical metrics (all servers)
+- `ESC` - Exit TUI
+- `Q` - Quit immediately
+
+**Detail View (Single-Server):**
+- `S` - Start/Stop server (toggles based on status)
+- `C` - Open configuration screen
+- `R` - Remove server (with confirmation)
+- `H` - View historical metrics (this server)
+- `ESC` - Back to list view
+- `Q` - Quit immediately
+
+**Models View:**
+- `↑/↓` or `k/j` - Navigate model list
+- `Enter` or `D` - Delete selected model
+- `S` - Open search view
+- `R` - Refresh model list
+- `ESC` - Back to main view
+- `Q` - Quit immediately
+
+**Search View:**
+- `/` or `I` - Focus search input
+- `Enter` (in input) - Execute search
+- `↑/↓` or `k/j` - Navigate results or files
+- `Enter` (on result) - Show GGUF files for model
+- `Enter` (on file) - Download/install model
+- `R` - Refresh results (re-execute search)
+- `ESC` - Back to models view (or results list if viewing files)
+- `Q` - Quit immediately
+
+**Historical View:**
+- `H` - Toggle between Recent/Hour view
+- `ESC` - Return to live monitoring
+- `Q` - Quit immediately
+
+**Configuration Screen:**
+- `↑/↓` or `k/j` - Navigate fields
+- `Enter` - Open modal for selected field
+- `S` - Save changes (prompts for restart if running)
+- `ESC` - Cancel (prompts if unsaved changes)
+- `Q` - Quit immediately
+
+### Optional: GPU/CPU Metrics
+
+For GPU and CPU utilization metrics, install macmon:
+```bash
+brew install vladkens/tap/macmon
+```
+
+Without macmon, the TUI still shows:
+- ✅ Server status and uptime
+- ✅ Active slots and token generation speeds
+- ✅ Memory usage (via built-in vm_stat)
+- ❌ GPU/CPU/ANE utilization (requires macmon)
+
+### Deprecated: `llamacpp server monitor`
+
+The `llamacpp server monitor` command is deprecated. Use `llamacpp` instead to launch the TUI dashboard.
+
 ## Router (Unified Endpoint)
 
 The router provides a single OpenAI-compatible endpoint that automatically routes requests to the correct backend server based on the model name. This is perfect for LLM clients that don't support multiple endpoints.
@@ -643,7 +858,7 @@ Launch the interactive TUI dashboard for monitoring and managing servers.
 llamacpp
 ```
 
-See [Interactive TUI Dashboard](#interactive-tui-dashboard) for full details.
+See [Interactive TUI](#interactive-tui) for full details.
 
 ### `llamacpp ls`
 List all GGUF models in ~/models directory.
@@ -762,47 +977,6 @@ llamacpp logs --rotate
 - `--rotate` - Archives all current logs with timestamps
 
 **Use case:** Quickly see which servers are accumulating large logs, or clean up all logs at once.
-
-## Models Management TUI
-
-The Models Management TUI is accessible by pressing `M` from the `llamacpp` list view. It provides a full-featured interface for managing local models and searching/downloading new ones.
-
-**Features:**
-- **Browse local models** - View all GGUF files with size, modification date, and server usage
-- **Delete models** - Remove models with automatic cleanup of associated servers
-- **Search HuggingFace** - Find and browse models from Hugging Face repository
-- **Download with progress** - Real-time progress tracking for model downloads
-- **Seamless navigation** - Switch between monitoring and models management
-
-**Quick Access:**
-```bash
-# Launch TUI and press 'M' to open Models Management
-llamacpp
-```
-
-**Models View:**
-- View all installed models in scrollable table
-- See which servers are using each model
-- Color-coded status (green = safe to delete, yellow/gray = servers using)
-- Delete models with Enter or D key
-- Cascade deletion: automatically removes associated servers
-
-**Search View (press 'S' from Models view):**
-- Search HuggingFace models by name
-- Browse search results with download counts and likes
-- Expand models to show available GGUF files
-- Download files with real-time progress tracking
-- Cancel downloads with ESC (cleans up partial files)
-
-**Keyboard Controls:**
-- **M** - Switch to Models view (from TUI list view)
-- **↑/↓** or **k/j** - Navigate lists
-- **Enter** - Select/download/delete
-- **S** - Open search view (from models view)
-- **/** or **I** - Focus search input (in search view)
-- **R** - Refresh view
-- **ESC** - Back/cancel
-- **Q** - Quit
 
 ## Server Management
 
@@ -1019,131 +1193,6 @@ The compact format shows one line per HTTP request and includes:
 **Note:** Verbose logging is now enabled by default. HTTP request logs are available by default.
 
 Use `--http` to see full request/response JSON, or `--verbose` option to see all internal server logs.
-
-## Interactive TUI Dashboard
-
-The main way to monitor and manage servers is through the interactive TUI dashboard, launched by running `llamacpp` with no arguments.
-
-```bash
-llamacpp
-```
-
-![Server Monitoring TUI](https://raw.githubusercontent.com/appkitstudio/llamacpp-cli/main/docs/images/monitor-detail.png)
-
-**Features:**
-- Multi-server dashboard with real-time metrics
-- Drill-down to single-server detail view
-- Create, start, stop, and remove servers without leaving the TUI
-- Edit server configuration inline
-- Access Models Management (press `M`)
-- Historical metrics with time-series charts
-
-**Multi-Server Dashboard:**
-```
-┌─────────────────────────────────────────────────────────┐
-│ System Resources                                         │
-│ GPU: [████░░░] 65%  CPU: [███░░░] 38%  Memory: 58%     │
-├─────────────────────────────────────────────────────────┤
-│ Servers (3 running, 0 stopped)                          │
-│   │ Server ID      │ Port │ Status │ Slots │ tok/s    │
-│───┼────────────────┼──────┼────────┼───────┼──────────┤
-│ ► │ llama-3-2-3b   │ 9000 │ ● RUN  │ 2/4   │ 245      │  (highlighted)
-│   │ qwen2-7b       │ 9001 │ ● RUN  │ 1/4   │ 198      │
-│   │ llama-3-1-8b   │ 9002 │ ○ IDLE │ 0/4   │ -        │
-└─────────────────────────────────────────────────────────┘
-↑/↓ Navigate | Enter for details | [H]istory [R]efresh [Q] Quit
-```
-
-**Single-Server View:**
-- **Server Information** - Status, uptime, model name, endpoint, slot counts
-- **Request Metrics** - Active/idle slots, prompt speed, generation speed
-- **Active Slots** - Per-slot token generation rates and progress
-- **System Resources** - GPU/CPU/ANE utilization, memory usage, temperature
-
-**Keyboard Shortcuts:**
-- **List View (Multi-Server):**
-  - `↑/↓` or `k/j` - Navigate server list
-  - `Enter` - View details for selected server
-  - `N` - Create new server
-  - `M` - Switch to Models Management
-  - `H` - View historical metrics (all servers)
-  - `ESC` - Exit TUI
-  - `Q` - Quit immediately
-- **Detail View (Single-Server):**
-  - `S` - Start/Stop server (toggles based on status)
-  - `C` - Open configuration screen
-  - `R` - Remove server (with confirmation)
-  - `H` - View historical metrics (this server)
-  - `ESC` - Back to list view
-  - `Q` - Quit immediately
-- **Historical View:**
-  - `H` - Toggle Hour View (Recent ↔ Hour)
-  - `ESC` - Back to live monitoring
-  - `Q` - Quit
-
-**Historical Monitoring:**
-
-Press `H` from any live monitoring view to see historical time-series charts. The historical view shows:
-
-- **Token generation speed** over time with statistics (avg, max, stddev)
-- **GPU usage** over time with min/max/avg
-- **CPU usage** over time with min/max/avg
-- **Memory usage** over time with min/max/avg
-
-**View Modes (Toggle with `H` key):**
-
-- **Recent View (default):**
-  - Shows last 40-80 samples (~1-3 minutes)
-  - Raw data with no downsampling - perfect accuracy
-  - Best for: "What's happening right now?"
-
-- **Hour View:**
-  - Shows all ~1,800 samples from last hour
-  - **Absolute time-aligned downsampling** (30:1 ratio) - chart stays perfectly stable
-  - Bucket boundaries never shift (aligned to round minutes)
-  - New samples only affect their own bucket, not the entire chart
-  - **Bucket max** for GPU/CPU/token speed (preserves peaks)
-  - **Bucket mean** for memory (shows average)
-  - Chart labels indicate "Peak per bucket" or "Average per bucket"
-  - Best for: "What happened over the last hour?"
-
-**Note:** The `H` key has two functions:
-- From **live monitoring** → Enter historical view (Recent mode)
-- Within **historical view** → Toggle between Recent and Hour views
-
-**Data Collection:**
-
-Historical data is automatically collected whenever you run the TUI (`llamacpp`). Data is retained for 24 hours in `~/.llamacpp/history/<server-id>.json` files, then automatically pruned.
-
-**Multi-Server Historical View:**
-
-From the multi-server dashboard, press `H` to see a summary table comparing average metrics across all servers for the last hour.
-
-**Features:**
-- **Multi-server dashboard** - Monitor all servers at once
-- **Real-time updates** - Metrics refresh every 2 seconds (adjustable)
-- **Historical monitoring** - View time-series charts of past metrics (press `H` from monitor view)
-- **Token-per-second calculation** - Shows actual generation speed per slot
-- **Progress bars** - Visual representation of GPU/CPU/memory usage
-- **Error recovery** - Shows stale data with warnings if connection lost
-- **Graceful degradation** - Works without GPU metrics (uses memory-only mode)
-
-**Optional: GPU/CPU Metrics**
-
-For GPU and CPU utilization metrics, install macmon:
-```bash
-brew install vladkens/tap/macmon
-```
-
-Without macmon, the TUI still shows:
-- ✅ Server status and uptime
-- ✅ Active slots and token generation speeds
-- ✅ Memory usage (via built-in vm_stat)
-- ❌ GPU/CPU/ANE utilization (requires macmon)
-
-### Deprecated: `llamacpp server monitor`
-
-The `llamacpp server monitor` command is deprecated. Use `llamacpp` instead to launch the TUI dashboard.
 
 ## Configuration
 
