@@ -551,7 +551,8 @@ llamacpp launch claude
 llamacpp launch claude --model llama-3.2-3b-instruct-q4_k_m.gguf
 
 # Pass arguments to Claude Code
-llamacpp launch claude -- --resume
+llamacpp launch claude --resume
+llamacpp launch claude -p "what time is it?"
 
 # Show configuration without launching
 llamacpp launch claude --config

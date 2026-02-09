@@ -527,7 +527,7 @@ const launch = program
 
 // Launch Claude Code
 launch
-  .command('claude')
+  .command('claude [args...]')
   .description('Launch Claude Code with llamacpp models')
   .option('--config', 'Configure without launching (display environment variables)')
   .option('--model <model>', 'Pre-select model (skips interactive selection)')
@@ -535,19 +535,10 @@ launch
   .option('--host <host>', 'Connect to router at host (alternative to --router-url)')
   .option('--port <port>', 'Connect to router at port (alternative to --router-url)', parseInt)
   .allowUnknownOption()
-  .action(async (options, cmd) => {
+  .action(async (args: string[], options) => {
     try {
-      // Collect arguments after -- separator for Claude Code
-      const claudeArgs: string[] = [];
-      let foundSeparator = false;
-
-      for (const arg of cmd.parent.rawArgs) {
-        if (foundSeparator) {
-          claudeArgs.push(arg);
-        } else if (arg === '--') {
-          foundSeparator = true;
-        }
-      }
+      // Arguments after 'claude' are passed through to Claude Code
+      const claudeArgs: string[] = args || [];
 
       await launchClaude({ ...options, claudeArgs });
     } catch (error) {
