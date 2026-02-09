@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.14.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.12.1...v1.14.0) (2026-02-09)
+
+### Features
+
+* **anthropic**: add full Anthropic Messages API support for Claude Code integration
+
+  The router now provides complete Anthropic protocol translation, enabling Claude Code to work seamlessly with local llama.cpp models through the unified router endpoint.
+
+  **Key features:**
+  - Full Anthropic Messages API compatibility (non-streaming and streaming)
+  - Tool/function calling support with bidirectional translation (Anthropic ↔ OpenAI)
+  - Server-Sent Events (SSE) streaming with proper event sequencing
+  - Complete content block handling (text, tool_use, tool_result)
+  - Comprehensive error handling with Anthropic error format
+  - Model tier routing (routes Opus/Sonnet/Haiku/subagents to same local model)
+
+  **Implementation:**
+  - `src/types/anthropic-types.ts` - Complete Anthropic API type definitions
+  - `src/lib/anthropic-converter.ts` - Bidirectional protocol translation
+  - `src/lib/anthropic-stream-converter.ts` - Stateful streaming event conversion
+  - `src/lib/router-server.ts` - Enhanced `/v1/messages` endpoint with middleware
+  - `src/commands/launch/claude.ts` - Additional model routing environment variables
+
+  **Usage:**
+  ```bash
+  # Launch Claude Code with local model (interactive selection)
+  llamacpp launch claude
+
+  # Launch with specific model
+  llamacpp launch claude --model llama-3.1-8b-instruct.gguf
+
+  # Direct API usage
+  curl -X POST http://127.0.0.1:9100/v1/messages \
+    -H "Content-Type: application/json" \
+    -d '{
+      "model": "model-name",
+      "max_tokens": 1024,
+      "messages": [{"role": "user", "content": "Hello"}]
+    }'
+  ```
+
+  **Documentation:**
+  - `ANTHROPIC_PROTOCOL_ANALYSIS.md` - Deep dive into Ollama's approach
+  - `ANTHROPIC_MIDDLEWARE_IMPLEMENTATION.md` - Implementation summary
+
+  **Requirements for tool use:**
+  - Model must support function calling (Llama 3.1+, Qwen 2.5+, Mistral v3+)
+  - llama.cpp must handle JSON schema conversion
+
 ## [1.12.1](https://github.com/appkitstudio/llamacpp-cli/compare/v1.12.0...v1.12.1) (2026-02-06)
 
 

@@ -9,6 +9,20 @@ import { RouterConfig } from '../types/router-config';
 import { ServerConfig } from '../types/server-config';
 import { readJson, fileExists, getConfigDir, getServersDir } from '../utils/file-utils';
 import { RouterLogger, RequestTimer, RouterLogEntry } from './router-logger';
+import {
+  fromMessagesRequest,
+  toMessagesResponse,
+  generateMessageId,
+  estimateInputTokens,
+  createAnthropicError,
+} from './anthropic-converter';
+import { AnthropicStreamConverter } from './anthropic-stream-converter';
+import type {
+  AnthropicMessagesRequest,
+  OpenAIChatRequest,
+  OpenAIChatResponse,
+  OpenAIChatStreamChunk,
+} from '../types/anthropic-types';
 
 interface ErrorResponse {
   error: string;
@@ -235,13 +249,15 @@ class RouterServer {
     try {
       // Parse request body
       const body = await this.readBody(req);
-      let anthropicRequest: any;
+      let anthropicRequest: AnthropicMessagesRequest;
       try {
         anthropicRequest = JSON.parse(body);
       } catch (error) {
         statusCode = 400;
         errorMsg = 'Invalid JSON in request body';
-        this.sendError(res, statusCode, 'Bad Request', errorMsg);
+        const anthropicError = createAnthropicError(statusCode, errorMsg);
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(anthropicError));
         await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg);
         return;
       }
@@ -249,16 +265,39 @@ class RouterServer {
       // Extract model name and prompt preview
       modelName = anthropicRequest.model || 'unknown';
       if (anthropicRequest.messages && anthropicRequest.messages.length > 0) {
-        const userMsg = anthropicRequest.messages.find((m: any) => m.role === 'user');
+        const userMsg = anthropicRequest.messages.find(m => m.role === 'user');
         if (userMsg && typeof userMsg.content === 'string') {
           promptPreview = userMsg.content.slice(0, 50);
         }
       }
 
+      // Validate required fields
       if (!anthropicRequest.model) {
         statusCode = 400;
         errorMsg = 'Missing "model" field in request';
-        this.sendError(res, statusCode, 'Bad Request', errorMsg);
+        const anthropicError = createAnthropicError(statusCode, errorMsg);
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(anthropicError));
+        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+        return;
+      }
+
+      if (!anthropicRequest.max_tokens || anthropicRequest.max_tokens <= 0) {
+        statusCode = 400;
+        errorMsg = 'max_tokens is required and must be positive';
+        const anthropicError = createAnthropicError(statusCode, errorMsg);
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(anthropicError));
+        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+        return;
+      }
+
+      if (!anthropicRequest.messages || anthropicRequest.messages.length === 0) {
+        statusCode = 400;
+        errorMsg = 'messages is required and must be non-empty';
+        const anthropicError = createAnthropicError(statusCode, errorMsg);
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(anthropicError));
         await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
         return;
       }
@@ -268,7 +307,9 @@ class RouterServer {
       if (!server) {
         statusCode = 404;
         errorMsg = `No server found for model: ${modelName}`;
-        this.sendError(res, statusCode, 'Not Found', errorMsg);
+        const anthropicError = createAnthropicError(statusCode, errorMsg);
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(anthropicError));
         await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
         return;
       }
@@ -277,83 +318,87 @@ class RouterServer {
       if (server.status !== 'running') {
         statusCode = 503;
         errorMsg = `Server for model ${modelName} is not running (status: ${server.status})`;
-        this.sendError(res, statusCode, 'Service Unavailable', errorMsg);
+        const anthropicError = createAnthropicError(statusCode, errorMsg);
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(anthropicError));
         await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
         return;
       }
 
-      // Convert Anthropic Messages format to OpenAI Chat Completions format
-      const openAIMessages: any[] = [];
+      // Convert Anthropic request to OpenAI format
+      const openAIRequest: OpenAIChatRequest = fromMessagesRequest(anthropicRequest);
 
-      // Add system message if present
-      if (anthropicRequest.system) {
-        // System can be a string or array of content blocks
-        let systemContent = '';
-        if (typeof anthropicRequest.system === 'string') {
-          systemContent = anthropicRequest.system;
-        } else if (Array.isArray(anthropicRequest.system)) {
-          // Extract text from content blocks
-          systemContent = anthropicRequest.system
-            .filter((block: any) => block.type === 'text')
-            .map((block: any) => block.text)
-            .join('\n');
-        }
-        if (systemContent) {
-          openAIMessages.push({
-            role: 'system',
-            content: systemContent
-          });
-        }
-      }
-
-      // Add user/assistant messages
-      if (anthropicRequest.messages) {
-        for (const msg of anthropicRequest.messages) {
-          let content = '';
-          // Content can be a string or array of content blocks
-          if (typeof msg.content === 'string') {
-            content = msg.content;
-          } else if (Array.isArray(msg.content)) {
-            // Extract text from content blocks
-            content = msg.content
-              .filter((block: any) => block.type === 'text')
-              .map((block: any) => block.text)
-              .join('\n');
-          }
-          openAIMessages.push({
-            role: msg.role,
-            content
-          });
-        }
-      }
-
-      const openAIRequest = {
-        model: anthropicRequest.model,
-        messages: openAIMessages,
-        max_tokens: anthropicRequest.max_tokens || 1024,
-        temperature: anthropicRequest.temperature,
-        top_p: anthropicRequest.top_p,
-        stream: false, // Always disable streaming for now - we don't handle SSE yet
-      };
+      // Generate message ID for response
+      const messageId = generateMessageId();
 
       // Proxy request to backend
-      // Always use 127.0.0.1 as destination (0.0.0.0 is only valid as bind address)
       const backendHost = server.host === '0.0.0.0' ? '127.0.0.1' : server.host;
       const backendUrl = `http://${backendHost}:${server.port}/v1/chat/completions`;
 
-      // Make request to backend
-      const url = new URL(backendUrl);
-      const options = {
-        hostname: url.hostname,
-        port: url.port,
-        path: url.pathname,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        timeout: this.config.requestTimeout,
-      };
+      // Handle streaming vs non-streaming
+      if (anthropicRequest.stream) {
+        await this.handleAnthropicStreaming(
+          anthropicRequest,
+          openAIRequest,
+          backendUrl,
+          messageId,
+          res,
+          timer,
+          modelName,
+          promptPreview,
+          server
+        );
+      } else {
+        await this.handleAnthropicNonStreaming(
+          openAIRequest,
+          backendUrl,
+          messageId,
+          res,
+          timer,
+          modelName,
+          promptPreview,
+          server
+        );
+      }
+    } catch (error) {
+      console.error('[Router] Error handling Anthropic messages request:', error);
+      statusCode = 500;
+      errorMsg = (error as Error).message;
+      const anthropicError = createAnthropicError(statusCode, errorMsg);
+      if (!res.headersSent) {
+        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(anthropicError));
+      }
+      await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+    }
+  }
 
+  /**
+   * Handle non-streaming Anthropic Messages request
+   */
+  private async handleAnthropicNonStreaming(
+    openAIRequest: OpenAIChatRequest,
+    backendUrl: string,
+    messageId: string,
+    res: http.ServerResponse,
+    timer: RequestTimer,
+    modelName: string,
+    promptPreview: string | undefined,
+    server: ServerConfig
+  ): Promise<void> {
+    const url = new URL(backendUrl);
+    const options: http.RequestOptions = {
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      timeout: this.config.requestTimeout,
+    };
+
+    return new Promise((resolve, reject) => {
       const backendReq = http.request(options, (backendRes) => {
         let responseData = '';
 
@@ -363,69 +408,193 @@ class RouterServer {
 
         backendRes.on('end', async () => {
           try {
-            const openAIResponse = JSON.parse(responseData);
+            const parsedResponse = JSON.parse(responseData);
+
+            // Check if backend returned an error
+            if (parsedResponse.error) {
+              const statusCode = backendRes.statusCode || 500;
+              const errorMsg = parsedResponse.error.message || 'Backend error';
+              console.error('[Router] Backend returned error:', errorMsg);
+              const anthropicError = createAnthropicError(statusCode, errorMsg);
+              res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(anthropicError));
+              await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, `${server.host}:${server.port}`, promptPreview);
+              reject(new Error(errorMsg));
+              return;
+            }
+
+            // Check if response has required fields for a completion
+            if (!parsedResponse.choices || !Array.isArray(parsedResponse.choices) || parsedResponse.choices.length === 0) {
+              const statusCode = 502;
+              const errorMsg = 'Invalid backend response: missing choices array';
+              console.error('[Router] Backend response missing choices:', responseData.slice(0, 500));
+              const anthropicError = createAnthropicError(statusCode, errorMsg);
+              res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(anthropicError));
+              await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, `${server.host}:${server.port}`, promptPreview);
+              reject(new Error(errorMsg));
+              return;
+            }
+
+            const openAIResponse: OpenAIChatResponse = parsedResponse;
 
             // Convert OpenAI response to Anthropic format
-            const anthropicResponse = {
-              id: openAIResponse.id || `msg_${Date.now()}`,
-              type: 'message',
-              role: 'assistant',
-              content: [{
-                type: 'text',
-                text: openAIResponse.choices?.[0]?.message?.content || ''
-              }],
-              model: openAIResponse.model || modelName,
-              stop_reason: openAIResponse.choices?.[0]?.finish_reason === 'stop' ? 'end_turn' : 'max_tokens',
-              stop_sequence: null,
-              usage: {
-                input_tokens: openAIResponse.usage?.prompt_tokens || 0,
-                output_tokens: openAIResponse.usage?.completion_tokens || 0
-              }
-            };
+            const anthropicResponse = toMessagesResponse(openAIResponse, messageId);
 
-            statusCode = 200;
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(anthropicResponse));
 
-            await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), undefined, backendHost + ':' + server.port, promptPreview);
+            await this.logRequest(modelName, '/v1/messages', 200, timer.elapsed(), undefined, `${server.host}:${server.port}`, promptPreview);
+            resolve();
           } catch (error) {
-            console.error('[Router] Error parsing backend response:', error);
+            console.error('[Router] Error processing backend response:', error);
             console.error('[Router] Raw response data:', responseData.slice(0, 1000));
-            statusCode = 502;
-            errorMsg = `Failed to parse backend response: ${(error as Error).message}`;
-            this.sendError(res, statusCode, 'Bad Gateway', errorMsg);
-            await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, backendHost + ':' + server.port, promptPreview);
+            const statusCode = 502;
+            const errorMsg = `Failed to process backend response: ${(error as Error).message}`;
+            const anthropicError = createAnthropicError(statusCode, errorMsg);
+            res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(anthropicError));
+            await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, `${server.host}:${server.port}`, promptPreview);
+            reject(error);
           }
         });
       });
 
       backendReq.on('error', async (error) => {
         console.error('[Router] Proxy request failed:', error);
-        statusCode = 502;
-        errorMsg = `Backend request failed: ${error.message}`;
-        this.sendError(res, statusCode, 'Bad Gateway', errorMsg);
-        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, backendHost + ':' + server.port, promptPreview);
+        const statusCode = 502;
+        const errorMsg = `Backend request failed: ${error.message}`;
+        const anthropicError = createAnthropicError(statusCode, errorMsg);
+        if (!res.headersSent) {
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(anthropicError));
+        }
+        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, `${server.host}:${server.port}`, promptPreview);
+        reject(error);
       });
 
       backendReq.on('timeout', async () => {
         console.error('[Router] Proxy request timed out');
         backendReq.destroy();
-        statusCode = 504;
-        errorMsg = 'Request timeout';
-        this.sendError(res, statusCode, 'Gateway Timeout', errorMsg);
-        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, backendHost + ':' + server.port, promptPreview);
+        const statusCode = 504;
+        const errorMsg = 'Request timeout';
+        const anthropicError = createAnthropicError(statusCode, errorMsg);
+        if (!res.headersSent) {
+          res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(anthropicError));
+        }
+        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, `${server.host}:${server.port}`, promptPreview);
+        reject(new Error('Request timeout'));
       });
 
       backendReq.write(JSON.stringify(openAIRequest));
       backendReq.end();
+    });
+  }
 
-    } catch (error) {
-      console.error('[Router] Error handling Anthropic messages request:', error);
-      statusCode = 500;
-      errorMsg = (error as Error).message;
-      this.sendError(res, statusCode, 'Internal Server Error', errorMsg);
-      await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
-    }
+  /**
+   * Handle streaming Anthropic Messages request
+   */
+  private async handleAnthropicStreaming(
+    anthropicRequest: AnthropicMessagesRequest,
+    openAIRequest: OpenAIChatRequest,
+    backendUrl: string,
+    messageId: string,
+    res: http.ServerResponse,
+    timer: RequestTimer,
+    modelName: string,
+    promptPreview: string | undefined,
+    server: ServerConfig
+  ): Promise<void> {
+    // Set SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    });
+
+    // Create stream converter
+    const estimatedTokens = estimateInputTokens(anthropicRequest);
+    const converter = new AnthropicStreamConverter(messageId, anthropicRequest.model, estimatedTokens);
+
+    const url = new URL(backendUrl);
+    const options: http.RequestOptions = {
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      timeout: this.config.requestTimeout,
+    };
+
+    return new Promise((resolve, reject) => {
+      const backendReq = http.request(options, (backendRes) => {
+        let buffer = '';
+
+        backendRes.on('data', (chunk) => {
+          buffer += chunk.toString();
+
+          // Process complete SSE events
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') {
+                res.write('data: [DONE]\n\n');
+                continue;
+              }
+
+              try {
+                const chunk: OpenAIChatStreamChunk = JSON.parse(data);
+                const events = converter.process(chunk);
+
+                // Emit Anthropic SSE events
+                for (const event of events) {
+                  res.write(`event: ${event.type}\n`);
+                  res.write(`data: ${JSON.stringify(event)}\n\n`);
+                }
+              } catch (error) {
+                console.error('[Router] Error parsing streaming chunk:', error);
+              }
+            }
+          }
+        });
+
+        backendRes.on('end', async () => {
+          res.end();
+          await this.logRequest(modelName, '/v1/messages', 200, timer.elapsed(), undefined, `${server.host}:${server.port}`, promptPreview);
+          resolve();
+        });
+      });
+
+      backendReq.on('error', async (error) => {
+        console.error('[Router] Streaming proxy request failed:', error);
+        const errorEvent = createAnthropicError(502, `Backend request failed: ${error.message}`);
+        res.write(`event: error\n`);
+        res.write(`data: ${JSON.stringify(errorEvent)}\n\n`);
+        res.end();
+        await this.logRequest(modelName, '/v1/messages', 502, timer.elapsed(), error.message, `${server.host}:${server.port}`, promptPreview);
+        reject(error);
+      });
+
+      backendReq.on('timeout', async () => {
+        console.error('[Router] Streaming proxy request timed out');
+        backendReq.destroy();
+        const errorEvent = createAnthropicError(504, 'Request timeout');
+        res.write(`event: error\n`);
+        res.write(`data: ${JSON.stringify(errorEvent)}\n\n`);
+        res.end();
+        await this.logRequest(modelName, '/v1/messages', 504, timer.elapsed(), 'Request timeout', `${server.host}:${server.port}`, promptPreview);
+        reject(new Error('Request timeout'));
+      });
+
+      backendReq.write(JSON.stringify(openAIRequest));
+      backendReq.end();
+    });
   }
 
   /**

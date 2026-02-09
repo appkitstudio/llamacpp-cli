@@ -421,9 +421,17 @@ response = client.chat.completions.create(
 
 ### Supported Endpoints
 
+**OpenAI-Compatible:**
 - `POST /v1/chat/completions` - Chat completions (routes to correct backend)
 - `POST /v1/embeddings` - Text embeddings (routes to correct backend)
 - `GET /v1/models` - List all available models from running servers
+
+**Anthropic-Compatible:**
+- `POST /v1/messages` - Anthropic Messages API (with tool calling support)
+- `POST /v1/messages/count_tokens` - Token counting
+- `GET /v1/models/{model}` - Retrieve specific model info
+
+**System:**
 - `GET /health` - Router health check
 
 ### Configuration
@@ -570,7 +578,36 @@ llamacpp launch claude --host 192.168.1.100 --port 9100
    - `ANTHROPIC_AUTH_TOKEN=llamacpp`
    - `ANTHROPIC_API_KEY=""`
    - `ANTHROPIC_BASE_URL=http://localhost:9100`
+   - `ANTHROPIC_DEFAULT_OPUS_MODEL=<selected-model>`
+   - `ANTHROPIC_DEFAULT_SONNET_MODEL=<selected-model>`
+   - `ANTHROPIC_DEFAULT_HAIKU_MODEL=<selected-model>`
+   - `CLAUDE_CODE_SUBAGENT_MODEL=<selected-model>`
 5. Launches Claude Code with selected model
+
+**Anthropic Protocol Support:**
+
+The router provides full Anthropic Messages API compatibility with:
+- ✅ Non-streaming and streaming responses (SSE)
+- ✅ Tool/function calling (bidirectional translation)
+- ✅ System prompts
+- ✅ Content blocks (text, tool_use, tool_result)
+- ✅ Temperature, top_p, top_k, max_tokens
+- ✅ Stop sequences
+- ✅ Comprehensive error handling
+
+**Tool Use Support:**
+
+For Claude Code's tool calling features to work, your model must:
+- Support function calling (Llama 3.1+, Qwen 2.5+, Mistral v3+)
+- Work with llama.cpp's JSON schema conversion
+
+Recommended models:
+- **Llama 3.1** (8B, 70B) - Excellent function calling
+- **Qwen 2.5** (7B, 14B, 72B) - Best instruction following
+- **Mistral v3** (7B) - Good function calling
+- **Command R+** - Enterprise option
+
+Text-only models will work for basic chat but won't support tool execution.
 
 **Requirements:**
 

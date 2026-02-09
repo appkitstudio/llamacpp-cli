@@ -17,6 +17,11 @@ export interface ClaudeEnv {
   ANTHROPIC_AUTH_TOKEN: string;
   ANTHROPIC_API_KEY: string;
   ANTHROPIC_BASE_URL: string;
+  // Model routing - ensures all Claude tiers use the same local model
+  ANTHROPIC_DEFAULT_OPUS_MODEL: string;
+  ANTHROPIC_DEFAULT_SONNET_MODEL: string;
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: string;
+  CLAUDE_CODE_SUBAGENT_MODEL: string;
 }
 
 /**

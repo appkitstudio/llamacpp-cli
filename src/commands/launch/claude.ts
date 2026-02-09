@@ -194,10 +194,15 @@ export async function launchClaude(options: LaunchOptions): Promise<void> {
     }
 
     // Setup environment variables
+    // These route all Claude model tiers (Opus, Sonnet, Haiku, subagents) to the same local model
     const env: ClaudeEnv = {
       ANTHROPIC_AUTH_TOKEN: 'llamacpp',
       ANTHROPIC_API_KEY: '',
       ANTHROPIC_BASE_URL: routerUrl,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: selectedModel,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: selectedModel,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: selectedModel,
+      CLAUDE_CODE_SUBAGENT_MODEL: selectedModel,
     };
 
     // Config-only mode
