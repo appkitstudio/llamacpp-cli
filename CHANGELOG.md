@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.14.1] (2026-02-09)
+
+### Bug Fixes
+
+* **anthropic**: fix Edit tool string escaping issue with Qwen3 models
+  - llama.cpp doesn't properly unescape Qwen3's XML-formatted tool parameters
+  - Added automatic string unescaping in both streaming and non-streaming responses
+  - Fixes "Error editing file" errors when Claude Code tries to use Edit tool
+  - Unescapes `\n`, `\r`, `\t`, `\"`, `\'`, and `\\` in tool call parameters
+  - Affects all Qwen models using XML tool format (Qwen 2.5, Qwen3)
+
 ## [1.14.0](https://github.com/appkitstudio/llamacpp-cli/compare/v1.12.1...v1.14.0) (2026-02-09)
 
 ### Features

@@ -10,6 +10,37 @@ import type {
 } from '../types/anthropic-types.js';
 
 /**
+ * Recursively unescape strings in tool call parameters
+ * Fixes issue where llama.cpp doesn't properly unescape Qwen3's XML format
+ */
+function unescapeToolParameters(obj: any): any {
+  if (typeof obj === 'string') {
+    // Unescape common escape sequences
+    return obj
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'")
+      .replace(/\\\\/g, '\\'); // Backslash must be last
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(unescapeToolParameters);
+  }
+
+  if (obj !== null && typeof obj === 'object') {
+    const result: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = unescapeToolParameters(value);
+    }
+    return result;
+  }
+
+  return obj;
+}
+
+/**
  * StreamConverter manages state for converting OpenAI streaming responses to Anthropic format.
  *
  * It tracks the current state of content blocks and emits proper Anthropic SSE events.
@@ -83,9 +114,21 @@ export class AnthropicStreamConverter {
         this.contentIndex++;
       }
 
-      // Close any open tool calls
+      // Close any open tool calls - send unescaped input before closing
       for (const [index, state] of this.toolCallsInProgress.entries()) {
         if (state.started && !state.completed) {
+          // Send unescaped tool input now that it's complete
+          if (state.arguments) {
+            try {
+              const parsedInput = JSON.parse(state.arguments);
+              const unescapedInput = unescapeToolParameters(parsedInput);
+              const correctedJson = JSON.stringify(unescapedInput);
+              events.push(this.createInputJsonDeltaEvent(state.blockIndex, correctedJson));
+            } catch (e) {
+              // If parsing fails, send raw arguments
+              events.push(this.createInputJsonDeltaEvent(state.blockIndex, state.arguments));
+            }
+          }
           events.push(this.createContentBlockStopEvent(state.blockIndex));
           state.completed = true;
         }
@@ -147,13 +190,9 @@ export class AnthropicStreamConverter {
       events.push(this.createToolUseStartEvent(state.id, state.name));
     }
 
-    // Emit input_json_delta if we have arguments
-    if (state.started && toolCallDelta.function?.arguments) {
-      events.push(this.createInputJsonDeltaEvent(
-        state.blockIndex,
-        toolCallDelta.function.arguments
-      ));
-    }
+    // NOTE: We don't send input_json_delta events incrementally anymore.
+    // Instead, we buffer the arguments and send them unescaped when the tool call completes.
+    // This fixes the issue where llama.cpp doesn't properly unescape Qwen3's XML format.
 
     return events;
   }

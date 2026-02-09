@@ -167,6 +167,37 @@ function extractTextFromContentBlocks(blocks: AnthropicContentBlock[]): string {
 // Response Conversion: OpenAI → Anthropic
 // ============================================================================
 
+/**
+ * Recursively unescape strings in tool call parameters
+ * Fixes issue where llama.cpp doesn't properly unescape Qwen3's XML format
+ */
+function unescapeToolParameters(obj: any): any {
+  if (typeof obj === 'string') {
+    // Unescape common escape sequences
+    return obj
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\'/g, "'")
+      .replace(/\\\\/g, '\\'); // Backslash must be last
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(unescapeToolParameters);
+  }
+
+  if (obj !== null && typeof obj === 'object') {
+    const result: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = unescapeToolParameters(value);
+    }
+    return result;
+  }
+
+  return obj;
+}
+
 export function toMessagesResponse(
   openaiRes: OpenAIChatResponse,
   messageId?: string
@@ -188,11 +219,15 @@ export function toMessagesResponse(
   // Add tool calls
   if (message.tool_calls) {
     for (const tc of message.tool_calls) {
+      const rawInput = JSON.parse(tc.function.arguments || '{}');
+      // Unescape strings to fix llama.cpp XML parsing issue with Qwen3
+      const unescapedInput = unescapeToolParameters(rawInput);
+
       content.push({
         type: 'tool_use',
         id: tc.id,
         name: tc.function.name,
-        input: JSON.parse(tc.function.arguments || '{}'),
+        input: unescapedInput,
       });
     }
   }
