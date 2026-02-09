@@ -99,16 +99,30 @@ class RouterServer {
 
     try {
       // Route based on path
-      if (req.url === '/health' && req.method === 'GET') {
+      const url = req.url || '/';
+      const method = req.method || 'GET';
+
+      if (url === '/' && method === 'GET') {
+        // Root endpoint - return simple status
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', service: 'llamacpp-router' }));
+      } else if (url === '/health' && method === 'GET') {
         await this.handleHealth(req, res);
-      } else if (req.url === '/v1/models' && req.method === 'GET') {
+      } else if (url === '/v1/models' && method === 'GET') {
         await this.handleModels(req, res);
-      } else if (req.url === '/v1/chat/completions' && req.method === 'POST') {
+      } else if (url.startsWith('/v1/models/') && method === 'GET') {
+        const modelId = url.slice('/v1/models/'.length).split('?')[0]; // Strip query params
+        await this.handleModelRetrieve(req, res, decodeURIComponent(modelId));
+      } else if (url.startsWith('/v1/messages/count_tokens') && method === 'POST') {
+        await this.handleCountTokens(req, res);
+      } else if (url.startsWith('/v1/messages') && method === 'POST') {
+        await this.handleAnthropicMessages(req, res);
+      } else if (url.startsWith('/v1/chat/completions') && method === 'POST') {
         await this.handleChatCompletions(req, res);
-      } else if (req.url === '/v1/embeddings' && req.method === 'POST') {
+      } else if (url.startsWith('/v1/embeddings') && method === 'POST') {
         await this.handleEmbeddings(req, res);
       } else {
-        this.sendError(res, 404, 'Not Found', `Unknown endpoint: ${req.url}`);
+        this.sendError(res, 404, 'Not Found', `Unknown endpoint: ${url}`);
       }
     } catch (error) {
       console.error('[Router] Error handling request:', error);
@@ -149,6 +163,269 @@ class RouterServer {
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(response));
+  }
+
+  /**
+   * Retrieve specific model endpoint - OpenAI compatible
+   * Returns success for any model to allow Claude Code to work with both local and cloud models
+   */
+  private async handleModelRetrieve(req: http.IncomingMessage, res: http.ServerResponse, modelId: string): Promise<void> {
+    const servers = await this.getAllServers();
+    const server = servers.find(s => s.modelName === modelId && s.status === 'running');
+
+    // Return model info for both local models and unknown models (like claude-haiku)
+    // This allows Claude Code to use both local and cloud model names
+    const modelInfo: ModelInfo = {
+      id: modelId,
+      object: 'model',
+      created: server ? Math.floor(new Date(server.createdAt).getTime() / 1000) : Math.floor(Date.now() / 1000),
+      owned_by: server ? 'llamacpp' : 'anthropic',
+    };
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(modelInfo));
+  }
+
+  /**
+   * Count tokens endpoint - Anthropic token counting API
+   */
+  private async handleCountTokens(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      // Parse request body
+      const body = await this.readBody(req);
+      const request = JSON.parse(body);
+
+      // Estimate token count (rough approximation: ~4 chars per token)
+      let totalChars = 0;
+      if (request.system) {
+        totalChars += typeof request.system === 'string' ? request.system.length : JSON.stringify(request.system).length;
+      }
+      if (request.messages) {
+        for (const msg of request.messages) {
+          const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+          totalChars += content.length;
+        }
+      }
+
+      const estimatedTokens = Math.ceil(totalChars / 4);
+
+      // Return Anthropic-compatible token count response
+      const response = {
+        input_tokens: estimatedTokens
+      };
+
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(response));
+    } catch (error) {
+      console.error('[Router] Error counting tokens:', error);
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message);
+    }
+  }
+
+  /**
+   * Anthropic Messages API endpoint - convert to OpenAI format and route
+   */
+  private async handleAnthropicMessages(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const timer = new RequestTimer();
+    let modelName = 'unknown';
+    let statusCode = 500;
+    let errorMsg: string | undefined;
+    let promptPreview: string | undefined;
+
+    try {
+      // Parse request body
+      const body = await this.readBody(req);
+      let anthropicRequest: any;
+      try {
+        anthropicRequest = JSON.parse(body);
+      } catch (error) {
+        statusCode = 400;
+        errorMsg = 'Invalid JSON in request body';
+        this.sendError(res, statusCode, 'Bad Request', errorMsg);
+        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg);
+        return;
+      }
+
+      // Extract model name and prompt preview
+      modelName = anthropicRequest.model || 'unknown';
+      if (anthropicRequest.messages && anthropicRequest.messages.length > 0) {
+        const userMsg = anthropicRequest.messages.find((m: any) => m.role === 'user');
+        if (userMsg && typeof userMsg.content === 'string') {
+          promptPreview = userMsg.content.slice(0, 50);
+        }
+      }
+
+      if (!anthropicRequest.model) {
+        statusCode = 400;
+        errorMsg = 'Missing "model" field in request';
+        this.sendError(res, statusCode, 'Bad Request', errorMsg);
+        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+        return;
+      }
+
+      // Find server for model
+      const server = await this.findServerForModel(modelName);
+      if (!server) {
+        statusCode = 404;
+        errorMsg = `No server found for model: ${modelName}`;
+        this.sendError(res, statusCode, 'Not Found', errorMsg);
+        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+        return;
+      }
+
+      // Check if server is running
+      if (server.status !== 'running') {
+        statusCode = 503;
+        errorMsg = `Server for model ${modelName} is not running (status: ${server.status})`;
+        this.sendError(res, statusCode, 'Service Unavailable', errorMsg);
+        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+        return;
+      }
+
+      // Convert Anthropic Messages format to OpenAI Chat Completions format
+      const openAIMessages: any[] = [];
+
+      // Add system message if present
+      if (anthropicRequest.system) {
+        // System can be a string or array of content blocks
+        let systemContent = '';
+        if (typeof anthropicRequest.system === 'string') {
+          systemContent = anthropicRequest.system;
+        } else if (Array.isArray(anthropicRequest.system)) {
+          // Extract text from content blocks
+          systemContent = anthropicRequest.system
+            .filter((block: any) => block.type === 'text')
+            .map((block: any) => block.text)
+            .join('\n');
+        }
+        if (systemContent) {
+          openAIMessages.push({
+            role: 'system',
+            content: systemContent
+          });
+        }
+      }
+
+      // Add user/assistant messages
+      if (anthropicRequest.messages) {
+        for (const msg of anthropicRequest.messages) {
+          let content = '';
+          // Content can be a string or array of content blocks
+          if (typeof msg.content === 'string') {
+            content = msg.content;
+          } else if (Array.isArray(msg.content)) {
+            // Extract text from content blocks
+            content = msg.content
+              .filter((block: any) => block.type === 'text')
+              .map((block: any) => block.text)
+              .join('\n');
+          }
+          openAIMessages.push({
+            role: msg.role,
+            content
+          });
+        }
+      }
+
+      const openAIRequest = {
+        model: anthropicRequest.model,
+        messages: openAIMessages,
+        max_tokens: anthropicRequest.max_tokens || 1024,
+        temperature: anthropicRequest.temperature,
+        top_p: anthropicRequest.top_p,
+        stream: false, // Always disable streaming for now - we don't handle SSE yet
+      };
+
+      // Proxy request to backend
+      // Always use 127.0.0.1 as destination (0.0.0.0 is only valid as bind address)
+      const backendHost = server.host === '0.0.0.0' ? '127.0.0.1' : server.host;
+      const backendUrl = `http://${backendHost}:${server.port}/v1/chat/completions`;
+
+      // Make request to backend
+      const url = new URL(backendUrl);
+      const options = {
+        hostname: url.hostname,
+        port: url.port,
+        path: url.pathname,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        timeout: this.config.requestTimeout,
+      };
+
+      const backendReq = http.request(options, (backendRes) => {
+        let responseData = '';
+
+        backendRes.on('data', (chunk) => {
+          responseData += chunk.toString();
+        });
+
+        backendRes.on('end', async () => {
+          try {
+            const openAIResponse = JSON.parse(responseData);
+
+            // Convert OpenAI response to Anthropic format
+            const anthropicResponse = {
+              id: openAIResponse.id || `msg_${Date.now()}`,
+              type: 'message',
+              role: 'assistant',
+              content: [{
+                type: 'text',
+                text: openAIResponse.choices?.[0]?.message?.content || ''
+              }],
+              model: openAIResponse.model || modelName,
+              stop_reason: openAIResponse.choices?.[0]?.finish_reason === 'stop' ? 'end_turn' : 'max_tokens',
+              stop_sequence: null,
+              usage: {
+                input_tokens: openAIResponse.usage?.prompt_tokens || 0,
+                output_tokens: openAIResponse.usage?.completion_tokens || 0
+              }
+            };
+
+            statusCode = 200;
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(anthropicResponse));
+
+            await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), undefined, backendHost + ':' + server.port, promptPreview);
+          } catch (error) {
+            console.error('[Router] Error parsing backend response:', error);
+            console.error('[Router] Raw response data:', responseData.slice(0, 1000));
+            statusCode = 502;
+            errorMsg = `Failed to parse backend response: ${(error as Error).message}`;
+            this.sendError(res, statusCode, 'Bad Gateway', errorMsg);
+            await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, backendHost + ':' + server.port, promptPreview);
+          }
+        });
+      });
+
+      backendReq.on('error', async (error) => {
+        console.error('[Router] Proxy request failed:', error);
+        statusCode = 502;
+        errorMsg = `Backend request failed: ${error.message}`;
+        this.sendError(res, statusCode, 'Bad Gateway', errorMsg);
+        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, backendHost + ':' + server.port, promptPreview);
+      });
+
+      backendReq.on('timeout', async () => {
+        console.error('[Router] Proxy request timed out');
+        backendReq.destroy();
+        statusCode = 504;
+        errorMsg = 'Request timeout';
+        this.sendError(res, statusCode, 'Gateway Timeout', errorMsg);
+        await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, backendHost + ':' + server.port, promptPreview);
+      });
+
+      backendReq.write(JSON.stringify(openAIRequest));
+      backendReq.end();
+
+    } catch (error) {
+      console.error('[Router] Error handling Anthropic messages request:', error);
+      statusCode = 500;
+      errorMsg = (error as Error).message;
+      this.sendError(res, statusCode, 'Internal Server Error', errorMsg);
+      await this.logRequest(modelName, '/v1/messages', statusCode, timer.elapsed(), errorMsg, undefined, promptPreview);
+    }
   }
 
   /**
@@ -206,7 +483,9 @@ class RouterServer {
       }
 
       // Proxy request to backend
-      const backendUrl = `http://${server.host}:${server.port}/v1/chat/completions`;
+      // Always use 127.0.0.1 as destination (0.0.0.0 is only valid as bind address)
+      const backendHost = server.host === '0.0.0.0' ? '127.0.0.1' : server.host;
+      const backendUrl = `http://${backendHost}:${server.port}/v1/chat/completions`;
       await this.proxyRequest(backendUrl, requestData, req, res);
 
       // Log success
@@ -283,7 +562,9 @@ class RouterServer {
       }
 
       // Proxy request to backend
-      const backendUrl = `http://${server.host}:${server.port}/v1/embeddings`;
+      // Always use 127.0.0.1 as destination (0.0.0.0 is only valid as bind address)
+      const backendHost = server.host === '0.0.0.0' ? '127.0.0.1' : server.host;
+      const backendUrl = `http://${backendHost}:${server.port}/v1/embeddings`;
       await this.proxyRequest(backendUrl, requestData, req, res);
 
       // Log success

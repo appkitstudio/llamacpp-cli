@@ -535,6 +535,83 @@ llamacpp router logs --stderr
 
 If the requested model's server is not running, the router returns a 503 error with a helpful message.
 
+## Launch Integrations
+
+llamacpp-cli can launch external tools with automatic configuration to use your local models, providing seamless integration with popular AI coding assistants.
+
+### Claude Code
+
+Launch [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (Anthropic's official AI coding assistant CLI) with your local llamacpp models:
+
+```bash
+# Launch with interactive model selection
+llamacpp launch claude
+
+# Launch with specific model
+llamacpp launch claude --model llama-3.2-3b-instruct-q4_k_m.gguf
+
+# Pass arguments to Claude Code
+llamacpp launch claude -- --resume
+
+# Show configuration without launching
+llamacpp launch claude --config
+
+# Connect to remote router
+llamacpp launch claude --host 192.168.1.100 --port 9100
+```
+
+**How it works:**
+
+1. Checks if Claude Code CLI is installed (`claude` command)
+2. Verifies router is running (starts it if needed)
+3. Fetches available models from router
+4. Sets environment variables:
+   - `ANTHROPIC_AUTH_TOKEN=llamacpp`
+   - `ANTHROPIC_API_KEY=""`
+   - `ANTHROPIC_BASE_URL=http://localhost:9100`
+5. Launches Claude Code with selected model
+
+**Requirements:**
+
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed
+- Router service running (`llamacpp router start`)
+- At least one server running with a model
+
+**Installation:**
+
+```bash
+# Install Claude Code (choose one method)
+npm install -g @anthropic-ai/claude-code
+# or
+brew install anthropics/tap/claude-code
+```
+
+**Environment Variables:**
+
+The launch command respects the `LLAMACPP_HOST` environment variable:
+
+```bash
+# Use remote router by default
+export LLAMACPP_HOST=http://192.168.1.100:9100
+llamacpp launch claude
+```
+
+**Remote Router Support:**
+
+You can connect to a llamacpp router running on a different machine:
+
+```bash
+# Full URL
+llamacpp launch claude --router-url http://192.168.1.100:9100
+
+# Host + Port
+llamacpp launch claude --host 192.168.1.100 --port 9100
+
+# Environment variable
+export LLAMACPP_HOST=http://192.168.1.100:9100
+llamacpp launch claude
+```
+
 ## Admin Interface (REST API + Web UI)
 
 The admin interface provides full remote management of llama.cpp servers through both a REST API and a modern web UI. Perfect for programmatic control, automation, and browser-based management.

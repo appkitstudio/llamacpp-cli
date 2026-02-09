@@ -408,6 +408,17 @@ ${argsXml}
     const status = await this.getServiceStatus(config.label);
     return { config, status };
   }
+
+  /**
+   * Get router URL
+   */
+  async getRouterUrl(): Promise<string | null> {
+    const config = await this.loadConfig();
+    if (!config) {
+      return null;
+    }
+    return `http://${config.host}:${config.port}`;
+  }
 }
 
 // Export singleton instance

@@ -31,6 +31,7 @@ import { adminStatusCommand } from './commands/admin/status';
 import { adminRestartCommand } from './commands/admin/restart';
 import { adminConfigCommand } from './commands/admin/config';
 import { adminLogsCommand } from './commands/admin/logs';
+import { launchClaude } from './commands/launch/claude';
 import packageJson from '../package.json';
 
 const program = new Command();
@@ -513,6 +514,42 @@ admin
   .action(async (options) => {
     try {
       await adminLogsCommand(options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Launch integrations commands
+const launch = program
+  .command('launch')
+  .description('Launch integrations with external tools');
+
+// Launch Claude Code
+launch
+  .command('claude')
+  .description('Launch Claude Code with llamacpp models')
+  .option('--config', 'Configure without launching (display environment variables)')
+  .option('--model <model>', 'Pre-select model (skips interactive selection)')
+  .option('--router-url <url>', 'Connect to router at URL (default: http://localhost:9100)')
+  .option('--host <host>', 'Connect to router at host (alternative to --router-url)')
+  .option('--port <port>', 'Connect to router at port (alternative to --router-url)', parseInt)
+  .allowUnknownOption()
+  .action(async (options, cmd) => {
+    try {
+      // Collect arguments after -- separator for Claude Code
+      const claudeArgs: string[] = [];
+      let foundSeparator = false;
+
+      for (const arg of cmd.parent.rawArgs) {
+        if (foundSeparator) {
+          claudeArgs.push(arg);
+        } else if (arg === '--') {
+          foundSeparator = true;
+        }
+      }
+
+      await launchClaude({ ...options, claudeArgs });
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);
