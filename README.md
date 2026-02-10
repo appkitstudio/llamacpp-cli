@@ -1,5 +1,7 @@
 # llamacpp-cli
 
+> **Note:** llamacpp-cli only works on **macOS** and requires [llama.cpp](https://github.com/ggerganov/llama.cpp) to be installed.
+
 > Manage llama.cpp servers like Ollama—but faster. Full control over llama-server with macOS launchctl integration.
 
 CLI tool to manage local llama.cpp servers on macOS. Provides an Ollama-like experience for managing GGUF models and llama-server instances, with **significantly faster response times** than Ollama.
