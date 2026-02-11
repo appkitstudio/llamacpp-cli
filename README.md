@@ -379,7 +379,7 @@ The `llamacpp server monitor` command is deprecated. Use `llamacpp` instead to l
 
 ## Router (Unified Endpoint)
 
-The router provides a single OpenAI-compatible endpoint that automatically routes requests to the correct backend server based on the model name. This is perfect for LLM clients that don't support multiple endpoints.
+The router provides a single unified endpoint that automatically routes requests to the correct backend server based on the model name. Supports both OpenAI and Anthropic API formats natively (thanks to llama.cpp's native Anthropic API support). Perfect for LLM clients that don't support multiple endpoints.
 
 ### Quick Start
 
@@ -428,10 +428,12 @@ response = client.chat.completions.create(
 - `POST /v1/embeddings` - Text embeddings (routes to correct backend)
 - `GET /v1/models` - List all available models from running servers
 
-**Anthropic-Compatible:**
-- `POST /v1/messages` - Anthropic Messages API (with tool calling support)
-- `POST /v1/messages/count_tokens` - Token counting
+**Anthropic-Compatible (Native Pass-through):**
+- `POST /v1/messages` - Anthropic Messages API (direct proxy to llama.cpp's native implementation)
+- `POST /v1/messages/count_tokens` - Token counting (estimated)
 - `GET /v1/models/{model}` - Retrieve specific model info
+
+**Note:** Anthropic API requests are proxied directly to llama.cpp's native `/v1/messages` endpoint (added in llama.cpp PR #17570). This means full native support for tool calling, streaming, vision, and all Anthropic features without conversion overhead.
 
 **System:**
 - `GET /health` - Router health check

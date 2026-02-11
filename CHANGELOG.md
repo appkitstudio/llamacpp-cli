@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.0.0] (2026-02-10)
+
+### BREAKING CHANGES
+
+* **router**: Simplified architecture using llama.cpp's native Anthropic API
+
+  The router has been completely refactored to use direct pass-through to llama.cpp's native `/v1/messages` endpoint (added in llama.cpp PR #17570). This eliminates ~500 lines of conversion code and provides better performance.
+
+  **What changed:**
+  - Removed `anthropic-converter.ts` (~350 lines) - No longer needed
+  - Removed `anthropic-stream-converter.ts` (~150 lines) - No longer needed
+  - Router now proxies Anthropic requests directly to llama.cpp's native implementation
+  - All Anthropic features (tool calling, vision, thinking) now handled natively by llama.cpp
+  - No more custom Qwen3 XML unescaping workarounds (llama.cpp handles this correctly)
+  - Significant performance improvement (no conversion overhead)
+
+  **Why this is breaking:**
+  - Internal architecture change (major refactor)
+  - Requires llama.cpp with native Anthropic API support (PR #17570+)
+  - Different error handling behavior (native llama.cpp errors)
+
+  **Migration guide:**
+  - Update llama.cpp to latest version: `brew upgrade llama.cpp`
+  - No API changes - all `/v1/messages` requests work the same
+  - Better compatibility with tool calling and advanced features
+
+  **Benefits:**
+  - Simpler, more maintainable codebase
+  - Better performance (no conversion layer)
+  - Full native support for all Anthropic features
+  - Fewer bugs (leverage llama.cpp's battle-tested implementation)
+
 ## [1.14.1] (2026-02-09)
 
 ### Bug Fixes
