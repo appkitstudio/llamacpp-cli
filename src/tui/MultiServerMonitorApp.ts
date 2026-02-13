@@ -19,6 +19,7 @@ import { getLogsDir, getLaunchAgentsDir, ensureDir, parseMetalMemoryFromLog } fr
 import { formatBytes, formatContextSize } from '../utils/format-utils.js';
 import { isPortInUse } from '../utils/process-utils.js';
 import { ModalController } from './shared/modal-controller.js';
+import { createOverlay } from './shared/overlay-utils.js';
 
 type ViewMode = 'list' | 'detail';
 
@@ -702,21 +703,6 @@ export async function createMultiServerMonitorUI(
     return value.toLocaleString();
   }
 
-  // Helper to create semi-transparent overlay (matches ModalController)
-  function createOverlay(): blessed.Widgets.BoxElement {
-    return blessed.box({
-      parent: screen,
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      style: {
-        bg: 'black',
-        transparent: true,
-      },
-    });
-  }
-
   // Helper to create modal boxes (matches ModalController styling)
   function createModal(title: string, height: number | string = 'shrink', borderColor: string = 'cyan'): blessed.Widgets.BoxElement {
     return blessed.box({
@@ -763,7 +749,7 @@ export async function createMultiServerMonitorUI(
     // 0 = checkbox (delete model), 1 = confirm button
     let selectedOption = showDeleteModelOption ? 0 : 1;
 
-    const overlay = createOverlay();
+    const overlay = createOverlay(screen);
     screen.append(overlay);
     const modal = createModal('Remove Server', showDeleteModelOption ? 18 : 14, 'red');
 
@@ -878,7 +864,7 @@ export async function createMultiServerMonitorUI(
             await fs.unlink(server.modelPath);
           }
 
-          screen.remove(progressModal);
+          modalController.closeProgress(progressModal);
 
           // Remove server from our arrays
           const idx = servers.findIndex(s => s.id === server.id);
@@ -899,7 +885,7 @@ export async function createMultiServerMonitorUI(
           resolve();
 
         } catch (err) {
-          screen.remove(progressModal);
+          modalController.closeProgress(progressModal);
           await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
           registerHandlers();
           startPolling();
@@ -937,7 +923,7 @@ export async function createMultiServerMonitorUI(
     let scrollOffset = 0;
     const maxVisible = 8;
 
-    const modelOverlay = createOverlay();
+    const modelOverlay = createOverlay(screen);
     screen.append(modelOverlay);
     const modelModal = createModal('Create Server - Select Model', maxVisible + 8);
 
@@ -1093,7 +1079,7 @@ export async function createMultiServerMonitorUI(
     ];
 
     let selectedFieldIndex = 0;
-    const configOverlay = createOverlay();
+    const configOverlay = createOverlay(screen);
     screen.append(configOverlay);
     const configModal = createModal('Create Server - Configuration', 20);
 
@@ -1174,7 +1160,7 @@ export async function createMultiServerMonitorUI(
             let optionIndex = options.indexOf((config as any)[field.key]);
             if (optionIndex < 0) optionIndex = 0;
 
-            const selectOverlay = createOverlay();
+            const selectOverlay = createOverlay(screen);
             screen.append(selectOverlay);
             const selectModal = createModal(field.label, options.length + 6);
 
@@ -1232,7 +1218,7 @@ export async function createMultiServerMonitorUI(
           } else if (field.type === 'number') {
             // Number input
             const isCtxSize = field.key === 'ctxSize';
-            const inputOverlay = createOverlay();
+            const inputOverlay = createOverlay(screen);
             screen.append(inputOverlay);
             const inputModal = createModal(`Edit ${field.label}`, isCtxSize ? 11 : 10);
 
@@ -1441,7 +1427,7 @@ export async function createMultiServerMonitorUI(
       screen.render();
       await new Promise(resolve => setTimeout(resolve, 1000));
 
-      screen.remove(progressModal);
+      modalController.closeProgress(progressModal);
 
       // Add to our arrays
       servers.push(updatedConfig);
@@ -1461,7 +1447,7 @@ export async function createMultiServerMonitorUI(
       startPolling();
 
     } catch (err) {
-      screen.remove(progressModal);
+      modalController.closeProgress(progressModal);
       await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
       // Immediately render with cached data for instant feedback
       const content = renderListView(lastSystemMetrics);
@@ -1665,12 +1651,12 @@ export async function createMultiServerMonitorUI(
           screen.render();
           await new Promise(resolve => setTimeout(resolve, 800));
 
-          screen.remove(progressModal);
+          modalController.closeProgress(progressModal);
           registerHandlers();
           startPolling();
 
         } catch (err) {
-          screen.remove(progressModal);
+          modalController.closeProgress(progressModal);
           await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
           registerHandlers();
           startPolling();
@@ -1754,12 +1740,12 @@ export async function createMultiServerMonitorUI(
         screen.render();
         await new Promise(resolve => setTimeout(resolve, 800));
 
-        screen.remove(progressModal);
+        modalController.closeProgress(progressModal);
         registerHandlers();
         startPolling();
 
       } catch (err) {
-        screen.remove(progressModal);
+        modalController.closeProgress(progressModal);
         await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
         registerHandlers();
         startPolling();

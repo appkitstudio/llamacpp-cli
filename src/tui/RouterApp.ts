@@ -590,11 +590,11 @@ export async function createRouterUI(
       }
       state.hasChanges = false;
 
-      screen.remove(progressModal);
+      modalController.closeProgress(progressModal);
       // Pass empty onClose - saveChanges() manages handler registration for entire flow
       await showSuccess('Configuration saved', () => {});
     } catch (err) {
-      screen.remove(progressModal);
+      modalController.closeProgress(progressModal);
       // Pass empty onClose - saveChanges() manages handler registration for entire flow
       await showError(err instanceof Error ? err.message : 'Unknown error', () => {});
     }
@@ -611,14 +611,18 @@ export async function createRouterUI(
     try {
       await routerManager.start();
       await refreshStatus();
-      screen.remove(progressModal);
-      await showSuccess('Router started');
+
+      // Update modal to show success
+      progressModal.setContent('\n  {green-fg}✓ Router started{/green-fg}');
+      screen.render();
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      modalController.closeProgress(progressModal);
+      render();
     } catch (err) {
-      screen.remove(progressModal);
+      modalController.closeProgress(progressModal);
       await showError(err instanceof Error ? err.message : 'Failed to start router');
     }
-
-    render();
   }
 
   // Stop router
@@ -628,14 +632,18 @@ export async function createRouterUI(
     try {
       await routerManager.stop();
       await refreshStatus();
-      screen.remove(progressModal);
-      await showSuccess('Router stopped');
+
+      // Update modal to show success
+      progressModal.setContent('\n  {green-fg}✓ Router stopped{/green-fg}');
+      screen.render();
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      modalController.closeProgress(progressModal);
+      render();
     } catch (err) {
-      screen.remove(progressModal);
+      modalController.closeProgress(progressModal);
       await showError(err instanceof Error ? err.message : 'Failed to stop router');
     }
-
-    render();
   }
 
   // Restart router
@@ -645,14 +653,18 @@ export async function createRouterUI(
     try {
       await routerManager.restart();
       await refreshStatus();
-      screen.remove(progressModal);
-      await showSuccess('Router restarted');
+
+      // Update modal to show success
+      progressModal.setContent('\n  {green-fg}✓ Router restarted{/green-fg}');
+      screen.render();
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      modalController.closeProgress(progressModal);
+      render();
     } catch (err) {
-      screen.remove(progressModal);
+      modalController.closeProgress(progressModal);
       await showError(err instanceof Error ? err.message : 'Failed to restart router');
     }
-
-    render();
   }
 
   // Toggle auto-refresh

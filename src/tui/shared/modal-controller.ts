@@ -1,4 +1,5 @@
 import * as blessed from 'blessed';
+import { createOverlay } from './overlay-utils.js';
 
 /**
  * Modal controller that properly isolates keyboard handling
@@ -44,22 +45,6 @@ export class ModalController {
     });
   }
 
-  /**
-   * Create semi-transparent overlay to block interaction with screen behind modal
-   */
-  private createOverlay(): blessed.Widgets.BoxElement {
-    return blessed.box({
-      parent: this.screen,
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      style: {
-        bg: 'black',
-        transparent: true,
-      },
-    });
-  }
 
   /**
    * Show a simple error message modal
@@ -79,7 +64,7 @@ export class ModalController {
       const context: ModalContext = {
         element: modal,
         handlers: new Map(),
-        overlay: this.createOverlay(),
+        overlay: createOverlay(this.screen),
       };
 
       this.modalStack.push(context);
@@ -87,6 +72,8 @@ export class ModalController {
       const closeModal = () => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
+        modal.destroy();
+        context.overlay.destroy();
         this.modalStack.pop();
         this.screen.render();
 
@@ -126,7 +113,7 @@ export class ModalController {
       const context: ModalContext = {
         element: modal,
         handlers: new Map(),
-        overlay: this.createOverlay(),
+        overlay: createOverlay(this.screen),
       };
 
       this.modalStack.push(context);
@@ -134,6 +121,8 @@ export class ModalController {
       const closeModal = () => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
+        modal.destroy();
+        context.overlay.destroy();
         this.modalStack.pop();
         this.screen.render();
 
@@ -191,7 +180,7 @@ export class ModalController {
       const context: ModalContext = {
         element: modal,
         handlers: new Map(),
-        overlay: this.createOverlay(),
+        overlay: createOverlay(this.screen),
       };
 
       this.modalStack.push(context);
@@ -199,6 +188,8 @@ export class ModalController {
       const closeWithResult = (result: 'save' | 'discard' | 'continue') => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
+        modal.destroy();
+        context.overlay.destroy();
         this.modalStack.pop();
         this.screen.render();
 
@@ -268,7 +259,7 @@ export class ModalController {
       const context: ModalContext = {
         element: modal,
         handlers: new Map(),
-        overlay: this.createOverlay(),
+        overlay: createOverlay(this.screen),
       };
 
       this.modalStack.push(context);
@@ -276,6 +267,8 @@ export class ModalController {
       const closeWithResult = (result: boolean) => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
+        modal.destroy();
+        context.overlay.destroy();
         this.modalStack.pop();
         this.screen.render();
 
@@ -359,7 +352,7 @@ export class ModalController {
       const context: ModalContext = {
         element: modal,
         handlers: new Map(),
-        overlay: this.createOverlay(),
+        overlay: createOverlay(this.screen),
       };
 
       this.modalStack.push(context);
@@ -367,6 +360,8 @@ export class ModalController {
       const closeWithResult = (result: number | null) => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
+        modal.destroy();
+        context.overlay.destroy();
         this.modalStack.pop();
         this.screen.render();
 
@@ -459,7 +454,7 @@ export class ModalController {
       const context: ModalContext = {
         element: modal,
         handlers: new Map(),
-        overlay: this.createOverlay(),
+        overlay: createOverlay(this.screen),
       };
 
       this.modalStack.push(context);
@@ -467,6 +462,8 @@ export class ModalController {
       const closeWithResult = (result: string | null) => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
+        modal.destroy();
+        context.overlay.destroy();
         this.modalStack.pop();
         this.screen.render();
 
@@ -555,7 +552,7 @@ export class ModalController {
       const context: ModalContext = {
         element: modal,
         handlers: new Map(),
-        overlay: this.createOverlay(),
+        overlay: createOverlay(this.screen),
       };
 
       this.modalStack.push(context);
@@ -563,6 +560,8 @@ export class ModalController {
       const closeWithResult = (result: string | boolean | null) => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
+        modal.destroy();
+        context.overlay.destroy();
         this.modalStack.pop();
         this.screen.render();
 
@@ -606,6 +605,7 @@ export class ModalController {
 
   /**
    * Show a progress modal (non-interactive)
+   * Note: Progress modals don't use overlays since they're temporary
    */
   showProgress(message: string): blessed.Widgets.BoxElement {
     const modal = this.createModalElement({
@@ -615,10 +615,20 @@ export class ModalController {
     });
 
     modal.setContent(`\n  {cyan-fg}${message}{/cyan-fg}`);
+
     this.screen.append(modal);
     this.screen.render();
 
     return modal;
+  }
+
+  /**
+   * Remove a progress modal
+   */
+  closeProgress(modal: blessed.Widgets.BoxElement): void {
+    this.screen.remove(modal);
+    modal.destroy();
+    this.screen.render();
   }
 }
 

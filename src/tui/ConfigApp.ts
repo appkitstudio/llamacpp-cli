@@ -909,11 +909,11 @@ export async function createConfigUI(
           await new Promise(resolve => setTimeout(resolve, 2000));
 
           const finalStatus = await statusChecker.updateServerStatus(newConfig);
-          screen.remove(progressModal);
+          modalController.closeProgress(progressModal);
           return finalStatus;
         }
 
-        screen.remove(progressModal);
+        modalController.closeProgress(progressModal);
         return newConfig;
       } else {
         // Normal config update (no migration)
@@ -966,21 +966,21 @@ export async function createConfigUI(
             await new Promise(resolve => setTimeout(resolve, 2000));
 
             const finalStatus = await statusChecker.updateServerStatus(fullConfig);
-            screen.remove(progressModal);
+            modalController.closeProgress(progressModal);
             return finalStatus;
           }
 
-          screen.remove(progressModal);
+          modalController.closeProgress(progressModal);
           return fullConfig;
         }
       }
     } catch (err) {
-      screen.remove(progressModal);
+      modalController.closeProgress(progressModal);
       await showError(err instanceof Error ? err.message : 'Unknown error');
       return null;
     }
 
-    screen.remove(progressModal);
+    modalController.closeProgress(progressModal);
     return null;
   }
 

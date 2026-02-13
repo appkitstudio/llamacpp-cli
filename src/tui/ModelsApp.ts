@@ -8,6 +8,7 @@ import { formatBytes, formatDateShort } from '../utils/format-utils.js';
 import * as fs from 'fs/promises';
 import { createSearchUI } from './SearchApp.js';
 import { ModalController } from './shared/modal-controller.js';
+import { createOverlay } from './shared/overlay-utils.js';
 
 /**
  * Models management TUI
@@ -45,21 +46,6 @@ export async function createModelsUI(
     },
   });
   screen.append(contentBox);
-
-  // Helper to create semi-transparent overlay
-  function createOverlay(): blessed.Widgets.BoxElement {
-    return blessed.box({
-      parent: screen,
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      style: {
-        bg: 'black',
-        transparent: true,
-      },
-    });
-  }
 
   // Render models view
   async function render() {
@@ -188,7 +174,7 @@ export async function createModelsUI(
     // by keeping modal elements on screen until removed
 
     // Create overlay for modal
-    const overlay = createOverlay();
+    const overlay = createOverlay(screen);
 
     // Show confirmation dialog
     const confirmBox = blessed.box({
@@ -292,7 +278,7 @@ export async function createModelsUI(
         await loadModels();
       } catch (error) {
         // Show error with overlay
-        const errorOverlay = createOverlay();
+        const errorOverlay = createOverlay(screen);
 
         const errorBox = blessed.box({
           parent: screen,

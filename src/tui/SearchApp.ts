@@ -4,6 +4,7 @@ import { modelDownloader, DownloadProgress } from '../lib/model-downloader.js';
 import { stateManager } from '../lib/state-manager.js';
 import { formatBytes } from '../utils/format-utils.js';
 import { ModalController } from './shared/modal-controller.js';
+import { createOverlay } from './shared/overlay-utils.js';
 
 interface SearchState {
   query: string;
@@ -38,21 +39,6 @@ export async function createSearchUI(
 
   // Modal controller for centralized keyboard handling
   const modalController = new ModalController(screen);
-
-  // Helper to create semi-transparent overlay
-  function createOverlay(): blessed.Widgets.BoxElement {
-    return blessed.box({
-      parent: screen,
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      style: {
-        bg: 'black',
-        transparent: true,
-      },
-    });
-  }
 
   // Create content box for results
   const contentBox = blessed.box({
@@ -205,7 +191,7 @@ export async function createSearchUI(
 
   // Show search popup modal
   function showSearchPopup() {
-    const overlay = createOverlay();
+    const overlay = createOverlay(screen);
 
     const searchBox = blessed.box({
       parent: screen,
@@ -315,7 +301,7 @@ export async function createSearchUI(
     const modelsDir = await stateManager.getModelsDirectory();
 
     // Create overlay for progress modal
-    const progressOverlay = createOverlay();
+    const progressOverlay = createOverlay(screen);
 
     // Create progress modal
     const progressBox = blessed.box({
