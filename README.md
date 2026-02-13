@@ -14,6 +14,7 @@ CLI tool to manage local llama.cpp servers on macOS. Provides an Ollama-like exp
 ## Features
 
 - 🚀 **Easy server management** - Start, stop, and monitor llama.cpp servers
+- 🏷️ **Server aliases** - Friendly, stable identifiers that persist across model changes
 - 🔀 **Unified router** - Single OpenAI-compatible endpoint for all models with automatic routing and request logging
 - 🌐 **Admin Interface** - REST API + modern web UI for remote management and automation
 - 🤖 **Model downloads** - Pull GGUF models from Hugging Face
@@ -419,7 +420,21 @@ response = client.chat.completions.create(
     model="llama-3.2-3b-instruct-q4_k_m.gguf",
     messages=[{"role": "user", "content": "Hello!"}]
 )
+
+# Or use server aliases for cleaner code
+response = client.chat.completions.create(
+    model="thinking",  # Routes to server with alias "thinking"
+    messages=[{"role": "user", "content": "Hello!"}]
+)
 ```
+
+**Model Name Resolution:**
+The router accepts model names in multiple formats:
+- Full model filename: `llama-3.2-3b-instruct-q4_k_m.gguf`
+- Server alias: `thinking` (set with `--alias` flag)
+- Partial model name: `llama-3.2-3b` (fuzzy match)
+
+Aliases provide a stable, friendly identifier that persists across model changes.
 
 ### Supported Endpoints
 
@@ -1095,6 +1110,64 @@ llamacpp logs --rotate
 
 **Use case:** Quickly see which servers are accumulating large logs, or clean up all logs at once.
 
+## Server Aliases
+
+Server aliases provide stable, user-friendly identifiers for your servers that persist across model changes. Instead of using auto-generated IDs like `llama-3-2-3b-instruct-q4-k-m`, you can use memorable names like `thinking`, `coder`, or `gpt-oss`.
+
+### Why Use Aliases?
+
+**Stability:** When you change a server's model, the server ID changes (because it's derived from the model name). Aliases stay the same, preventing broken references in scripts and workflows.
+
+**Convenience:** Shorter, more memorable names are easier to type and read.
+
+**Router Integration:** Aliases work with the router, allowing cleaner API requests.
+
+### Usage Examples
+
+```bash
+# Create server with alias
+llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --alias thinking
+
+# Use alias in all commands
+llamacpp server start thinking
+llamacpp server stop thinking
+llamacpp server logs thinking
+llamacpp ps thinking
+
+# Update alias
+llamacpp server config thinking --alias smart-model
+
+# Remove alias
+llamacpp server config thinking --alias ""
+
+# Alias persists across model changes
+llamacpp server config thinking --model mistral-7b.gguf --restart
+llamacpp server start thinking  # Still works with new model!
+
+# Use alias in router requests
+curl -X POST http://localhost:9100/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{"model": "thinking", "max_tokens": 100, "messages": [{"role": "user", "content": "Hello"}]}'
+```
+
+### Validation Rules
+
+- **Format:** Alphanumeric characters, hyphens, and underscores only
+- **Length:** 1-64 characters
+- **Uniqueness:** Case-insensitive (can't have both "Thinking" and "thinking")
+- **Reserved names:** Cannot use "router", "admin", or "server"
+- **Storage:** Case-sensitive (preserves your input)
+
+### Lookup Priority
+
+When you reference a server, the CLI checks identifiers in this order:
+1. **Alias** (exact match, case-sensitive)
+2. **Port** (if identifier is numeric)
+3. **Server ID** (exact match)
+4. **Model name** (fuzzy match)
+
+This means aliases always take precedence, providing predictable behavior.
+
 ## Server Management
 
 ### `llamacpp server create <model> [options]`
@@ -1104,11 +1177,15 @@ Create and start a new llama-server instance.
 llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf
 llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --port 8080 --ctx-size 16384 --verbose
 
+# Create with a friendly alias
+llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --alias thinking
+
 # Enable remote access (WARNING: security implications)
 llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --host 0.0.0.0
 ```
 
 **Options:**
+- `-a, --alias <name>` - Friendly alias for the server (alphanumeric, hyphens, underscores, 1-64 chars)
 - `-p, --port <number>` - Port number (default: auto-assign from 9000)
 - `-h, --host <address>` - Bind address (default: `127.0.0.1` for localhost only, use `0.0.0.0` for remote access)
 - `-t, --threads <number>` - Thread count (default: half of CPU cores)
@@ -1124,11 +1201,12 @@ Show detailed configuration and status information for a server.
 ```bash
 llamacpp server show llama-3.2-3b       # By partial name
 llamacpp server show 9000               # By port
+llamacpp server show thinking           # By alias
 llamacpp server show llama-3-2-3b       # By server ID
 ```
 
 **Displays:**
-- Server ID, model name, and path
+- Server ID, alias (if set), model name, and path
 - Current status (running/stopped/crashed)
 - Host and port
 - PID (process ID)
@@ -1138,7 +1216,7 @@ llamacpp server show llama-3-2-3b       # By server ID
 - System paths (plist file, log files)
 - Quick commands for common next actions
 
-**Identifiers:** Port number, server ID, partial model name
+**Identifiers:** Alias, port number, server ID, partial model name
 
 ### `llamacpp server config <identifier> [options]`
 Update server configuration parameters without recreating the server.
@@ -1146,6 +1224,12 @@ Update server configuration parameters without recreating the server.
 ```bash
 # Change model while keeping all other settings
 llamacpp server config llama-3.2-3b --model llama-3.2-1b-instruct-q4_k_m.gguf --restart
+
+# Add or update alias
+llamacpp server config llama-3.2-3b --alias thinking
+
+# Remove alias (use empty string)
+llamacpp server config thinking --alias ""
 
 # Update context size and restart
 llamacpp server config llama-3.2-3b --ctx-size 8192 --restart
@@ -1164,6 +1248,7 @@ llamacpp server config llama-3.2-3b --threads 8 --ctx-size 16384 --gpu-layers 40
 ```
 
 **Options:**
+- `-a, --alias <name>` - Set or update alias (use empty string `""` to remove)
 - `-m, --model <filename>` - Update model (filename or path)
 - `-h, --host <address>` - Update bind address (`127.0.0.1` for localhost, `0.0.0.0` for remote access)
 - `-t, --threads <number>` - Update thread count
@@ -1173,22 +1258,23 @@ llamacpp server config llama-3.2-3b --threads 8 --ctx-size 16384 --gpu-layers 40
 - `--no-verbose` - Disable verbose logging
 - `-r, --restart` - Automatically restart server if running
 
-**Note:** Changes require a server restart to take effect. Use `--restart` to automatically stop and start the server with the new configuration.
+**Note:** Changes require a server restart to take effect. Use `--restart` to automatically stop and start the server with the new configuration. Aliases persist across model changes, providing a stable identifier for your server.
 
 **⚠️ Security Warning:** Using `--host 0.0.0.0` binds the server to all network interfaces, allowing remote access. Only use this if you understand the security implications.
 
-**Identifiers:** Port number, server ID, partial model name
+**Identifiers:** Alias, port number, server ID, partial model name
 
 ### `llamacpp server start <identifier>`
 Start an existing stopped server.
 
 ```bash
+llamacpp server start thinking           # By alias
 llamacpp server start llama-3.2-3b       # By partial name
 llamacpp server start 9000               # By port
 llamacpp server start llama-3-2-3b       # By server ID
 ```
 
-**Identifiers:** Port number, server ID, partial model name, or model filename
+**Identifiers:** Alias, port number, server ID, partial model name, or model filename
 
 ### `llamacpp server run <identifier> [options]`
 Run an interactive chat session with a model, or send a single message.

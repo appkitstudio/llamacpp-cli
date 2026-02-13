@@ -187,6 +187,7 @@ server
   .option('-g, --gpu-layers <number>', 'GPU layers (default: 60)', parseInt)
   .option('-v, --verbose', 'Enable verbose HTTP logging (detailed request/response info)')
   .option('-f, --flags <flags>', 'Additional llama-server flags (comma-separated, e.g., "--pooling,mean")')
+  .option('-a, --alias <name>', 'Optional stable identifier for the server (e.g., "thinking", "coder")')
   .action(async (model: string, options) => {
     try {
       await createCommand(model, options);
@@ -200,7 +201,7 @@ server
 server
   .command('show')
   .description('Show server configuration details')
-  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .argument('<identifier>', 'Server identifier: alias, port (9000), server ID (llama-3-2-3b), or partial model name')
   .action(async (identifier: string) => {
     try {
       await serverShowCommand(identifier);
@@ -214,7 +215,7 @@ server
 server
   .command('config')
   .description('Update server configuration parameters')
-  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .argument('<identifier>', 'Server identifier: alias, port (9000), server ID (llama-3-2-3b), or partial model name')
   .option('-m, --model <filename>', 'Update model (filename or path)')
   .option('-h, --host <address>', 'Update bind address (127.0.0.1 for localhost, 0.0.0.0 for remote access)')
   .option('-t, --threads <number>', 'Update thread count', parseInt)
@@ -223,6 +224,7 @@ server
   .option('-v, --verbose', 'Enable verbose logging')
   .option('--no-verbose', 'Disable verbose logging')
   .option('-f, --flags <flags>', 'Update custom llama-server flags (comma-separated, empty string to clear)')
+  .option('-a, --alias <name>', 'Set or update alias (use empty string "" to remove)')
   .option('-r, --restart', 'Automatically restart server if running')
   .action(async (identifier: string, options) => {
     try {
@@ -237,7 +239,7 @@ server
 server
   .command('start')
   .description('Start an existing stopped server')
-  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .argument('<identifier>', 'Server identifier: alias, port (9000), server ID (llama-3-2-3b), or partial model name')
   .action(async (identifier: string) => {
     try {
       await startCommand(identifier);
@@ -251,7 +253,7 @@ server
 server
   .command('run')
   .description('Run an interactive chat session with a model')
-  .argument('<model>', 'Model identifier: port (9000), server ID (llama-3-2-3b), partial name, or model filename')
+  .argument('<model>', 'Model identifier: alias, port (9000), server ID (llama-3-2-3b), partial name, or model filename')
   .option('-m, --message <text>', 'Send a single message and exit (non-interactive mode)')
   .action(async (model: string, options) => {
     try {
@@ -266,7 +268,7 @@ server
 server
   .command('stop')
   .description('Stop a running server')
-  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .argument('<identifier>', 'Server identifier: alias, port (9000), server ID (llama-3-2-3b), or partial model name')
   .action(async (identifier: string) => {
     try {
       await stopCommand(identifier);
@@ -280,7 +282,7 @@ server
 server
   .command('rm')
   .description('Remove a server configuration and launchctl service (preserves model file)')
-  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .argument('<identifier>', 'Server identifier: alias, port (9000), server ID (llama-3-2-3b), or partial model name')
   .action(async (identifier: string) => {
     try {
       await deleteCommand(identifier);
@@ -294,7 +296,7 @@ server
 server
   .command('logs')
   .description('View server logs (default: compact one-line per request)')
-  .argument('<identifier>', 'Server identifier: port (9000), server ID (llama-3-2-3b), or partial model name')
+  .argument('<identifier>', 'Server identifier: alias, port (9000), server ID (llama-3-2-3b), or partial model name')
   .option('-f, --follow', 'Follow log output in real-time')
   .option('-n, --lines <number>', 'Number of lines to show (default: 50)', parseInt)
   .option('--http', 'Show full HTTP JSON request/response logs')

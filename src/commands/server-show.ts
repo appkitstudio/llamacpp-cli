@@ -35,6 +35,9 @@ export async function serverShowCommand(identifier: string): Promise<void> {
 
   // Basic info
   console.log(`${chalk.bold('Server ID:')}      ${updatedServer.id}`);
+  if (updatedServer.alias) {
+    console.log(`${chalk.bold('Alias:')}          ${chalk.cyan(updatedServer.alias)}`);
+  }
   console.log(`${chalk.bold('Model Name:')}     ${updatedServer.modelName}`);
   console.log(`${chalk.bold('Model Path:')}     ${chalk.dim(updatedServer.modelPath)}`);
   console.log(`${chalk.bold('Host:')}           ${updatedServer.host}`);

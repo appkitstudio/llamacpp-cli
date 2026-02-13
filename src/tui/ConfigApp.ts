@@ -1,6 +1,6 @@
 import blessed from 'blessed';
 import * as path from 'path';
-import { ServerConfig, sanitizeModelName } from '../types/server-config.js';
+import { ServerConfig, sanitizeModelName, validateAlias } from '../types/server-config.js';
 import { stateManager } from '../lib/state-manager.js';
 import { launchctlManager } from '../lib/launchctl-manager.js';
 import { statusChecker } from '../lib/status-checker.js';
@@ -17,7 +17,7 @@ interface ConfigField {
   value: any;
   originalValue: any;
   options?: string[];
-  validation?: (value: any) => string | null; // Returns error message or null if valid
+  validation?: (value: any) => string | null | Promise<string | null>; // Returns error message or null if valid (sync or async)
 }
 
 interface ConfigState {
@@ -43,6 +43,29 @@ export async function createConfigUI(
         type: 'model',
         value: server.modelName,
         originalValue: server.modelName,
+      },
+      {
+        key: 'alias',
+        label: 'Alias',
+        type: 'text',
+        value: server.alias || '',
+        originalValue: server.alias || '',
+        validation: async (value: string) => {
+          // Empty string is valid (means remove alias)
+          if (value.trim() === '') return null;
+
+          // Validate format
+          const formatError = validateAlias(value.trim());
+          if (formatError) return formatError;
+
+          // Check uniqueness (exclude current server)
+          const conflictingServerId = await stateManager.isAliasAvailable(value.trim(), server.id);
+          if (conflictingServerId) {
+            return `Alias already used by server: ${conflictingServerId}`;
+          }
+
+          return null;
+        },
       },
       {
         key: 'host',
@@ -334,7 +357,7 @@ export async function createConfigUI(
       screen.render();
       inputBox.focus();
 
-      inputBox.on('submit', (value: string) => {
+      inputBox.on('submit', async (value: string) => {
         let numValue: number | null;
 
         if (isCtxSize) {
@@ -346,9 +369,16 @@ export async function createConfigUI(
 
         if (numValue !== null) {
           if (field.validation) {
-            const error = field.validation(numValue);
-            if (error) {
-              infoText.setContent(`{red-fg}Error: ${error}{/red-fg}`);
+            try {
+              const error = await field.validation(numValue);
+              if (error) {
+                infoText.setContent(`{red-fg}Error: ${error}{/red-fg}`);
+                screen.render();
+                inputBox.focus();
+                return;
+              }
+            } catch (err) {
+              infoText.setContent(`{red-fg}Validation error: ${(err as Error).message}{/red-fg}`);
               screen.render();
               inputBox.focus();
               return;
@@ -454,11 +484,18 @@ export async function createConfigUI(
     return new Promise((resolve) => {
       const modal = createModal(`Edit ${field.label}`, 10);
 
+      // Customize info text based on field type
+      const infoContent = field.key === 'customFlags'
+        ? 'Enter comma-separated flags:'
+        : field.key === 'alias'
+        ? 'Enter alias (or leave empty to remove):'
+        : `Enter ${field.label.toLowerCase()}:`;
+
       const infoText = blessed.text({
         parent: modal,
         top: 1,
         left: 2,
-        content: 'Enter comma-separated flags:',
+        content: infoContent,
         tags: true,
       });
 
@@ -488,8 +525,28 @@ export async function createConfigUI(
       screen.render();
       inputBox.focus();
 
-      inputBox.on('submit', (value: string) => {
-        field.value = value.trim();
+      inputBox.on('submit', async (value: string) => {
+        const trimmedValue = value.trim();
+
+        // Run validation if present (handle both sync and async)
+        if (field.validation) {
+          try {
+            const error = await field.validation(trimmedValue);
+            if (error) {
+              infoText.setContent(`{red-fg}Error: ${error}{/red-fg}`);
+              screen.render();
+              inputBox.focus();
+              return;
+            }
+          } catch (err) {
+            infoText.setContent(`{red-fg}Validation error: ${(err as Error).message}{/red-fg}`);
+            screen.render();
+            inputBox.focus();
+            return;
+          }
+        }
+
+        field.value = trimmedValue;
         updateHasChanges();
         screen.remove(modal);
         registerHandlers();
@@ -770,6 +827,7 @@ export async function createConfigUI(
   async function saveChanges(): Promise<ServerConfig | null> {
     // Build updates object
     const modelField = state.fields.find(f => f.key === 'model')!;
+    const aliasField = state.fields.find(f => f.key === 'alias')!;
     const hostField = state.fields.find(f => f.key === 'host')!;
     const portField = state.fields.find(f => f.key === 'port')!;
     const threadsField = state.fields.find(f => f.key === 'threads')!;
@@ -859,6 +917,7 @@ export async function createConfigUI(
           id: newServerId,
           modelPath: newModelPath,
           modelName: newModelName,
+          ...(aliasField.value ? { alias: aliasField.value } : { alias: undefined }),
           host: hostField.value,
           port: portField.value,
           threads: threadsField.value,
@@ -913,6 +972,7 @@ export async function createConfigUI(
           gpuLayers: gpuLayersField.value,
           verbose: verboseField.value,
           customFlags: customFlags && customFlags.length > 0 ? customFlags : undefined,
+          ...(aliasField.value ? { alias: aliasField.value } : { alias: undefined }),
         };
 
         if (newModelPath && newModelName) {

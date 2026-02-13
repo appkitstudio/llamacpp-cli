@@ -5,7 +5,7 @@ import { URL } from 'url';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { AdminConfig } from '../types/admin-config';
-import { ServerConfig } from '../types/server-config';
+import { ServerConfig, validateAlias } from '../types/server-config';
 import { readJson, fileExists, getConfigDir, getServersDir } from '../utils/file-utils';
 import { stateManager } from './state-manager';
 import { launchctlManager } from './launchctl-manager';
@@ -301,6 +301,21 @@ class AdminServer {
         port = await portManager.findAvailablePort();
       }
 
+      // Validate alias if provided
+      if (data.alias) {
+        const aliasError = validateAlias(data.alias);
+        if (aliasError) {
+          this.sendError(res, 400, 'Bad Request', `Invalid alias: ${aliasError}`, 'INVALID_ALIAS');
+          return;
+        }
+
+        const conflictingServerId = await stateManager.isAliasAvailable(data.alias);
+        if (conflictingServerId) {
+          this.sendError(res, 409, 'Conflict', `Alias "${data.alias}" is already used by server: ${conflictingServerId}`, 'ALIAS_IN_USE');
+          return;
+        }
+      }
+
       // Parse custom flags if provided
       let customFlags: string[] | undefined;
       if (data.customFlags) {
@@ -323,6 +338,7 @@ class AdminServer {
           gpuLayers: data.gpuLayers,
           verbose: data.verbose,
           customFlags,
+          alias: data.alias,
         }
       );
 
@@ -409,6 +425,28 @@ class AdminServer {
         updates.customFlags = Array.isArray(data.customFlags)
           ? data.customFlags
           : data.customFlags.split(',').map((f: string) => f.trim()).filter((f: string) => f.length > 0);
+      }
+      if (data.alias !== undefined) {
+        // Empty string or null means remove alias
+        if (data.alias === '' || data.alias === null) {
+          updates.alias = undefined;
+        } else {
+          // Validate alias format
+          const aliasError = validateAlias(data.alias);
+          if (aliasError) {
+            this.sendError(res, 400, 'Bad Request', `Invalid alias: ${aliasError}`, 'INVALID_ALIAS');
+            return;
+          }
+
+          // Check uniqueness (exclude current server)
+          const conflictingServerId = await stateManager.isAliasAvailable(data.alias, server.id);
+          if (conflictingServerId) {
+            this.sendError(res, 409, 'Conflict', `Alias "${data.alias}" is already used by server: ${conflictingServerId}`, 'ALIAS_IN_USE');
+            return;
+          }
+
+          updates.alias = data.alias;
+        }
       }
 
       // Check if server is running

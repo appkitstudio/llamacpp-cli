@@ -335,7 +335,9 @@ export async function createMultiServerMonitorUI(
       const indicator = isSelected ? '►' : ' ';
 
       // Server ID (variable width, truncate if longer than available space)
-      const serverId = server.id.padEnd(serverIdWidth).substring(0, serverIdWidth);
+      // Show alias in parens if present
+      const serverIdText = server.alias ? `${server.id} (${server.alias})` : server.id;
+      const serverId = serverIdText.padEnd(serverIdWidth).substring(0, serverIdWidth);
 
       // Port
       const port = server.port.toString().padStart(4);
@@ -422,7 +424,8 @@ export async function createMultiServerMonitorUI(
     let content = '';
 
     // Header
-    content += `{bold}{blue-fg}═══ ${server.id} (${server.port}){/blue-fg}{/bold}\n\n`;
+    const headerText = server.alias ? `${server.id} (${server.alias})` : server.id;
+    content += `{bold}{blue-fg}═══ ${headerText} (${server.port}){/blue-fg}{/bold}\n\n`;
 
     // Check if server is stopped
     if (server.status !== 'running') {

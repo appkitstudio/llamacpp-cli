@@ -11,6 +11,7 @@ import { commandExists } from '../utils/process-utils';
 import { formatBytes } from '../utils/format-utils';
 import { ensureDir, parseMetalMemoryFromLog } from '../utils/file-utils';
 import { ensureModelsDirectory } from '../lib/models-dir-setup';
+import { validateAlias } from '../types/server-config';
 
 interface CreateOptions {
   port?: number;
@@ -20,6 +21,7 @@ interface CreateOptions {
   gpuLayers?: number;
   verbose?: boolean;
   flags?: string;
+  alias?: string;
 }
 
 export async function createCommand(model: string, options: CreateOptions): Promise<void> {
@@ -53,13 +55,26 @@ export async function createCommand(model: string, options: CreateOptions): Prom
     throw new Error(`Server already exists for ${modelName}\n\nUse: llamacpp server start ${modelName}`);
   }
 
-  // 5. Get model size
+  // 5. Validate alias if provided
+  if (options.alias) {
+    const validationError = validateAlias(options.alias);
+    if (validationError) {
+      throw new Error(`Invalid alias: ${validationError}`);
+    }
+
+    const conflictingServerId = await stateManager.isAliasAvailable(options.alias);
+    if (conflictingServerId) {
+      throw new Error(`Alias "${options.alias}" is already used by server: ${conflictingServerId}`);
+    }
+  }
+
+  // 6. Get model size
   const modelSize = await modelScanner.getModelSize(modelName);
   if (!modelSize) {
     throw new Error(`Failed to read model file: ${modelPath}`);
   }
 
-  // 6. Determine port
+  // 7. Determine port
   let port: number;
   if (options.port) {
     portManager.validatePort(options.port);
@@ -72,7 +87,7 @@ export async function createCommand(model: string, options: CreateOptions): Prom
     port = await portManager.findAvailablePort();
   }
 
-  // 7. Generate server configuration
+  // 8. Generate server configuration
   console.log(chalk.blue(`🚀 Creating server for ${modelName}\n`));
 
   // Parse custom flags if provided
@@ -89,6 +104,7 @@ export async function createCommand(model: string, options: CreateOptions): Prom
     gpuLayers: options.gpuLayers,
     verbose: options.verbose,
     customFlags,
+    alias: options.alias,
   };
 
   const config = await configGenerator.generateConfig(
@@ -109,6 +125,9 @@ export async function createCommand(model: string, options: CreateOptions): Prom
   // Display configuration
   console.log(chalk.dim(`Model: ${modelPath}`));
   console.log(chalk.dim(`Size: ${formatBytes(modelSize)}`));
+  if (config.alias) {
+    console.log(chalk.dim(`Alias: ${chalk.cyan(config.alias)}`));
+  }
   console.log(chalk.dim(`Host: ${config.host}`));
   console.log(chalk.dim(`Port: ${config.port}${options.port ? '' : ' (auto-assigned)'}`));
   console.log(chalk.dim(`Threads: ${config.threads}`));

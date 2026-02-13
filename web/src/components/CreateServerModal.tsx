@@ -9,6 +9,7 @@ interface CreateServerModalProps {
 
 interface FormData {
   model: string;
+  alias: string;
   port: string; // Empty string means auto-assign
   host: string;
   threads: number;
@@ -47,6 +48,7 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
 
   const [formData, setFormData] = useState<FormData>({
     model: '',
+    alias: '',
     port: '',
     host: '127.0.0.1',
     threads: 4,
@@ -65,6 +67,7 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
     if (isOpen) {
       setFormData({
         model: '',
+        alias: '',
         port: '',
         host: '127.0.0.1',
         threads: 4,
@@ -110,6 +113,7 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
 
       await createServer.mutateAsync({
         model: formData.model,
+        alias: formData.alias.trim() || undefined,
         port: formData.port ? parseInt(formData.port) : undefined,
         host: formData.host,
         threads: formData.threads,
@@ -212,6 +216,23 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
                 {formatSize(selectedModel.size)} · Smart defaults applied
               </p>
             )}
+          </div>
+
+          {/* Alias */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Alias (optional)
+            </label>
+            <input
+              type="text"
+              value={formData.alias}
+              onChange={(e) => setFormData({ ...formData, alias: e.target.value })}
+              placeholder="e.g., thinking, coder, gpt-oss"
+              pattern="[a-zA-Z0-9_-]*"
+              maxLength={64}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent"
+            />
+            <p className="text-xs text-gray-500 mt-1">Friendly name for this server (alphanumeric, hyphens, underscores)</p>
           </div>
 
           {/* Port */}

@@ -7,7 +7,7 @@ import { launchctlManager } from '../lib/launchctl-manager';
 import { configGenerator } from '../lib/config-generator';
 import { autoRotateIfNeeded } from '../utils/log-utils';
 import { modelScanner } from '../lib/model-scanner';
-import { sanitizeModelName } from '../types/server-config';
+import { sanitizeModelName, validateAlias } from '../types/server-config';
 import { getLogsDir, getLaunchAgentsDir } from '../utils/file-utils';
 
 export interface ConfigUpdateOptions {
@@ -18,6 +18,7 @@ export interface ConfigUpdateOptions {
   gpuLayers?: number;
   verbose?: boolean;
   flags?: string;
+  alias?: string;
   restart?: boolean;
 }
 
@@ -50,7 +51,8 @@ export async function serverConfigCommand(
                      options.ctxSize !== undefined ||
                      options.gpuLayers !== undefined ||
                      options.verbose !== undefined ||
-                     options.flags !== undefined;
+                     options.flags !== undefined ||
+                     options.alias !== undefined;
 
   if (!hasChanges) {
     console.error(chalk.red('❌ No configuration changes specified'));
@@ -63,11 +65,14 @@ export async function serverConfigCommand(
     console.log(chalk.dim('  --verbose           Enable verbose logging'));
     console.log(chalk.dim('  --no-verbose        Disable verbose logging'));
     console.log(chalk.dim('  --flags <flags>     Custom llama-server flags (comma-separated)'));
+    console.log(chalk.dim('  --alias <name>      Set or update alias (use empty string to remove)'));
     console.log(chalk.dim('  --restart           Auto-restart if running'));
     console.log(chalk.dim('\nExamples:'));
     console.log(chalk.dim(`  llamacpp server config ${server.id} --model llama-3.2-1b.gguf --restart`));
     console.log(chalk.dim(`  llamacpp server config ${server.id} --ctx-size 8192 --restart`));
     console.log(chalk.dim(`  llamacpp server config ${server.id} --flags="--pooling,mean" --restart`));
+    console.log(chalk.dim(`  llamacpp server config ${server.id} --alias thinking`));
+    console.log(chalk.dim(`  llamacpp server config ${server.id} --alias ""`));  // Remove alias
     process.exit(1);
   }
 
@@ -105,6 +110,31 @@ export async function serverConfigCommand(
       console.log(chalk.yellow('⚠️  Changing the model will migrate to a new server ID'));
       console.log(chalk.dim(`   Old ID: ${server.id}`));
       console.log(chalk.dim(`   New ID: ${newServerId}\n`));
+    }
+  }
+
+  // Validate alias if provided
+  let aliasUpdate: string | undefined | null = undefined;  // undefined = no change, null = remove, string = set/update
+  if (options.alias !== undefined) {
+    if (options.alias === '') {
+      // Empty string means remove alias
+      aliasUpdate = null;
+    } else {
+      // Validate format
+      const validationError = validateAlias(options.alias);
+      if (validationError) {
+        console.error(chalk.red(`❌ Invalid alias: ${validationError}`));
+        process.exit(1);
+      }
+
+      // Check uniqueness (exclude current server)
+      const conflictingServerId = await stateManager.isAliasAvailable(options.alias, server.id);
+      if (conflictingServerId) {
+        console.error(chalk.red(`❌ Alias "${options.alias}" is already used by server: ${conflictingServerId}`));
+        process.exit(1);
+      }
+
+      aliasUpdate = options.alias;
     }
   }
 
@@ -160,6 +190,11 @@ export async function serverConfigCommand(
     const newValue = options.flags || 'none';
     console.log(`${chalk.bold('Custom Flags:')}   ${chalk.dim(oldValue)} → ${chalk.green(newValue)}`);
   }
+  if (aliasUpdate !== undefined) {
+    const oldValue = server.alias || '(none)';
+    const newValue = aliasUpdate === null ? '(none)' : aliasUpdate;
+    console.log(`${chalk.bold('Alias:')}          ${chalk.dim(oldValue)} → ${chalk.cyan(newValue)}`);
+  }
   console.log('');
 
   // Parse custom flags if provided
@@ -205,6 +240,8 @@ export async function serverConfigCommand(
       ...(options.gpuLayers !== undefined && { gpuLayers: options.gpuLayers }),
       ...(options.verbose !== undefined && { verbose: options.verbose }),
       ...(options.flags !== undefined && { customFlags }),
+      // Handle alias: preserve existing, or update/remove if specified
+      ...(aliasUpdate !== undefined && (aliasUpdate === null ? { alias: undefined } : { alias: aliasUpdate })),
       // Update plist-related paths
       label: `com.llama.${newServerId}`,
       plistPath: path.join(plistDir, `com.llama.${newServerId}.plist`),
@@ -269,6 +306,7 @@ export async function serverConfigCommand(
     ...(options.gpuLayers !== undefined && { gpuLayers: options.gpuLayers }),
     ...(options.verbose !== undefined && { verbose: options.verbose }),
     ...(options.flags !== undefined && { customFlags }),
+    ...(aliasUpdate !== undefined && (aliasUpdate === null ? { alias: undefined } : { alias: aliasUpdate })),
   };
 
   await stateManager.updateServerConfig(server.id, updatedConfig);

@@ -2,6 +2,7 @@ export type ServerStatus = 'running' | 'stopped' | 'crashed';
 
 export interface ServerConfig {
   id: string;              // Sanitized model name (unique identifier)
+  alias?: string;          // Optional user-defined stable identifier
   modelPath: string;       // Full path to GGUF file
   modelName: string;       // Display name (original filename)
   port: number;            // Server port
@@ -43,4 +44,33 @@ export function sanitizeModelName(modelName: string): string {
     .replace(/[^a-zA-Z0-9]+/g, '-')    // Replace non-alphanumeric with hyphens
     .toLowerCase()                      // Lowercase
     .replace(/^-+|-+$/g, '');          // Trim hyphens from ends
+}
+
+/**
+ * Reserved alias names that cannot be used
+ */
+const RESERVED_ALIASES = ['router', 'admin', 'server'];
+
+/**
+ * Validate an alias name
+ * @param alias - The alias to validate
+ * @returns null if valid, error message if invalid
+ */
+export function validateAlias(alias: string): string | null {
+  // Check length
+  if (alias.length < 1 || alias.length > 64) {
+    return 'Alias must be between 1 and 64 characters';
+  }
+
+  // Check format (alphanumeric, hyphens, underscores only)
+  if (!/^[a-zA-Z0-9_-]+$/.test(alias)) {
+    return 'Alias can only contain alphanumeric characters, hyphens, and underscores';
+  }
+
+  // Check reserved names (case-insensitive)
+  if (RESERVED_ALIASES.includes(alias.toLowerCase())) {
+    return `Alias "${alias}" is reserved and cannot be used`;
+  }
+
+  return null;
 }

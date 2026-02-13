@@ -763,6 +763,16 @@ class RouterServer {
   private async findServerForModel(modelName: string): Promise<ServerConfig | null> {
     const servers = await this.getAllServers();
 
+    // 1. Check aliases first (exact match, case-sensitive)
+    const aliasMatch = servers.find(s => s.alias === modelName);
+    if (aliasMatch) return aliasMatch;
+
+    // 2. Check aliases with case-insensitive matching
+    const aliasMatchCaseInsensitive = servers.find(
+      s => s.alias && s.alias.toLowerCase() === modelName.toLowerCase()
+    );
+    if (aliasMatchCaseInsensitive) return aliasMatchCaseInsensitive;
+
     // Normalize a model name for flexible matching (lowercase, no extension, normalize separators)
     const normalize = (name: string): string => {
       return name
@@ -773,17 +783,17 @@ class RouterServer {
 
     const normalizedRequest = normalize(modelName);
 
-    // Try exact match first
+    // 3. Try exact model name match
     const exactMatch = servers.find(s => s.modelName === modelName);
     if (exactMatch) return exactMatch;
 
-    // Try case-insensitive match
+    // 4. Try case-insensitive model name match
     const caseInsensitiveMatch = servers.find(
       s => s.modelName.toLowerCase() === modelName.toLowerCase()
     );
     if (caseInsensitiveMatch) return caseInsensitiveMatch;
 
-    // Try adding .gguf extension if not present
+    // 5. Try adding .gguf extension if not present
     if (!modelName.endsWith('.gguf')) {
       const withExtension = modelName + '.gguf';
       const extensionMatch = servers.find(
@@ -792,7 +802,7 @@ class RouterServer {
       if (extensionMatch) return extensionMatch;
     }
 
-    // Try normalized matching (handles case, extension, and underscore/hyphen variations)
+    // 6. Try normalized matching (handles case, extension, and underscore/hyphen variations)
     const normalizedMatch = servers.find(
       s => normalize(s.modelName) === normalizedRequest
     );

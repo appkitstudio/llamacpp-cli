@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useServers, useStartServer, useStopServer } from '../hooks/useApi';
-import { Play, Square, Cpu, Database, Loader2, Settings, Plus, FileText } from 'lucide-react';
+import { Cpu, Database, Loader2, Plus } from 'lucide-react';
 import { ServerConfigModal } from '../components/ServerConfigModal';
 import { CreateServerModal } from '../components/CreateServerModal';
 import type { Server } from '../types/api';
@@ -196,16 +196,16 @@ export function Servers() {
             key={server.id}
             className="group bg-white border border-neutral-200 rounded-lg p-5 hover:border-neutral-300 hover:shadow-sm transition-all"
           >
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex-1 min-w-0">
-                <h3 className="text-base font-semibold text-neutral-900 truncate mb-1">
-                  {server.modelName.replace('.gguf', '')}
-                </h3>
-                <p className="text-sm text-neutral-500">
-                  localhost:{server.port}
-                </p>
-              </div>
-              {renderStatusBadge(server)}
+            <div className="mb-4">
+              <h3 className="text-base font-semibold text-neutral-900 truncate mb-1">
+                {server.modelName.replace('.gguf', '')}
+                {server.alias && (
+                  <span className="ml-2 text-sm font-normal text-cyan-600">({server.alias})</span>
+                )}
+              </h3>
+              <p className="text-sm text-neutral-500">
+                localhost:{server.port}
+              </p>
             </div>
 
             <div className="space-y-2 mb-4">
@@ -219,35 +219,35 @@ export function Servers() {
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                onClick={() => navigate(`/servers/${server.id}/logs`)}
-                disabled={actionLoading?.id === server.id}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
-                title="Logs"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                Logs
-              </button>
-              <button
-                onClick={() => setConfigServer(server)}
-                disabled={actionLoading?.id === server.id}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
-                title="Config"
-              >
-                <Settings className="w-3.5 h-3.5" />
-                Config
-              </button>
-              <button
-                onClick={() => handleStop(server.id)}
-                disabled={actionLoading?.id === server.id}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
-                title="Stop"
-              >
-                <Square className="w-3.5 h-3.5" />
-                Stop
-              </button>
+            {/* Actions and Status */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => navigate(`/servers/${server.id}/logs`)}
+                  disabled={actionLoading?.id === server.id}
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                  title="Logs"
+                >
+                  Logs
+                </button>
+                <button
+                  onClick={() => setConfigServer(server)}
+                  disabled={actionLoading?.id === server.id}
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                  title="Config"
+                >
+                  Config
+                </button>
+                <button
+                  onClick={() => handleStop(server.id)}
+                  disabled={actionLoading?.id === server.id}
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                  title="Stop"
+                >
+                  Stop
+                </button>
+              </div>
+              {renderStatusBadge(server)}
             </div>
           </div>
         ))}
@@ -258,16 +258,16 @@ export function Servers() {
             key={server.id}
             className="group bg-white border border-neutral-200 rounded-lg p-5 hover:border-neutral-300 hover:shadow-sm transition-all opacity-60 hover:opacity-100"
           >
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex-1 min-w-0">
-                <h3 className="text-base font-semibold text-neutral-900 truncate mb-1">
-                  {server.modelName.replace('.gguf', '')}
-                </h3>
-                <p className="text-sm text-neutral-500">
-                  localhost:{server.port}
-                </p>
-              </div>
-              {renderStatusBadge(server)}
+            <div className="mb-4">
+              <h3 className="text-base font-semibold text-neutral-900 truncate mb-1">
+                {server.modelName.replace('.gguf', '')}
+                {server.alias && (
+                  <span className="ml-2 text-sm font-normal text-cyan-600">({server.alias})</span>
+                )}
+              </h3>
+              <p className="text-sm text-neutral-500">
+                localhost:{server.port}
+              </p>
             </div>
 
             <div className="space-y-2 mb-4">
@@ -281,35 +281,35 @@ export function Servers() {
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                onClick={() => navigate(`/servers/${server.id}/logs`)}
-                disabled={actionLoading?.id === server.id}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
-                title="Logs"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                Logs
-              </button>
-              <button
-                onClick={() => setConfigServer(server)}
-                disabled={actionLoading?.id === server.id}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
-                title="Config"
-              >
-                <Settings className="w-3.5 h-3.5" />
-                Config
-              </button>
-              <button
-                onClick={() => handleStart(server.id)}
-                disabled={actionLoading?.id === server.id}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
-                title="Start"
-              >
-                <Play className="w-3.5 h-3.5" />
-                Start
-              </button>
+            {/* Actions and Status */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => navigate(`/servers/${server.id}/logs`)}
+                  disabled={actionLoading?.id === server.id}
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                  title="Logs"
+                >
+                  Logs
+                </button>
+                <button
+                  onClick={() => setConfigServer(server)}
+                  disabled={actionLoading?.id === server.id}
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                  title="Config"
+                >
+                  Config
+                </button>
+                <button
+                  onClick={() => handleStart(server.id)}
+                  disabled={actionLoading?.id === server.id}
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                  title="Start"
+                >
+                  Start
+                </button>
+              </div>
+              {renderStatusBadge(server)}
             </div>
           </div>
         ))}

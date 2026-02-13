@@ -2,6 +2,7 @@ export type ServerStatus = 'running' | 'stopped' | 'crashed';
 
 export interface Server {
   id: string;
+  alias?: string;
   modelPath: string;
   modelName: string;
   port: number;
@@ -54,6 +55,7 @@ export interface SystemStatus {
 
 export interface CreateServerRequest {
   model: string;
+  alias?: string;
   port?: number;
   host?: string;
   threads?: number;
@@ -65,6 +67,7 @@ export interface CreateServerRequest {
 
 export interface UpdateServerRequest {
   model?: string;
+  alias?: string | null;
   port?: number;
   host?: string;
   threads?: number;

@@ -134,6 +134,31 @@ export class StateManager {
   }
 
   /**
+   * Find a server by alias (exact match, case-sensitive)
+   */
+  async findServerByAlias(alias: string): Promise<ServerConfig | null> {
+    const servers = await this.getAllServers();
+    return servers.find((s) => s.alias === alias) || null;
+  }
+
+  /**
+   * Check if an alias is available (case-insensitive uniqueness check)
+   * @param alias - The alias to check
+   * @param excludeServerId - Optional server ID to exclude from check (for updates)
+   * @returns null if available, or the conflicting server ID if taken
+   */
+  async isAliasAvailable(alias: string, excludeServerId?: string): Promise<string | null> {
+    const servers = await this.getAllServers();
+    const aliasLower = alias.toLowerCase();
+
+    const conflict = servers.find(
+      (s) => s.alias && s.alias.toLowerCase() === aliasLower && s.id !== excludeServerId
+    );
+
+    return conflict ? conflict.id : null;
+  }
+
+  /**
    * Find a server by model name (fuzzy match)
    */
   async findServerByModelName(name: string): Promise<ServerConfig | null> {
@@ -154,9 +179,14 @@ export class StateManager {
   }
 
   /**
-   * Find a server by identifier (ID, model name, or port)
+   * Find a server by identifier (alias, port, ID, or model name)
+   * Priority: alias (exact) → port (if numeric) → ID/model name (fuzzy)
    */
   async findServer(identifier: string): Promise<ServerConfig | null> {
+    // Try as alias first (exact match, case-sensitive)
+    const aliasMatch = await this.findServerByAlias(identifier);
+    if (aliasMatch) return aliasMatch;
+
     // Try as port number
     const port = parseInt(identifier, 10);
     if (!isNaN(port)) {

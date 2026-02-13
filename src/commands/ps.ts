@@ -39,7 +39,7 @@ export async function psCommand(): Promise<void> {
   const serversWithStatus = await statusChecker.updateAllServerStatuses();
 
   const table = new Table({
-    head: ['SERVER ID', 'MODEL', 'PORT', 'STATUS', 'PID', 'MEMORY', 'UPTIME'],
+    head: ['SERVER ID', 'ALIAS', 'MODEL', 'PORT', 'STATUS', 'PID', 'MEMORY', 'UPTIME'],
   });
 
   const counts = { running: 0, stopped: 0, crashed: 0 };
@@ -57,6 +57,7 @@ export async function psCommand(): Promise<void> {
 
     table.push([
       server.id,
+      server.alias ? chalk.cyan(server.alias) : chalk.dim('(none)'),
       server.modelName,
       server.port.toString(),
       config.color(config.text),

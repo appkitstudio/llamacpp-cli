@@ -10,6 +10,7 @@ interface ServerConfigModalProps {
 }
 
 interface FormData {
+  alias: string;
   port: number;
   host: string;
   threads: number;
@@ -23,6 +24,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
   const updateServer = useUpdateServer();
 
   const [formData, setFormData] = useState<FormData>({
+    alias: '',
     port: 9000,
     host: '127.0.0.1',
     threads: 4,
@@ -39,6 +41,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
   useEffect(() => {
     if (server) {
       setFormData({
+        alias: server.alias || '',
         port: server.port,
         host: server.host,
         threads: server.threads,
@@ -63,9 +66,15 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
         .map(f => f.trim())
         .filter(f => f.length > 0);
 
+      // If alias changed, include it (empty string means remove, same value means don't change)
+      const aliasUpdate = formData.alias.trim() === (server.alias || '')
+        ? undefined
+        : formData.alias.trim() || null;
+
       await updateServer.mutateAsync({
         id: server.id,
         data: {
+          ...(aliasUpdate !== undefined && { alias: aliasUpdate }),
           port: formData.port,
           host: formData.host,
           threads: formData.threads,
@@ -110,6 +119,23 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Alias */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Alias (optional)
+            </label>
+            <input
+              type="text"
+              value={formData.alias}
+              onChange={(e) => setFormData({ ...formData, alias: e.target.value })}
+              placeholder="e.g., thinking, coder, gpt-oss"
+              pattern="[a-zA-Z0-9_-]*"
+              maxLength={64}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent"
+            />
+            <p className="text-xs text-gray-500 mt-1">Friendly name (leave empty to remove)</p>
+          </div>
+
           {/* Port */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">

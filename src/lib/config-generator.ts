@@ -14,6 +14,7 @@ export interface ServerOptions {
   jinja?: boolean;
   verbose?: boolean;
   customFlags?: string[];
+  alias?: string;
 }
 
 export interface SmartDefaults {
@@ -73,6 +74,7 @@ export class ConfigGenerator {
     const jinja = options?.jinja ?? true;
     const verbose = options?.verbose ?? true;  // Default to true (HTTP request logging)
     const customFlags = options?.customFlags;  // Optional custom flags
+    const alias = options?.alias;  // Optional alias
 
     // Generate server ID
     const id = sanitizeModelName(modelName);
@@ -86,6 +88,7 @@ export class ConfigGenerator {
 
     const config: ServerConfig = {
       id,
+      ...(alias && { alias }),  // Only include alias if provided
       modelPath,
       modelName,
       port,
