@@ -18,6 +18,7 @@ import { ModelInfo } from '../types/model-info.js';
 import { getLogsDir, getLaunchAgentsDir, ensureDir, parseMetalMemoryFromLog } from '../utils/file-utils.js';
 import { formatBytes, formatContextSize } from '../utils/format-utils.js';
 import { isPortInUse } from '../utils/process-utils.js';
+import { ModalController } from './shared/modal-controller.js';
 
 type ViewMode = 'list' | 'detail';
 
@@ -52,7 +53,9 @@ export async function createMultiServerMonitorUI(
   let cameFromDirectJump = directJumpIndex !== undefined; // Track if we entered via ps <id>
   let inHistoricalView = false; // Track whether we're in historical view to prevent key conflicts
   let hasCalledFirstRender = false; // Track if we've called onFirstRender callback
-  let isModalOpen = false; // Prevents screen handlers from executing when modals are open
+
+  // Modal controller for centralized keyboard handling
+  const modalController = new ModalController(screen);
 
   // Spinner animation
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -699,7 +702,22 @@ export async function createMultiServerMonitorUI(
     return value.toLocaleString();
   }
 
-  // Helper to create modal boxes
+  // Helper to create semi-transparent overlay (matches ModalController)
+  function createOverlay(): blessed.Widgets.BoxElement {
+    return blessed.box({
+      parent: screen,
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      style: {
+        bg: 'black',
+        transparent: true,
+      },
+    });
+  }
+
+  // Helper to create modal boxes (matches ModalController styling)
   function createModal(title: string, height: number | string = 'shrink', borderColor: string = 'cyan'): blessed.Widgets.BoxElement {
     return blessed.box({
       parent: screen,
@@ -710,7 +728,7 @@ export async function createMultiServerMonitorUI(
       border: { type: 'line' },
       style: {
         border: { fg: borderColor },
-        fg: 'white',
+        fg: 'white', // Matches ModalController
       },
       tags: true,
       label: ` ${title} `,
@@ -719,24 +737,12 @@ export async function createMultiServerMonitorUI(
 
   // Show progress modal
   function showProgressModal(message: string): blessed.Widgets.BoxElement {
-    const modal = createModal('Working', 6);
-    modal.setContent(`\n  {cyan-fg}${message}{/cyan-fg}`);
-    screen.render();
-    return modal;
+    return modalController.showProgress(message);
   }
 
   // Show error modal
   async function showErrorModal(message: string): Promise<void> {
-    return new Promise((resolve) => {
-      const modal = createModal('Error', 8, 'red');
-      modal.setContent(`\n  {red-fg}❌ ${message}{/red-fg}\n\n  {gray-fg}[Enter] Close{/gray-fg}`);
-      screen.render();
-      modal.focus();
-      modal.key(['enter', 'escape'], () => {
-        screen.remove(modal);
-        resolve();
-      });
-    });
+    await modalController.showError(message, () => {});
   }
 
   // Remove server dialog
@@ -757,6 +763,8 @@ export async function createMultiServerMonitorUI(
     // 0 = checkbox (delete model), 1 = confirm button
     let selectedOption = showDeleteModelOption ? 0 : 1;
 
+    const overlay = createOverlay();
+    screen.append(overlay);
     const modal = createModal('Remove Server', showDeleteModelOption ? 18 : 14, 'red');
 
     function renderDialog(): void {
@@ -822,6 +830,7 @@ export async function createMultiServerMonitorUI(
 
       modal.key(['escape'], () => {
         screen.remove(modal);
+        screen.remove(overlay);
         registerHandlers();
         startPolling();
         resolve();
@@ -829,6 +838,7 @@ export async function createMultiServerMonitorUI(
 
       modal.key(['enter'], async () => {
         screen.remove(modal);
+        screen.remove(overlay);
 
         // Show progress
         const progressModal = showProgressModal('Removing server...');
@@ -927,6 +937,8 @@ export async function createMultiServerMonitorUI(
     let scrollOffset = 0;
     const maxVisible = 8;
 
+    const modelOverlay = createOverlay();
+    screen.append(modelOverlay);
     const modelModal = createModal('Create Server - Select Model', maxVisible + 8);
 
     function renderModelPicker(): void {
@@ -995,11 +1007,13 @@ export async function createMultiServerMonitorUI(
 
       modelModal.key(['escape'], () => {
         screen.remove(modelModal);
+        screen.remove(modelOverlay);
         resolve(null);
       });
 
       modelModal.key(['enter'], () => {
         screen.remove(modelModal);
+        screen.remove(modelOverlay);
         resolve(models[selectedModelIndex]);
       });
     });
@@ -1079,6 +1093,8 @@ export async function createMultiServerMonitorUI(
     ];
 
     let selectedFieldIndex = 0;
+    const configOverlay = createOverlay();
+    screen.append(configOverlay);
     const configModal = createModal('Create Server - Configuration', 20);
 
     function formatConfigValue(key: string, value: any): string {
@@ -1138,6 +1154,7 @@ export async function createMultiServerMonitorUI(
 
       configModal.key(['escape'], () => {
         screen.remove(configModal);
+        screen.remove(configOverlay);
         resolve(false);
       });
 
@@ -1145,6 +1162,7 @@ export async function createMultiServerMonitorUI(
         if (selectedFieldIndex === fields.length) {
           // Create button selected
           screen.remove(configModal);
+          screen.remove(configOverlay);
           resolve(true);
         } else {
           // Edit field
@@ -1156,6 +1174,8 @@ export async function createMultiServerMonitorUI(
             let optionIndex = options.indexOf((config as any)[field.key]);
             if (optionIndex < 0) optionIndex = 0;
 
+            const selectOverlay = createOverlay();
+            screen.append(selectOverlay);
             const selectModal = createModal(field.label, options.length + 6);
 
             function renderSelectOptions(): void {
@@ -1192,10 +1212,12 @@ export async function createMultiServerMonitorUI(
               selectModal.key(['enter'], () => {
                 (config as any)[field.key] = options[optionIndex];
                 screen.remove(selectModal);
+                screen.remove(selectOverlay);
                 resolveSelect();
               });
               selectModal.key(['escape'], () => {
                 screen.remove(selectModal);
+                screen.remove(selectOverlay);
                 resolveSelect();
               });
             });
@@ -1210,6 +1232,8 @@ export async function createMultiServerMonitorUI(
           } else if (field.type === 'number') {
             // Number input
             const isCtxSize = field.key === 'ctxSize';
+            const inputOverlay = createOverlay();
+            screen.append(inputOverlay);
             const inputModal = createModal(`Edit ${field.label}`, isCtxSize ? 11 : 10);
 
             const currentDisplay = isCtxSize
@@ -1280,16 +1304,19 @@ export async function createMultiServerMonitorUI(
                   (config as any)[field.key] = numValue;
                 }
                 screen.remove(inputModal);
+                screen.remove(inputOverlay);
                 resolveInput();
               });
 
               inputBox.on('cancel', () => {
                 screen.remove(inputModal);
+                screen.remove(inputOverlay);
                 resolveInput();
               });
 
               inputBox.key(['escape'], () => {
                 screen.remove(inputModal);
+                screen.remove(inputOverlay);
                 resolveInput();
               });
             });
@@ -1475,7 +1502,7 @@ export async function createMultiServerMonitorUI(
     },
     escape: () => {
       // Don't handle ESC if modal is open or we're in historical view
-      if (isModalOpen || inHistoricalView) return;
+      if (modalController.isModalOpen() || inHistoricalView) return;
 
       if (viewMode === 'detail') {
         showLoading();

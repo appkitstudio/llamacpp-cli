@@ -7,6 +7,7 @@ import { ServerConfig } from '../types/server-config.js';
 import { formatBytes, formatDateShort } from '../utils/format-utils.js';
 import * as fs from 'fs/promises';
 import { createSearchUI } from './SearchApp.js';
+import { ModalController } from './shared/modal-controller.js';
 
 /**
  * Models management TUI
@@ -20,7 +21,9 @@ export async function createModelsUI(
   let models: ModelInfo[] = [];
   let selectedIndex = 0;
   let isLoading = false;
-  let isModalOpen = false; // Prevents screen handlers from executing when modals are open
+
+  // Modal controller for centralized keyboard handling
+  const modalController = new ModalController(screen);
 
   // Create content box
   const contentBox = blessed.box({
@@ -42,6 +45,21 @@ export async function createModelsUI(
     },
   });
   screen.append(contentBox);
+
+  // Helper to create semi-transparent overlay
+  function createOverlay(): blessed.Widgets.BoxElement {
+    return blessed.box({
+      parent: screen,
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      style: {
+        bg: 'black',
+        transparent: true,
+      },
+    });
+  }
 
   // Render models view
   async function render() {
@@ -166,10 +184,14 @@ export async function createModelsUI(
     const allServers = await stateManager.getAllServers();
     const serversUsingModel = allServers.filter(s => s.modelPath === model.path);
 
-    isModalOpen = true;
+    // Note: Custom blessed.box modals don't use modalController directly, but we track state
+    // by keeping modal elements on screen until removed
+
+    // Create overlay for modal
+    const overlay = createOverlay();
 
     // Show confirmation dialog
-    const confirmBox = blessed.message({
+    const confirmBox = blessed.box({
       parent: screen,
       top: 'center',
       left: 'center',
@@ -181,9 +203,10 @@ export async function createModelsUI(
         fg: 'white',
       },
       tags: true,
+      label: ' Delete Model ',
     });
 
-    let confirmText = `{bold}Delete model: ${model.filename}?{/bold}\n\n`;
+    let confirmText = `\n{bold}Delete model: ${model.filename}?{/bold}\n\n`;
     confirmText += `Size: ${model.sizeFormatted}\n\n`;
 
     if (serversUsingModel.length > 0) {
@@ -195,12 +218,24 @@ export async function createModelsUI(
       confirmText += `\n{yellow-fg}These servers will be deleted before removing the model.{/yellow-fg}\n\n`;
     }
 
-    confirmText += `Type 'yes' to confirm:\n\n\n\n`; // Extra lines for input box space
+    // Count lines to position input box correctly
+    const contentLines = confirmText.split('\n').length;
 
-    // Create input box for confirmation
+    confirmBox.setContent(confirmText);
+
+    // Add label for input
+    blessed.text({
+      parent: confirmBox,
+      top: contentLines,
+      left: 2,
+      content: `Type 'yes' to confirm:`,
+      tags: true,
+    });
+
+    // Create input box for confirmation (using top positioning, not bottom)
     const inputBox = blessed.textbox({
       parent: confirmBox,
-      bottom: 1,
+      top: contentLines + 1,
       left: 2,
       right: 2,
       height: 3,
@@ -211,16 +246,14 @@ export async function createModelsUI(
         focus: { border: { fg: 'green' } },
       },
     });
-
-    confirmBox.setContent(confirmText);
+    screen.append(overlay);
     screen.append(confirmBox);
-    confirmBox.focus();
     inputBox.focus();
     screen.render();
 
     inputBox.on('submit', async (value: string) => {
       screen.remove(confirmBox);
-      isModalOpen = false;
+      screen.remove(overlay);
 
       if (value.toLowerCase() !== 'yes') {
         await render();
@@ -258,8 +291,10 @@ export async function createModelsUI(
         // Reload models
         await loadModels();
       } catch (error) {
-        // Show error
-        const errorBox = blessed.message({
+        // Show error with overlay
+        const errorOverlay = createOverlay();
+
+        const errorBox = blessed.box({
           parent: screen,
           top: 'center',
           left: 'center',
@@ -271,11 +306,21 @@ export async function createModelsUI(
             fg: 'red',
           },
           tags: true,
+          label: ' Error ',
+          keys: true,
         });
 
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        errorBox.display(`{bold}Delete failed{/bold}\n\n${errorMsg}\n\nPress any key to continue`, () => {
+        errorBox.setContent(`\n  {bold}Delete failed{/bold}\n\n  ${errorMsg}\n\n  {gray-fg}Press any key to continue{/gray-fg}`);
+
+        screen.append(errorOverlay);
+        screen.append(errorBox);
+        errorBox.focus();
+        screen.render();
+
+        errorBox.once('keypress', () => {
           screen.remove(errorBox);
+          screen.remove(errorOverlay);
           isLoading = false;
           render();
         });
@@ -284,13 +329,13 @@ export async function createModelsUI(
 
     inputBox.on('cancel', () => {
       screen.remove(confirmBox);
-      isModalOpen = false;
+      screen.remove(overlay);
       render();
     });
 
     inputBox.key(['escape'], () => {
       screen.remove(confirmBox);
-      isModalOpen = false;
+      screen.remove(overlay);
       render();
     });
   }
@@ -327,7 +372,8 @@ export async function createModelsUI(
       loadModels();
     },
     escape: async () => {
-      if (isModalOpen) return; // Don't handle if modal is open
+      // Note: Custom blessed.box modals have their own focus and ESC handling
+      // Screen handlers don't fire when modals are focused
       cleanup();
       await onBack();
     },

@@ -3,6 +3,7 @@ import { modelSearch, HFModelResult } from '../lib/model-search.js';
 import { modelDownloader, DownloadProgress } from '../lib/model-downloader.js';
 import { stateManager } from '../lib/state-manager.js';
 import { formatBytes } from '../utils/format-utils.js';
+import { ModalController } from './shared/modal-controller.js';
 
 interface SearchState {
   query: string;
@@ -35,8 +36,23 @@ export async function createSearchUI(
     error: null,
   };
 
-  // Modal state flag to prevent screen handlers from executing when modals are open
-  let isModalOpen = false;
+  // Modal controller for centralized keyboard handling
+  const modalController = new ModalController(screen);
+
+  // Helper to create semi-transparent overlay
+  function createOverlay(): blessed.Widgets.BoxElement {
+    return blessed.box({
+      parent: screen,
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      style: {
+        bg: 'black',
+        transparent: true,
+      },
+    });
+  }
 
   // Create content box for results
   const contentBox = blessed.box({
@@ -189,6 +205,8 @@ export async function createSearchUI(
 
   // Show search popup modal
   function showSearchPopup() {
+    const overlay = createOverlay();
+
     const searchBox = blessed.box({
       parent: screen,
       top: 'center',
@@ -211,15 +229,12 @@ export async function createSearchUI(
       right: 1,
       height: 1,
       inputOnFocus: true,
-      style: {
-        fg: 'white',
-        bg: 'black',
-      },
     });
 
     // Handle submit
     searchInput.on('submit', async (value: string) => {
       screen.remove(searchBox);
+      screen.remove(overlay);
       screen.render();
 
       if (value && value.trim()) {
@@ -230,14 +245,17 @@ export async function createSearchUI(
     // Handle cancel
     searchInput.on('cancel', () => {
       screen.remove(searchBox);
+      screen.remove(overlay);
       render();
     });
 
     searchInput.key(['escape'], () => {
       screen.remove(searchBox);
+      screen.remove(overlay);
       render();
     });
 
+    screen.append(overlay);
     screen.append(searchBox);
     searchInput.focus();
     screen.render();
@@ -296,6 +314,9 @@ export async function createSearchUI(
     // Get models directory
     const modelsDir = await stateManager.getModelsDirectory();
 
+    // Create overlay for progress modal
+    const progressOverlay = createOverlay();
+
     // Create progress modal
     const progressBox = blessed.box({
       parent: screen,
@@ -348,11 +369,13 @@ export async function createSearchUI(
       screen.unkey('escape', cancelHandler);
       screen.unkey('C-c', cancelHandler);
       screen.remove(progressBox);
+      screen.remove(progressOverlay);
       // Re-register main handlers
       screen.key(['escape'], keyHandlers.escape);
       screen.key(['C-c'], keyHandlers.quit);
     };
 
+    screen.append(progressOverlay);
     screen.append(progressBox);
     progressBox.focus();
     screen.key(['escape', 'C-c'], cancelHandler);
@@ -465,7 +488,7 @@ export async function createSearchUI(
       showSearchPopup();
     },
     escape: () => {
-      if (isModalOpen) return; // Don't handle if modal is open
+      if (modalController.isModalOpen()) return; // Don't handle if modal is open
       if (state.expandedModelIndex !== null) {
         // Go back to results list
         state.expandedModelIndex = null;

@@ -9,6 +9,7 @@ import { modelScanner } from '../lib/model-scanner.js';
 import { ModelInfo } from '../types/model-info.js';
 import { getLogsDir, getLaunchAgentsDir } from '../utils/file-utils.js';
 import { autoRotateIfNeeded } from '../utils/log-utils.js';
+import { ModalController } from './shared/modal-controller.js';
 
 interface ConfigField {
   key: string;
@@ -144,7 +145,8 @@ export async function createConfigUI(
   };
 
   // Modal state flag to prevent screen handlers from executing when modals are open
-  let isModalOpen = false;
+  // Modal controller for centralized keyboard handling
+  const modalController = new ModalController(screen);
 
   // Create content box
   const contentBox = blessed.box({
@@ -283,6 +285,8 @@ export async function createConfigUI(
   }
 
   // Create a centered modal box
+
+  // Helper to create modal element (for custom modals with special logic)
   function createModal(title: string, height: number | string = 'shrink'): blessed.Widgets.BoxElement {
     return blessed.box({
       parent: screen,
@@ -300,11 +304,35 @@ export async function createConfigUI(
     });
   }
 
-  // Number input modal
-  async function editNumber(field: ConfigField): Promise<void> {
+  // Helper to create semi-transparent overlay
+  function createOverlay(): blessed.Widgets.BoxElement {
+    return blessed.box({
+      parent: screen,
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      style: {
+        bg: 'black',
+        transparent: true,
+      },
+    });
+  }
+
+  /**
+   * Number input modal with context size support
+   * Note: This function unregisters handlers before opening modal.
+   * Handlers are re-registered when modal closes via callback.
+   */
+  async function editNumber(field: ConfigField, onClose?: () => void): Promise<void> {
     unregisterHandlers();
     return new Promise((resolve) => {
+      const handleClose = onClose || (() => {
+        registerHandlers();
+        render();
+      });
       const isCtxSize = field.key === 'ctxSize';
+      const overlay = createOverlay();
       const modal = createModal(`Edit ${field.label}`, isCtxSize ? 11 : 10);
 
       const currentDisplay = isCtxSize
@@ -357,6 +385,8 @@ export async function createConfigUI(
         ? formatContextSize(field.value)
         : String(field.value);
       inputBox.setValue(initialValue);
+      screen.append(overlay);
+      screen.append(modal);
       screen.render();
       inputBox.focus();
 
@@ -391,37 +421,39 @@ export async function createConfigUI(
           updateHasChanges();
         }
         screen.remove(modal);
-        registerHandlers();
-        render();
+        screen.remove(overlay);
+        handleClose();
         resolve();
       });
 
       inputBox.on('cancel', () => {
         screen.remove(modal);
-        registerHandlers();
-        render();
-        resolve();
-      });
-
-      inputBox.key(['escape'], () => {
-        screen.remove(modal);
-        registerHandlers();
-        render();
+        screen.remove(overlay);
+        handleClose();
         resolve();
       });
     });
   }
 
-  // Toggle/select modal
-  async function editSelect(field: ConfigField): Promise<void> {
+  /**
+   * Toggle/select modal
+   * Note: This function unregisters handlers before opening modal.
+   * Handlers are re-registered when modal closes via callback.
+   */
+  async function editSelect(field: ConfigField, onClose?: () => void): Promise<void> {
     unregisterHandlers();
     return new Promise((resolve) => {
+      const handleClose = onClose || (() => {
+        registerHandlers();
+        render();
+      });
       const options = field.options || [];
       let selectedOption = field.type === 'toggle'
         ? (field.value ? 1 : 0)
         : options.indexOf(String(field.value));
       if (selectedOption < 0) selectedOption = 0;
 
+      const overlay = createOverlay();
       const modal = createModal(field.label, options.length + 6);
 
       function renderOptions(): void {
@@ -446,6 +478,8 @@ export async function createConfigUI(
         screen.render();
       }
 
+      screen.append(overlay);
+      screen.append(modal);
       renderOptions();
       modal.focus();
 
@@ -467,24 +501,33 @@ export async function createConfigUI(
         }
         updateHasChanges();
         screen.remove(modal);
-        registerHandlers();
-        render();
+        screen.remove(overlay);
+        handleClose();
         resolve();
       });
 
       modal.key(['escape'], () => {
         screen.remove(modal);
-        registerHandlers();
-        render();
+        screen.remove(overlay);
+        handleClose();
         resolve();
       });
     });
   }
 
-  // Text input modal
-  async function editText(field: ConfigField): Promise<void> {
+  /**
+   * Text input modal
+   * Note: This function unregisters handlers before opening modal.
+   * Handlers are re-registered when modal closes via callback.
+   */
+  async function editText(field: ConfigField, onClose?: () => void): Promise<void> {
     unregisterHandlers();
     return new Promise((resolve) => {
+      const handleClose = onClose || (() => {
+        registerHandlers();
+        render();
+      });
+      const overlay = createOverlay();
       const modal = createModal(`Edit ${field.label}`, 10);
 
       // Customize info text based on field type
@@ -525,6 +568,8 @@ export async function createConfigUI(
       });
 
       inputBox.setValue(field.value || '');
+      screen.append(overlay);
+      screen.append(modal);
       screen.render();
       inputBox.focus();
 
@@ -552,42 +597,48 @@ export async function createConfigUI(
         field.value = trimmedValue;
         updateHasChanges();
         screen.remove(modal);
-        registerHandlers();
-        render();
+        screen.remove(overlay);
+        handleClose();
         resolve();
       });
 
       inputBox.on('cancel', () => {
         screen.remove(modal);
-        registerHandlers();
-        render();
-        resolve();
-      });
-
-      inputBox.key(['escape'], () => {
-        screen.remove(modal);
-        registerHandlers();
-        render();
+        screen.remove(overlay);
+        handleClose();
         resolve();
       });
     });
   }
 
   // Model picker modal
-  async function editModel(field: ConfigField): Promise<void> {
+  /**
+   * Model selection modal
+   * Note: This function unregisters handlers before opening modal.
+   * Handlers are re-registered when modal closes via callback.
+   */
+  async function editModel(field: ConfigField, onClose?: () => void): Promise<void> {
     unregisterHandlers();
     return new Promise(async (resolve) => {
+      const handleClose = onClose || (() => {
+        registerHandlers();
+        render();
+      });
+
       const models = await modelScanner.scanModels();
       if (models.length === 0) {
         // Show error modal
+        const errorOverlay = createOverlay();
         const errorModal = createModal('Error', 7);
         errorModal.setContent('\n  {red-fg}No models found in ~/models{/red-fg}\n\n  {gray-fg}[ESC] Close{/gray-fg}');
+        screen.append(errorOverlay);
+        screen.append(errorModal);
         screen.render();
         errorModal.focus();
         errorModal.key(['escape', 'enter'], () => {
           screen.remove(errorModal);
-          registerHandlers();
-          render();
+          screen.remove(errorOverlay);
+          handleClose();
           resolve();
         });
         return;
@@ -598,6 +649,7 @@ export async function createConfigUI(
       let scrollOffset = 0;
       const maxVisible = 8;
 
+      const overlay = createOverlay();
       const modal = createModal('Select Model', maxVisible + 6);
 
       function renderModels(): void {
@@ -645,6 +697,8 @@ export async function createConfigUI(
         screen.render();
       }
 
+      screen.append(overlay);
+      screen.append(modal);
       renderModels();
       modal.focus();
 
@@ -662,179 +716,68 @@ export async function createConfigUI(
         field.value = models[selectedIndex].filename;
         updateHasChanges();
         screen.remove(modal);
-        registerHandlers();
-        render();
+        screen.remove(overlay);
+        handleClose();
         resolve();
       });
 
       modal.key(['escape'], () => {
         screen.remove(modal);
-        registerHandlers();
-        render();
+        screen.remove(overlay);
+        handleClose();
         resolve();
       });
     });
   }
 
-  // Show unsaved changes dialog
-  async function showUnsavedDialog(): Promise<'save' | 'discard' | 'continue'> {
-    unregisterHandlers();
-    isModalOpen = true;
-    return new Promise((resolve) => {
-      const modal = createModal('Unsaved Changes', 10);
-
-      let selectedOption = 0;
-      const options = [
-        { key: 'save', label: '[S]ave and exit' },
-        { key: 'discard', label: '[D]iscard changes' },
-        { key: 'continue', label: '[C]ontinue editing' },
-      ];
-
-      function renderDialog(): void {
-        let content = '\n';
-        for (let i = 0; i < options.length; i++) {
-          const isSelected = i === selectedOption;
-          if (isSelected) {
-            content += `  {cyan-fg}► ${options[i].label}{/cyan-fg}\n`;
-          } else {
-            content += `    ${options[i].label}\n`;
-          }
-        }
-        modal.setContent(content);
-        screen.render();
-      }
-
-      renderDialog();
-      modal.focus();
-
-      modal.key(['up', 'k'], () => {
-        selectedOption = Math.max(0, selectedOption - 1);
-        renderDialog();
-      });
-
-      modal.key(['down', 'j'], () => {
-        selectedOption = Math.min(options.length - 1, selectedOption + 1);
-        renderDialog();
-      });
-
-      modal.key(['enter'], () => {
-        screen.remove(modal);
-        isModalOpen = false;
-        registerHandlers();
-        resolve(options[selectedOption].key as 'save' | 'discard' | 'continue');
-      });
-
-      modal.key(['s', 'S'], () => {
-        screen.remove(modal);
-        isModalOpen = false;
-        registerHandlers();
-        resolve('save');
-      });
-
-      modal.key(['d', 'D'], () => {
-        screen.remove(modal);
-        isModalOpen = false;
-        registerHandlers();
-        resolve('discard');
-      });
-
-      modal.key(['c', 'C', 'escape'], () => {
-        screen.remove(modal);
-        isModalOpen = false;
-        registerHandlers();
-        resolve('continue');
-      });
-    });
+  /**
+   * Show unsaved changes dialog
+   * @param onClose - Optional callback when modal closes. Defaults to registering handlers + render.
+   *                  Pass empty function for complex flows where outer function manages handlers.
+   */
+  async function showUnsavedDialog(onClose?: () => void): Promise<'save' | 'discard' | 'continue'> {
+    return modalController.showUnsavedDialog(onClose || (() => {
+      registerHandlers();
+      render();
+    }));
   }
 
-  // Show restart confirmation dialog
-  async function showRestartDialog(): Promise<boolean> {
-    unregisterHandlers();
-    isModalOpen = true;
-    return new Promise((resolve) => {
-      const modal = createModal('Server is Running', 10);
-
-      let selectedOption = 0;
-      const options = [
-        { key: true, label: '[Y]es - Restart now' },
-        { key: false, label: '[N]o - Apply later' },
-      ];
-
-      function renderDialog(): void {
-        let content = '\n  Restart to apply changes?\n\n';
-        for (let i = 0; i < options.length; i++) {
-          const isSelected = i === selectedOption;
-          if (isSelected) {
-            content += `  {cyan-fg}► ${options[i].label}{/cyan-fg}\n`;
-          } else {
-            content += `    ${options[i].label}\n`;
-          }
-        }
-        modal.setContent(content);
-        screen.render();
-      }
-
-      renderDialog();
-      modal.focus();
-
-      modal.key(['up', 'k'], () => {
-        selectedOption = Math.max(0, selectedOption - 1);
-        renderDialog();
-      });
-
-      modal.key(['down', 'j'], () => {
-        selectedOption = Math.min(options.length - 1, selectedOption + 1);
-        renderDialog();
-      });
-
-      modal.key(['enter'], () => {
-        screen.remove(modal);
-        isModalOpen = false;
-        registerHandlers();
-        resolve(options[selectedOption].key);
-      });
-
-      modal.key(['y', 'Y'], () => {
-        screen.remove(modal);
-        isModalOpen = false;
-        registerHandlers();
-        resolve(true);
-      });
-
-      modal.key(['n', 'N', 'escape'], () => {
-        screen.remove(modal);
-        isModalOpen = false;
-        registerHandlers();
-        resolve(false);
-      });
-    });
+  /**
+   * Show restart confirmation dialog
+   * @param onClose - Optional callback when modal closes. Defaults to registering handlers + render.
+   *                  Pass empty function for complex flows where outer function manages handlers.
+   */
+  async function showRestartDialog(onClose?: () => void): Promise<boolean> {
+    return modalController.showRestartDialog(server.modelName, onClose || (() => {
+      registerHandlers();
+      render();
+    }));
   }
 
-  // Show progress modal
-  function showProgress(message: string): blessed.Widgets.BoxElement {
-    const modal = createModal('Working', 6);
-    modal.setContent(`\n  {cyan-fg}${message}{/cyan-fg}`);
-    screen.render();
-    return modal;
+  /**
+   * Show error modal
+   * @param message - Error message to display
+   * @param onClose - Optional callback when modal closes. Defaults to registering handlers + render.
+   *                  Pass empty function for complex flows where outer function manages handlers.
+   */
+  async function showError(message: string, onClose?: () => void): Promise<void> {
+    await modalController.showError(message, onClose || (() => {
+      registerHandlers();
+      render();
+    }));
   }
 
-  // Show error message
-  async function showError(message: string): Promise<void> {
-    unregisterHandlers();
-    isModalOpen = true;
-    return new Promise((resolve) => {
-      const modal = createModal('Error', 8);
-      modal.setContent(`\n  {red-fg}❌ ${message}{/red-fg}\n\n  {gray-fg}[Enter] Close{/gray-fg}`);
-      screen.render();
-      modal.focus();
-      modal.key(['enter', 'escape'], () => {
-        screen.remove(modal);
-        isModalOpen = false;
-        registerHandlers();
-        render();
-        resolve();
-      });
-    });
+  /**
+   * Show success modal
+   * @param message - Success message to display
+   * @param onClose - Optional callback when modal closes. Defaults to registering handlers + render.
+   *                  Pass empty function for complex flows where outer function manages handlers.
+   */
+  async function showSuccess(message: string, onClose?: () => void): Promise<void> {
+    await modalController.showSuccess(message, onClose || (() => {
+      registerHandlers();
+      render();
+    }));
   }
 
   // Save changes
@@ -891,11 +834,14 @@ export async function createConfigUI(
     let shouldRestart = false;
 
     if (wasRunning) {
-      shouldRestart = await showRestartDialog();
+      unregisterHandlers();
+      // Pass empty onClose - saveChanges manages handler registration
+      shouldRestart = await showRestartDialog(() => {});
+      registerHandlers();
     }
 
     // Show progress
-    const progressModal = showProgress('Saving configuration...');
+    const progressModal = modalController.showProgress('Saving configuration...');
 
     try {
       // Parse custom flags
@@ -1062,10 +1008,14 @@ export async function createConfigUI(
   // Handle escape/cancel
   async function handleEscape(): Promise<void> {
     // Don't handle if modal is open
-    if (isModalOpen) return;
+    if (modalController.isModalOpen()) return;
 
     if (state.hasChanges) {
-      const result = await showUnsavedDialog();
+      unregisterHandlers();
+      // Pass empty onClose - handleEscape manages handler registration
+      const result = await showUnsavedDialog(() => {});
+      registerHandlers();
+
       if (result === 'save') {
         const updated = await saveChanges();
         cleanup();
