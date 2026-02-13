@@ -2,9 +2,10 @@ import blessed from 'blessed';
 import { ServerConfig } from '../types/server-config.js';
 import { createMultiServerMonitorUI, MonitorUIControls } from './MultiServerMonitorApp.js';
 import { createModelsUI } from './ModelsApp.js';
+import { createRouterUI } from './RouterApp.js';
 import { createSplashScreen } from './SplashScreen.js';
 
-type RootView = 'monitor' | 'models';
+type RootView = 'monitor' | 'models' | 'router';
 
 /**
  * Root navigator that manages switching between Monitor and Models views
@@ -56,6 +57,25 @@ export async function createRootNavigator(
     );
   };
 
+  // Callback to switch to Router view (receives controls from Monitor)
+  const switchToRouter = async (monitorControls: MonitorUIControls) => {
+    if (isExiting) return;
+    currentView = 'router';
+
+    // Create Router view (Monitor is paused, not destroyed)
+    await createRouterUI(
+      screen,
+      async () => {
+        // onBack callback - return to Monitor view
+        if (isExiting) return;
+        currentView = 'monitor';
+
+        // Resume Monitor view instantly (no reload, just re-attach and resume polling)
+        monitorControls.resume();
+      }
+    );
+  };
+
   // Start with Monitor view (skip connecting message since splash already showed loading)
   // Pass cleanupSplash as onFirstRender callback - splash stays until monitor data is ready
   await createMultiServerMonitorUI(
@@ -64,6 +84,7 @@ export async function createRootNavigator(
     true, // Skip "Connecting to servers..." since splash screen showed loading
     directJumpToServer,
     switchToModels,
+    switchToRouter,
     cleanupSplash
   );
 

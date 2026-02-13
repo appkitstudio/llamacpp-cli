@@ -158,6 +158,7 @@ export async function createHistoricalUI(
   const REFRESH_INTERVAL = 1000;
   let lastGoodRender: string | null = null;
   let consecutiveErrors = 0;
+  let isModalOpen = false; // Prevents screen handlers from executing when modals are open
 
   const contentBox = createContentBox();
   screen.append(contentBox);
@@ -314,6 +315,7 @@ export async function createHistoricalUI(
       render();
     },
     escape: () => {
+      if (isModalOpen) return; // Don't handle if modal is open
       cleanup();
       screen.remove(contentBox);
       onBack();
@@ -360,6 +362,7 @@ export async function createMultiServerHistoricalUI(
   const REFRESH_INTERVAL = 3000;
   let lastGoodRender: string | null = null;
   let consecutiveErrors = 0;
+  let isModalOpen = false; // Prevents screen handlers from executing when modals are open
 
   const contentBox = createContentBox();
   screen.append(contentBox);
@@ -551,6 +554,7 @@ export async function createMultiServerHistoricalUI(
       render();
     },
     escape: () => {
+      if (isModalOpen) return; // Don't handle if modal is open
       cleanup();
       screen.remove(contentBox);
       onBack();

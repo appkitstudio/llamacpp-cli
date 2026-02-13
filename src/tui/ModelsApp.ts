@@ -20,6 +20,7 @@ export async function createModelsUI(
   let models: ModelInfo[] = [];
   let selectedIndex = 0;
   let isLoading = false;
+  let isModalOpen = false; // Prevents screen handlers from executing when modals are open
 
   // Create content box
   const contentBox = blessed.box({
@@ -165,6 +166,8 @@ export async function createModelsUI(
     const allServers = await stateManager.getAllServers();
     const serversUsingModel = allServers.filter(s => s.modelPath === model.path);
 
+    isModalOpen = true;
+
     // Show confirmation dialog
     const confirmBox = blessed.message({
       parent: screen,
@@ -217,6 +220,7 @@ export async function createModelsUI(
 
     inputBox.on('submit', async (value: string) => {
       screen.remove(confirmBox);
+      isModalOpen = false;
 
       if (value.toLowerCase() !== 'yes') {
         await render();
@@ -280,11 +284,13 @@ export async function createModelsUI(
 
     inputBox.on('cancel', () => {
       screen.remove(confirmBox);
+      isModalOpen = false;
       render();
     });
 
     inputBox.key(['escape'], () => {
       screen.remove(confirmBox);
+      isModalOpen = false;
       render();
     });
   }
@@ -321,6 +327,7 @@ export async function createModelsUI(
       loadModels();
     },
     escape: async () => {
+      if (isModalOpen) return; // Don't handle if modal is open
       cleanup();
       await onBack();
     },

@@ -39,6 +39,7 @@ export async function createMultiServerMonitorUI(
   skipConnectingMessage: boolean = false,
   directJumpIndex?: number,
   onModels?: (controls: MonitorUIControls) => void,
+  onRouter?: (controls: MonitorUIControls) => void,
   onFirstRender?: () => void
 ): Promise<MonitorUIControls> {
   let updateInterval = 5000;
@@ -51,6 +52,7 @@ export async function createMultiServerMonitorUI(
   let cameFromDirectJump = directJumpIndex !== undefined; // Track if we entered via ps <id>
   let inHistoricalView = false; // Track whether we're in historical view to prevent key conflicts
   let hasCalledFirstRender = false; // Track if we've called onFirstRender callback
+  let isModalOpen = false; // Prevents screen handlers from executing when modals are open
 
   // Spinner animation
   const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
@@ -410,7 +412,7 @@ export async function createMultiServerMonitorUI(
 
     // Footer
     content += '\n' + divider + '\n';
-    content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | [N]ew [M]odels [H]istory [Q]uit{/gray-fg}`;
+    content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | [N]ew [M]odels [R]outer [H]istory [Q]uit{/gray-fg}`;
 
     return content;
   }
@@ -1472,8 +1474,8 @@ export async function createMultiServerMonitorUI(
       }
     },
     escape: () => {
-      // Don't handle ESC if we're in historical view - let historical view handle it
-      if (inHistoricalView) return;
+      // Don't handle ESC if modal is open or we're in historical view
+      if (isModalOpen || inHistoricalView) return;
 
       if (viewMode === 'detail') {
         showLoading();
@@ -1496,6 +1498,13 @@ export async function createMultiServerMonitorUI(
         // Pause monitor (don't destroy - we'll resume when returning)
         controls.pause();
         await onModels(controls);
+      }
+    },
+    router: async () => {
+      if (onRouter && viewMode === 'list' && !inHistoricalView) {
+        // Pause monitor (don't destroy - we'll resume when returning)
+        controls.pause();
+        await onRouter(controls);
       }
     },
     history: async () => {
@@ -1758,6 +1767,8 @@ export async function createMultiServerMonitorUI(
     screen.unkey('escape', keyHandlers.escape);
     screen.unkey('m', keyHandlers.models);
     screen.unkey('M', keyHandlers.models);
+    screen.unkey('r', keyHandlers.router);
+    screen.unkey('R', keyHandlers.router);
     screen.unkey('h', keyHandlers.history);
     screen.unkey('H', keyHandlers.history);
     screen.unkey('c', keyHandlers.config);
@@ -1780,6 +1791,7 @@ export async function createMultiServerMonitorUI(
     screen.key(['enter'], keyHandlers.enter);
     screen.key(['escape'], keyHandlers.escape);
     screen.key(['m', 'M'], keyHandlers.models);
+    screen.key(['r', 'R'], keyHandlers.router);
     screen.key(['h', 'H'], keyHandlers.history);
     screen.key(['c', 'C'], keyHandlers.config);
     screen.key(['r', 'R'], keyHandlers.remove);

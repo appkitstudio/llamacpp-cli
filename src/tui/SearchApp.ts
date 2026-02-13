@@ -35,6 +35,9 @@ export async function createSearchUI(
     error: null,
   };
 
+  // Modal state flag to prevent screen handlers from executing when modals are open
+  let isModalOpen = false;
+
   // Create content box for results
   const contentBox = blessed.box({
     parent: screen,
@@ -462,6 +465,7 @@ export async function createSearchUI(
       showSearchPopup();
     },
     escape: () => {
+      if (isModalOpen) return; // Don't handle if modal is open
       if (state.expandedModelIndex !== null) {
         // Go back to results list
         state.expandedModelIndex = null;

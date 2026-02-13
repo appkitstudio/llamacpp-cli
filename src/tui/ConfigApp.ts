@@ -143,6 +143,9 @@ export async function createConfigUI(
     hasChanges: false,
   };
 
+  // Modal state flag to prevent screen handlers from executing when modals are open
+  let isModalOpen = false;
+
   // Create content box
   const contentBox = blessed.box({
     top: 0,
@@ -676,6 +679,7 @@ export async function createConfigUI(
   // Show unsaved changes dialog
   async function showUnsavedDialog(): Promise<'save' | 'discard' | 'continue'> {
     unregisterHandlers();
+    isModalOpen = true;
     return new Promise((resolve) => {
       const modal = createModal('Unsaved Changes', 10);
 
@@ -715,24 +719,28 @@ export async function createConfigUI(
 
       modal.key(['enter'], () => {
         screen.remove(modal);
+        isModalOpen = false;
         registerHandlers();
         resolve(options[selectedOption].key as 'save' | 'discard' | 'continue');
       });
 
       modal.key(['s', 'S'], () => {
         screen.remove(modal);
+        isModalOpen = false;
         registerHandlers();
         resolve('save');
       });
 
       modal.key(['d', 'D'], () => {
         screen.remove(modal);
+        isModalOpen = false;
         registerHandlers();
         resolve('discard');
       });
 
       modal.key(['c', 'C', 'escape'], () => {
         screen.remove(modal);
+        isModalOpen = false;
         registerHandlers();
         resolve('continue');
       });
@@ -742,6 +750,7 @@ export async function createConfigUI(
   // Show restart confirmation dialog
   async function showRestartDialog(): Promise<boolean> {
     unregisterHandlers();
+    isModalOpen = true;
     return new Promise((resolve) => {
       const modal = createModal('Server is Running', 10);
 
@@ -780,18 +789,21 @@ export async function createConfigUI(
 
       modal.key(['enter'], () => {
         screen.remove(modal);
+        isModalOpen = false;
         registerHandlers();
         resolve(options[selectedOption].key);
       });
 
       modal.key(['y', 'Y'], () => {
         screen.remove(modal);
+        isModalOpen = false;
         registerHandlers();
         resolve(true);
       });
 
       modal.key(['n', 'N', 'escape'], () => {
         screen.remove(modal);
+        isModalOpen = false;
         registerHandlers();
         resolve(false);
       });
@@ -809,6 +821,7 @@ export async function createConfigUI(
   // Show error message
   async function showError(message: string): Promise<void> {
     unregisterHandlers();
+    isModalOpen = true;
     return new Promise((resolve) => {
       const modal = createModal('Error', 8);
       modal.setContent(`\n  {red-fg}❌ ${message}{/red-fg}\n\n  {gray-fg}[Enter] Close{/gray-fg}`);
@@ -816,6 +829,7 @@ export async function createConfigUI(
       modal.focus();
       modal.key(['enter', 'escape'], () => {
         screen.remove(modal);
+        isModalOpen = false;
         registerHandlers();
         render();
         resolve();
@@ -1047,6 +1061,9 @@ export async function createConfigUI(
 
   // Handle escape/cancel
   async function handleEscape(): Promise<void> {
+    // Don't handle if modal is open
+    if (isModalOpen) return;
+
     if (state.hasChanges) {
       const result = await showUnsavedDialog();
       if (result === 'save') {
