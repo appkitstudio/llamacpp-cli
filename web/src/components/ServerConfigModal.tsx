@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, Loader2, Save, RotateCcw } from 'lucide-react';
-import { useUpdateServer } from '../hooks/useApi';
+import { X, Loader2, Save, RotateCcw, HardDrive, AlertTriangle } from 'lucide-react';
+import { useUpdateServer, useModels } from '../hooks/useApi';
 import type { Server } from '../types/api';
 
 interface ServerConfigModalProps {
@@ -10,6 +10,7 @@ interface ServerConfigModalProps {
 }
 
 interface FormData {
+  model: string;
   alias: string;
   port: number;
   host: string;
@@ -22,8 +23,10 @@ interface FormData {
 
 export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModalProps) {
   const updateServer = useUpdateServer();
+  const { data: modelsData, isLoading: modelsLoading } = useModels();
 
   const [formData, setFormData] = useState<FormData>({
+    model: '',
     alias: '',
     port: 9000,
     host: '127.0.0.1',
@@ -37,10 +40,13 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
   const [restartAfterSave, setRestartAfterSave] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const models = modelsData?.models || [];
+
   // Initialize form when server changes
   useEffect(() => {
     if (server) {
       setFormData({
+        model: server.modelName,
         alias: server.alias || '',
         port: server.port,
         host: server.host,
@@ -71,9 +77,13 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
         ? undefined
         : formData.alias.trim() || null;
 
+      // Check if model changed
+      const modelUpdate = formData.model !== server.modelName ? formData.model : undefined;
+
       await updateServer.mutateAsync({
         id: server.id,
         data: {
+          ...(modelUpdate && { model: modelUpdate }),
           ...(aliasUpdate !== undefined && { alias: aliasUpdate }),
           port: formData.port,
           host: formData.host,
@@ -98,6 +108,14 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
     return `${size} tokens`;
   };
 
+  const formatSize = (bytes: number) => {
+    if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+    return `${(bytes / 1e3).toFixed(1)} KB`;
+  };
+
+  const modelChanged = server && formData.model !== server.modelName;
+
   if (!isOpen || !server) return null;
 
   return (
@@ -119,6 +137,71 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Model Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Model
+            </label>
+            {modelsLoading ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+              </div>
+            ) : models.length === 0 ? (
+              <div className="text-center py-4 text-sm text-gray-500">
+                No models available
+              </div>
+            ) : (
+              <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
+                {models.map((model) => {
+                  const isCurrentModel = model.filename === server.modelName;
+                  const hasOtherServer = model.serversUsing > 0 && !isCurrentModel;
+                  const canSelect = isCurrentModel || !hasOtherServer;
+                  return (
+                    <button
+                      key={model.filename}
+                      type="button"
+                      onClick={() => canSelect && setFormData({ ...formData, model: model.filename })}
+                      disabled={!canSelect}
+                      className={`w-full text-left px-3 py-2 transition-colors ${
+                        formData.model === model.filename
+                          ? 'bg-gray-100 cursor-pointer'
+                          : !canSelect
+                          ? 'bg-gray-50 opacity-50 cursor-not-allowed'
+                          : 'hover:bg-gray-50 cursor-pointer'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <HardDrive className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                          <span className="text-sm text-gray-900 truncate">
+                            {model.filename.replace('.gguf', '')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 ml-2">
+                          <span className="text-xs text-gray-500">{formatSize(model.size)}</span>
+                          {isCurrentModel && (
+                            <span className="text-xs text-blue-600">current</span>
+                          )}
+                          {hasOtherServer && (
+                            <span className="text-xs text-orange-600">in use</span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {modelChanged && (
+              <div className="flex items-start gap-2 mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700">
+                  Changing the model will stop the server and update its configuration. This may take a few moments.
+                </p>
+              </div>
+            )}
+          </div>
+
           {/* Alias */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
