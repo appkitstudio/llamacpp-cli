@@ -2,12 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useServers, useStartServer, useStopServer } from '../hooks/useApi';
-import { Cpu, Database, Loader2, Plus } from 'lucide-react';
+import { Cpu, Database, Loader2, Plus, LayoutGrid, List } from 'lucide-react';
 import { ServerConfigModal } from '../components/ServerConfigModal';
 import { CreateServerModal } from '../components/CreateServerModal';
 import type { Server } from '../types/api';
 
 type ServerFilter = 'all' | 'running' | 'stopped';
+type ViewMode = 'grid' | 'list';
 
 export function Servers() {
   const navigate = useNavigate();
@@ -20,6 +21,15 @@ export function Servers() {
   const [configServer, setConfigServer] = useState<Server | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [filter, setFilter] = useState<ServerFilter>('all');
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('llamacpp_servers_view');
+    return (saved as ViewMode) || 'grid';
+  });
+
+  const handleViewChange = (mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem('llamacpp_servers_view', mode);
+  };
 
   const pendingAction = useRef<{ id: string; expectedStatus: 'running' | 'stopped' } | null>(null);
 
@@ -154,41 +164,70 @@ export function Servers() {
         </button>
       </div>
 
-      {/* Filter Buttons */}
-      <div className="flex items-center gap-2 mb-6">
-        <button
-          onClick={() => setFilter('all')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
-            filter === 'all'
-              ? 'bg-neutral-900 text-white border-neutral-900'
-              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
-          }`}
-        >
-          All
-        </button>
-        <button
-          onClick={() => setFilter('running')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
-            filter === 'running'
-              ? 'bg-neutral-900 text-white border-neutral-900'
-              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
-          }`}
-        >
-          Running
-        </button>
-        <button
-          onClick={() => setFilter('stopped')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
-            filter === 'stopped'
-              ? 'bg-neutral-900 text-white border-neutral-900'
-              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
-          }`}
-        >
-          Stopped
-        </button>
+      {/* Filter Buttons and View Toggle */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setFilter('all')}
+            className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+              filter === 'all'
+                ? 'bg-neutral-900 text-white border-neutral-900'
+                : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+            }`}
+          >
+            All
+          </button>
+          <button
+            onClick={() => setFilter('running')}
+            className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+              filter === 'running'
+                ? 'bg-neutral-900 text-white border-neutral-900'
+                : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+            }`}
+          >
+            Running
+          </button>
+          <button
+            onClick={() => setFilter('stopped')}
+            className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+              filter === 'stopped'
+                ? 'bg-neutral-900 text-white border-neutral-900'
+                : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+            }`}
+          >
+            Stopped
+          </button>
+        </div>
+
+        {/* View Toggle */}
+        <div className="flex items-center gap-1 p-1 bg-white border border-neutral-200 rounded-lg">
+          <button
+            onClick={() => handleViewChange('grid')}
+            className={`p-1.5 rounded transition-colors cursor-pointer ${
+              viewMode === 'grid'
+                ? 'bg-neutral-900 text-white'
+                : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+            }`}
+            title="Grid view"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => handleViewChange('list')}
+            className={`p-1.5 rounded transition-colors cursor-pointer ${
+              viewMode === 'list'
+                ? 'bg-neutral-900 text-white'
+                : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+            }`}
+            title="List view"
+          >
+            <List className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
-      {/* Grid Layout */}
+      {/* Server Display */}
+      {viewMode === 'grid' ? (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Running Servers */}
         {displayRunning.map((server) => (
@@ -314,6 +353,83 @@ export function Servers() {
           </div>
         ))}
       </div>
+      ) : (
+      /* List View */
+      <div className="bg-white border border-neutral-200 rounded-lg divide-y divide-neutral-200">
+        {[...displayRunning, ...displayStopped].map((server) => (
+          <div
+            key={server.id}
+            className={`group px-5 py-4 hover:bg-neutral-50 transition-colors ${
+              server.status !== 'running' ? 'opacity-60' : ''
+            }`}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4 flex-1 min-w-0">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm font-semibold text-neutral-900 truncate">
+                    {server.modelName.replace('.gguf', '')}
+                    {server.alias && (
+                      <span className="ml-2 text-sm font-normal text-cyan-600">({server.alias})</span>
+                    )}
+                  </h3>
+                  <div className="flex items-center gap-3 mt-1">
+                    <span className="text-xs text-neutral-600">localhost:{server.port}</span>
+                    <span className="text-xs text-neutral-400">•</span>
+                    <span className="text-xs text-neutral-600">{server.threads} threads</span>
+                    <span className="text-xs text-neutral-400">•</span>
+                    <span className="text-xs text-neutral-600">
+                      {formatContextSize(server.ctxSize)} context
+                    </span>
+                    <span className="text-xs text-neutral-400">•</span>
+                    <span className="text-xs text-neutral-600">{server.gpuLayers} GPU layers</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                {renderStatusBadge(server)}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => navigate(`/servers/${server.id}/logs`)}
+                    disabled={actionLoading?.id === server.id}
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    title="Logs"
+                  >
+                    Logs
+                  </button>
+                  <button
+                    onClick={() => setConfigServer(server)}
+                    disabled={actionLoading?.id === server.id}
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    title="Config"
+                  >
+                    Config
+                  </button>
+                  {server.status === 'running' ? (
+                    <button
+                      onClick={() => handleStop(server.id)}
+                      disabled={actionLoading?.id === server.id}
+                      className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                      title="Stop"
+                    >
+                      Stop
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleStart(server.id)}
+                      disabled={actionLoading?.id === server.id}
+                      className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                      title="Start"
+                    >
+                      Start
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      )}
 
       {/* Empty State */}
       {filteredServers.length === 0 && servers.length > 0 && (

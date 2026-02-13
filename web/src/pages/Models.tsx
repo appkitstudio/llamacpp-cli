@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useModels, useDeleteModel, useDownloadJobs } from '../hooks/useApi';
-import { HardDrive, Server, Trash2, Clock, Loader2, Download } from 'lucide-react';
+import { HardDrive, Server, Trash2, Clock, Loader2, Download, LayoutGrid, List } from 'lucide-react';
 import { SearchModal } from '../components/SearchModal';
 import { DownloadProgress } from '../components/DownloadProgress';
 import { useQueryClient } from '@tanstack/react-query';
@@ -10,6 +10,7 @@ interface ModelsProps {
 }
 
 type ModelFilter = 'all' | 'active' | 'inactive';
+type ViewMode = 'grid' | 'list';
 
 export function Models({ searchQuery = '' }: ModelsProps) {
   const queryClient = useQueryClient();
@@ -20,6 +21,15 @@ export function Models({ searchQuery = '' }: ModelsProps) {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [filter, setFilter] = useState<ModelFilter>('all');
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem('llamacpp_models_view');
+    return (saved as ViewMode) || 'grid';
+  });
+
+  const handleViewChange = (mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem('llamacpp_models_view', mode);
+  };
 
   const hasActiveDownloads = (jobsData?.jobs || []).some(
     job => job.status === 'pending' || job.status === 'downloading'
@@ -118,38 +128,66 @@ export function Models({ searchQuery = '' }: ModelsProps) {
         </button>
       </div>
 
-      {/* Filter Buttons */}
-      <div className="flex items-center gap-2 mb-6">
-        <button
-          onClick={() => setFilter('all')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
-            filter === 'all'
-              ? 'bg-neutral-900 text-white border-neutral-900'
-              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
-          }`}
-        >
-          All
-        </button>
-        <button
-          onClick={() => setFilter('active')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
-            filter === 'active'
-              ? 'bg-neutral-900 text-white border-neutral-900'
-              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
-          }`}
-        >
-          Active
-        </button>
-        <button
-          onClick={() => setFilter('inactive')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
-            filter === 'inactive'
-              ? 'bg-neutral-900 text-white border-neutral-900'
-              : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
-          }`}
-        >
-          Inactive
-        </button>
+      {/* Filter Buttons and View Toggle */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setFilter('all')}
+            className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+              filter === 'all'
+                ? 'bg-neutral-900 text-white border-neutral-900'
+                : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+            }`}
+          >
+            All
+          </button>
+          <button
+            onClick={() => setFilter('active')}
+            className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+              filter === 'active'
+                ? 'bg-neutral-900 text-white border-neutral-900'
+                : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+            }`}
+          >
+            Active
+          </button>
+          <button
+            onClick={() => setFilter('inactive')}
+            className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all cursor-pointer ${
+              filter === 'inactive'
+                ? 'bg-neutral-900 text-white border-neutral-900'
+                : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-300'
+            }`}
+          >
+            Inactive
+          </button>
+        </div>
+
+        {/* View Toggle */}
+        <div className="flex items-center gap-1 p-1 bg-white border border-neutral-200 rounded-lg">
+          <button
+            onClick={() => handleViewChange('grid')}
+            className={`p-1.5 rounded transition-colors cursor-pointer ${
+              viewMode === 'grid'
+                ? 'bg-neutral-900 text-white'
+                : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+            }`}
+            title="Grid view"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => handleViewChange('list')}
+            className={`p-1.5 rounded transition-colors cursor-pointer ${
+              viewMode === 'list'
+                ? 'bg-neutral-900 text-white'
+                : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+            }`}
+            title="List view"
+          >
+            <List className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {filteredModels.length === 0 ? (
@@ -180,7 +218,7 @@ export function Models({ searchQuery = '' }: ModelsProps) {
             </>
           )}
         </div>
-      ) : (
+      ) : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredModels.map((model) => (
             <div
@@ -239,6 +277,65 @@ export function Models({ searchQuery = '' }: ModelsProps) {
                   </>
                 )}
               </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        /* List View */
+        <div className="bg-white border border-neutral-200 rounded-lg divide-y divide-neutral-200">
+          {filteredModels.map((model) => (
+            <div
+              key={model.filename}
+              className="group px-5 py-4 hover:bg-neutral-50 transition-colors"
+            >
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-4 flex-1 min-w-0">
+                  <HardDrive className="w-5 h-5 text-neutral-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-semibold text-neutral-900 truncate">
+                      {model.filename.replace('.gguf', '')}
+                    </h3>
+                    <div className="flex items-center gap-3 mt-1">
+                      <span className="text-xs text-neutral-600">{formatSize(model.size)}</span>
+                      <span className="text-xs text-neutral-400">•</span>
+                      <span className="text-xs text-neutral-600">
+                        {model.serversUsing} server{model.serversUsing !== 1 ? 's' : ''}
+                      </span>
+                      <span className="text-xs text-neutral-400">•</span>
+                      <span className="text-xs text-neutral-600">{formatDate(model.modified)}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    {model.serversUsing > 0 && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-green-200/50 bg-green-50 text-xs font-medium text-green-700">
+                        active
+                      </span>
+                    )}
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-600">
+                      gguf
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleDelete(model.filename, model.serversUsing)}
+                    disabled={actionLoading === model.filename}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:cursor-wait"
+                  >
+                    {actionLoading === model.filename ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Deleting
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
             </div>
           ))}
         </div>
