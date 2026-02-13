@@ -102,7 +102,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 max-h-[90vh] flex flex-col">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <div>
@@ -189,14 +189,54 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
             </label>
             <input
               type="number"
-              value={formData.ctxSize}
-              onChange={(e) => setFormData({ ...formData, ctxSize: parseInt(e.target.value) || 2048 })}
+              value={formData.ctxSize || ''}
+              onChange={(e) => setFormData({ ...formData, ctxSize: e.target.value === '' ? 0 : parseInt(e.target.value) })}
               min={512}
               max={2097152}
-              step={512}
               className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent"
             />
-            <p className="text-xs text-gray-500 mt-1">{formatContextSize(formData.ctxSize)}</p>
+            <div className="flex items-center justify-between mt-1">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, ctxSize: 16384 })}
+                  className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+                >
+                  16k
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, ctxSize: 32768 })}
+                  className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+                >
+                  32k
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, ctxSize: 65536 })}
+                  className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+                >
+                  64k
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, ctxSize: 131072 })}
+                  className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+                >
+                  128k
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, ctxSize: 262144 })}
+                  className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+                >
+                  256k
+                </button>
+              </div>
+              {formData.ctxSize > 0 && (
+                <span className="text-xs text-gray-500">{formatContextSize(formData.ctxSize)}</span>
+              )}
+            </div>
           </div>
 
           {/* GPU Layers */}
