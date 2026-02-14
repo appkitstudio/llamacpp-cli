@@ -2044,17 +2044,18 @@ export async function createMultiServerMonitorUI(
       const progressModal = showProgressModal("Starting server...");
 
       try {
-        // Recreate plist if needed
-        const plistExists = await fs
-          .access(selectedServer.plistPath)
-          .then(() => true)
-          .catch(() => false);
-        if (!plistExists) {
-          progressModal.setContent(
-            "\n  {cyan-fg}Recreating plist...{/cyan-fg}",
-          );
-          screen.render();
-          await launchctlManager.createPlist(selectedServer);
+        // Always regenerate plist to ensure latest configuration (including wrapper)
+        progressModal.setContent(
+          "\n  {cyan-fg}Regenerating plist...{/cyan-fg}",
+        );
+        screen.render();
+        await launchctlManager.createPlist(selectedServer);
+
+        // Unload service if loaded (to pick up new plist)
+        try {
+          await launchctlManager.unloadService(selectedServer.plistPath);
+        } catch (err) {
+          // May not be loaded, continue
         }
 
         // Load service

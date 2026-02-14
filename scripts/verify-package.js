@@ -13,6 +13,7 @@ const { execSync } = require('child_process');
 const REQUIRED_FILES = [
   'dist/cli.js',
   'bin/llamacpp',
+  'dist/launchers/llamacpp-server',
   'web/dist/index.html',
   'web/dist/assets',
 ];
@@ -35,6 +36,19 @@ for (const file of REQUIRED_FILES) {
   if (!exists) {
     hasErrors = true;
     console.error(`   ERROR: Required file missing: ${file}`);
+  }
+}
+
+// Check if wrapper script is executable
+const wrapperPath = path.join(__dirname, '..', 'dist', 'launchers', 'llamacpp-server');
+if (fs.existsSync(wrapperPath)) {
+  try {
+    fs.accessSync(wrapperPath, fs.constants.X_OK);
+    console.log('✅ dist/launchers/llamacpp-server is executable');
+  } catch {
+    hasErrors = true;
+    console.error('❌ dist/launchers/llamacpp-server is NOT executable');
+    console.error('   Run: chmod +x dist/launchers/llamacpp-server');
   }
 }
 

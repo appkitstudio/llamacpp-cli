@@ -13,15 +13,41 @@ export interface ServiceStatus {
 
 export class LaunchctlManager {
   /**
+   * Get the path to the wrapper script
+   * Handles both development (src/) and production (dist/) scenarios
+   */
+  private getWrapperPath(): string {
+    // Try relative to current module location (works for both dev and prod)
+    let wrapperPath = path.join(__dirname, '..', 'launchers', 'llamacpp-server');
+    if (require('fs').existsSync(wrapperPath)) {
+      return wrapperPath;
+    }
+
+    // Try from the CLI binary location (global install)
+    const binPath = process.argv[1];
+    wrapperPath = path.join(path.dirname(binPath), '..', 'launchers', 'llamacpp-server');
+    if (require('fs').existsSync(wrapperPath)) {
+      return wrapperPath;
+    }
+
+    throw new Error('Could not locate llamacpp-server wrapper script');
+  }
+
+  /**
    * Generate plist XML content for a server
    */
   generatePlist(config: ServerConfig): string {
-    // Get path to llamacpp CLI (this binary)
-    const llamacppBin = process.argv[1]; // Path to the main CLI script
+    // Get path to wrapper script
+    const wrapperPath = this.getWrapperPath();
+
+    // Get node executable path (for wrapper to use)
+    const nodePath = process.execPath;
 
     // Build arguments for llamacpp internal server-wrapper command
+    // First arg to wrapper is node path, then comes our CLI arguments
     const wrapperArgs = [
-      llamacppBin,
+      wrapperPath,
+      nodePath,      // Wrapper needs this to find node
       'internal',
       'server-wrapper',
       '--http-log-path', config.httpLogPath,
@@ -55,11 +81,8 @@ export class LaunchctlManager {
       wrapperArgs.push(...config.customFlags);
     }
 
-    // Get Node.js binary path for execution
-    const nodePath = process.execPath;
-
-    // Build ProgramArguments array for plist
-    const programArguments = [nodePath, ...wrapperArgs].map(arg => `      <string>${arg}</string>`).join('\n');
+    // Build ProgramArguments array for plist (wrapper handles node execution)
+    const programArguments = wrapperArgs.map(arg => `      <string>${arg}</string>`).join('\n');
 
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -93,6 +116,9 @@ ${programArguments}
 
     <key>WorkingDirectory</key>
     <string>/tmp</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
 
     <key>ThrottleInterval</key>
     <integer>10</integer>

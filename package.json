@@ -10,12 +10,14 @@
     "dist/",
     "bin/",
     "web/dist/",
+    "src/launchers/",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "build": "tsc",
+    "build": "tsc && npm run postbuild",
+    "postbuild": "cp -r src/launchers dist/ && chmod +x dist/launchers/llamacpp-server",
     "start": "node dist/cli.js",
     "clean": "rm -rf dist",
     "verify-package": "node scripts/verify-package.js",

@@ -1,0 +1,8 @@
+#!/bin/bash
+# llamacpp-cli launcher wrapper
+# This script invokes Node.js but appears as "llamacpp-server" in process lists and macOS notifications
+# First argument is the full path to node executable
+NODE_PATH="$1"
+shift
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$NODE_PATH" "$SCRIPT_DIR/../cli.js" "$@"
