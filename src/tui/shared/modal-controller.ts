@@ -1,21 +1,26 @@
 import * as blessed from 'blessed';
 import { createOverlay } from './overlay-utils.js';
+import { KeyboardManager } from '../../lib/keyboard-manager.js';
 
 /**
- * Modal controller that properly isolates keyboard handling
+ * Modal controller that properly isolates keyboard handling using KeyboardManager.
  *
  * Key features:
- * - Completely disables screen keyboard handling while modal is open
- * - Prevents event bubbling from modal to screen
+ * - Uses KeyboardManager context stack to prevent event propagation
+ * - Pushes blocking context when modal opens
+ * - Pops context when modal closes
+ * - Prevents screen handlers from executing while modal is active
  * - Manages modal lifecycle with proper cleanup
  * - Provides consistent API for all modal types
  */
 export class ModalController {
   private screen: blessed.Widgets.Screen;
   private modalStack: ModalContext[] = [];
+  private keyboardManager: KeyboardManager;
 
-  constructor(screen: blessed.Widgets.Screen) {
+  constructor(screen: blessed.Widgets.Screen, keyboardManager: KeyboardManager) {
     this.screen = screen;
+    this.keyboardManager = keyboardManager;
   }
 
   /**
@@ -61,20 +66,13 @@ export class ModalController {
 
       modal.setContent(`\n  {red-fg}❌ ${message}{/red-fg}\n\n  {gray-fg}[Enter] Close{/gray-fg}`);
 
-      const context: ModalContext = {
-        element: modal,
-        handlers: new Map(),
-        overlay: createOverlay(this.screen),
-      };
-
-      this.modalStack.push(context);
-
       const closeModal = () => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
         modal.destroy();
         context.overlay.destroy();
         this.modalStack.pop();
+        this.keyboardManager.popContext(); // Pop keyboard context AFTER modal is destroyed
         this.screen.render();
 
         // Re-register handlers synchronously to prevent keyboard input loss
@@ -86,8 +84,21 @@ export class ModalController {
         resolve();
       };
 
-      modal.key(['enter', 'escape'], closeModal);
+      // Push keyboard context BEFORE showing modal (blocking=true prevents screen handlers)
+      this.keyboardManager.pushContext('error-modal', {
+        'enter': closeModal,
+        'escape': closeModal,
+      }, true);
 
+      const context: ModalContext = {
+        element: modal,
+        handlers: new Map(),
+        overlay: createOverlay(this.screen),
+      };
+
+      this.modalStack.push(context);
+
+      // Note: No need for modal.key() - KeyboardManager handles all keys
       this.screen.append(context.overlay);
       this.screen.append(modal);
       modal.focus();
@@ -110,20 +121,13 @@ export class ModalController {
 
       modal.setContent(`\n  {green-fg}✓ ${message}{/green-fg}\n\n  {gray-fg}[Enter] Close{/gray-fg}`);
 
-      const context: ModalContext = {
-        element: modal,
-        handlers: new Map(),
-        overlay: createOverlay(this.screen),
-      };
-
-      this.modalStack.push(context);
-
       const closeModal = () => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
         modal.destroy();
         context.overlay.destroy();
         this.modalStack.pop();
+        this.keyboardManager.popContext();
         this.screen.render();
 
         // Re-register handlers synchronously to prevent keyboard input loss
@@ -135,7 +139,19 @@ export class ModalController {
         resolve();
       };
 
-      modal.key(['enter', 'escape'], closeModal);
+      // Push keyboard context BEFORE showing modal
+      this.keyboardManager.pushContext('success-modal', {
+        'enter': closeModal,
+        'escape': closeModal,
+      }, true);
+
+      const context: ModalContext = {
+        element: modal,
+        handlers: new Map(),
+        overlay: createOverlay(this.screen),
+      };
+
+      this.modalStack.push(context);
 
       this.screen.append(context.overlay);
       this.screen.append(modal);
@@ -177,20 +193,13 @@ export class ModalController {
         this.screen.render();
       };
 
-      const context: ModalContext = {
-        element: modal,
-        handlers: new Map(),
-        overlay: createOverlay(this.screen),
-      };
-
-      this.modalStack.push(context);
-
       const closeWithResult = (result: 'save' | 'discard' | 'continue') => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
         modal.destroy();
         context.overlay.destroy();
         this.modalStack.pop();
+        this.keyboardManager.popContext();
         this.screen.render();
 
         // Re-register handlers synchronously to prevent keyboard input loss
@@ -202,20 +211,41 @@ export class ModalController {
         resolve(result);
       };
 
-      modal.key(['up', 'k'], () => {
-        selectedOption = Math.max(0, selectedOption - 1);
-        renderDialog();
-      });
+      // Push keyboard context with all handlers
+      this.keyboardManager.pushContext('unsaved-dialog', {
+        'up': () => {
+          selectedOption = Math.max(0, selectedOption - 1);
+          renderDialog();
+        },
+        'k': () => {
+          selectedOption = Math.max(0, selectedOption - 1);
+          renderDialog();
+        },
+        'down': () => {
+          selectedOption = Math.min(options.length - 1, selectedOption + 1);
+          renderDialog();
+        },
+        'j': () => {
+          selectedOption = Math.min(options.length - 1, selectedOption + 1);
+          renderDialog();
+        },
+        'enter': () => closeWithResult(options[selectedOption].key),
+        's': () => closeWithResult('save'),
+        'S': () => closeWithResult('save'),
+        'd': () => closeWithResult('discard'),
+        'D': () => closeWithResult('discard'),
+        'c': () => closeWithResult('continue'),
+        'C': () => closeWithResult('continue'),
+        'escape': () => closeWithResult('continue'),
+      }, true);
 
-      modal.key(['down', 'j'], () => {
-        selectedOption = Math.min(options.length - 1, selectedOption + 1);
-        renderDialog();
-      });
+      const context: ModalContext = {
+        element: modal,
+        handlers: new Map(),
+        overlay: createOverlay(this.screen),
+      };
 
-      modal.key(['enter'], () => closeWithResult(options[selectedOption].key));
-      modal.key(['s', 'S'], () => closeWithResult('save'));
-      modal.key(['d', 'D'], () => closeWithResult('discard'));
-      modal.key(['c', 'C', 'escape'], () => closeWithResult('continue'));
+      this.modalStack.push(context);
 
       this.screen.append(context.overlay);
       this.screen.append(modal);
@@ -256,20 +286,13 @@ export class ModalController {
         this.screen.render();
       };
 
-      const context: ModalContext = {
-        element: modal,
-        handlers: new Map(),
-        overlay: createOverlay(this.screen),
-      };
-
-      this.modalStack.push(context);
-
       const closeWithResult = (result: boolean) => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
         modal.destroy();
         context.overlay.destroy();
         this.modalStack.pop();
+        this.keyboardManager.popContext();
         this.screen.render();
 
         // Re-register handlers synchronously to prevent keyboard input loss
@@ -281,19 +304,39 @@ export class ModalController {
         resolve(result);
       };
 
-      modal.key(['up', 'k'], () => {
-        selectedOption = Math.max(0, selectedOption - 1);
-        renderDialog();
-      });
+      // Push keyboard context with all handlers
+      this.keyboardManager.pushContext('restart-dialog', {
+        'up': () => {
+          selectedOption = Math.max(0, selectedOption - 1);
+          renderDialog();
+        },
+        'k': () => {
+          selectedOption = Math.max(0, selectedOption - 1);
+          renderDialog();
+        },
+        'down': () => {
+          selectedOption = Math.min(options.length - 1, selectedOption + 1);
+          renderDialog();
+        },
+        'j': () => {
+          selectedOption = Math.min(options.length - 1, selectedOption + 1);
+          renderDialog();
+        },
+        'enter': () => closeWithResult(options[selectedOption].key),
+        'y': () => closeWithResult(true),
+        'Y': () => closeWithResult(true),
+        'n': () => closeWithResult(false),
+        'N': () => closeWithResult(false),
+        'escape': () => closeWithResult(false),
+      }, true);
 
-      modal.key(['down', 'j'], () => {
-        selectedOption = Math.min(options.length - 1, selectedOption + 1);
-        renderDialog();
-      });
+      const context: ModalContext = {
+        element: modal,
+        handlers: new Map(),
+        overlay: createOverlay(this.screen),
+      };
 
-      modal.key(['enter'], () => closeWithResult(options[selectedOption].key));
-      modal.key(['y', 'Y'], () => closeWithResult(true));
-      modal.key(['n', 'N', 'escape'], () => closeWithResult(false));
+      this.modalStack.push(context);
 
       this.screen.append(context.overlay);
       this.screen.append(modal);
@@ -349,20 +392,13 @@ export class ModalController {
         tags: true,
       });
 
-      const context: ModalContext = {
-        element: modal,
-        handlers: new Map(),
-        overlay: createOverlay(this.screen),
-      };
-
-      this.modalStack.push(context);
-
       const closeWithResult = (result: number | null) => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
         modal.destroy();
         context.overlay.destroy();
         this.modalStack.pop();
+        this.keyboardManager.popContext();
         this.screen.render();
 
         // Re-register handlers synchronously to prevent keyboard input loss
@@ -373,6 +409,18 @@ export class ModalController {
         // Resolve after handlers are registered
         resolve(result);
       };
+
+      // Push blocking context to prevent screen handlers from firing
+      // Note: textbox handles its own keys internally, but this prevents ESC from reaching screen
+      this.keyboardManager.pushContext('number-input-modal', {}, true);
+
+      const context: ModalContext = {
+        element: modal,
+        handlers: new Map(),
+        overlay: createOverlay(this.screen),
+      };
+
+      this.modalStack.push(context);
 
       inputBox.setValue(String(currentValue));
       this.screen.append(context.overlay);
@@ -451,20 +499,13 @@ export class ModalController {
         tags: true,
       });
 
-      const context: ModalContext = {
-        element: modal,
-        handlers: new Map(),
-        overlay: createOverlay(this.screen),
-      };
-
-      this.modalStack.push(context);
-
       const closeWithResult = (result: string | null) => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
         modal.destroy();
         context.overlay.destroy();
         this.modalStack.pop();
+        this.keyboardManager.popContext();
         this.screen.render();
 
         // Re-register handlers synchronously to prevent keyboard input loss
@@ -475,6 +516,17 @@ export class ModalController {
         // Resolve after handlers are registered
         resolve(result);
       };
+
+      // Push blocking context to prevent screen handlers from firing
+      this.keyboardManager.pushContext('text-input-modal', {}, true);
+
+      const context: ModalContext = {
+        element: modal,
+        handlers: new Map(),
+        overlay: createOverlay(this.screen),
+      };
+
+      this.modalStack.push(context);
 
       inputBox.setValue(currentValue);
       this.screen.append(context.overlay);
@@ -549,20 +601,13 @@ export class ModalController {
         this.screen.render();
       };
 
-      const context: ModalContext = {
-        element: modal,
-        handlers: new Map(),
-        overlay: createOverlay(this.screen),
-      };
-
-      this.modalStack.push(context);
-
       const closeWithResult = (result: string | boolean | null) => {
         this.screen.remove(modal);
         this.screen.remove(context.overlay);
         modal.destroy();
         context.overlay.destroy();
         this.modalStack.pop();
+        this.keyboardManager.popContext();
         this.screen.render();
 
         // Re-register handlers synchronously to prevent keyboard input loss
@@ -574,27 +619,43 @@ export class ModalController {
         resolve(result);
       };
 
-      modal.key(['up', 'k'], () => {
-        selectedOption = Math.max(0, selectedOption - 1);
-        renderOptions();
-      });
+      // Push keyboard context with all handlers
+      this.keyboardManager.pushContext('select-modal', {
+        'up': () => {
+          selectedOption = Math.max(0, selectedOption - 1);
+          renderOptions();
+        },
+        'k': () => {
+          selectedOption = Math.max(0, selectedOption - 1);
+          renderOptions();
+        },
+        'down': () => {
+          selectedOption = Math.min(options.length - 1, selectedOption + 1);
+          renderOptions();
+        },
+        'j': () => {
+          selectedOption = Math.min(options.length - 1, selectedOption + 1);
+          renderOptions();
+        },
+        'enter': () => {
+          if (isToggle) {
+            closeWithResult(selectedOption === 1);
+          } else {
+            closeWithResult(options[selectedOption]);
+          }
+        },
+        'escape': () => {
+          closeWithResult(null);
+        },
+      }, true);
 
-      modal.key(['down', 'j'], () => {
-        selectedOption = Math.min(options.length - 1, selectedOption + 1);
-        renderOptions();
-      });
+      const context: ModalContext = {
+        element: modal,
+        handlers: new Map(),
+        overlay: createOverlay(this.screen),
+      };
 
-      modal.key(['enter'], () => {
-        if (isToggle) {
-          closeWithResult(selectedOption === 1);
-        } else {
-          closeWithResult(options[selectedOption]);
-        }
-      });
-
-      modal.key(['escape'], () => {
-        closeWithResult(null);
-      });
+      this.modalStack.push(context);
 
       this.screen.append(context.overlay);
       this.screen.append(modal);

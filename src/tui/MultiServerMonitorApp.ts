@@ -29,6 +29,7 @@ import { formatBytes, formatContextSize } from "../utils/format-utils.js";
 import { isPortInUse } from "../utils/process-utils.js";
 import { ModalController } from "./shared/modal-controller.js";
 import { createOverlay } from "./shared/overlay-utils.js";
+import { KeyboardManager } from "../lib/keyboard-manager.js";
 import { getFileSize, formatFileSize } from "../utils/log-utils.js";
 import { LogParser } from "../utils/log-parser.js";
 
@@ -70,8 +71,9 @@ export async function createMultiServerMonitorUI(
   let logsLastUpdated: Date | null = null;
   let logsRefreshInterval: NodeJS.Timeout | null = null;
 
-  // Modal controller for centralized keyboard handling
-  const modalController = new ModalController(screen);
+  // Keyboard manager for centralized keyboard event handling
+  const keyboardManager = new KeyboardManager(screen);
+  const modalController = new ModalController(screen, keyboardManager);
 
   // Spinner animation
   const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -708,9 +710,7 @@ export async function createMultiServerMonitorUI(
 
   // Render current view
   async function render(): Promise<void> {
-    // Re-register handlers based on current view (for context-sensitive keys)
-    unregisterHandlers();
-    registerHandlers();
+    // No more handler registration in render() - KeyboardManager handles this!
 
     let content = "";
     if (viewMode === "list") {
@@ -936,7 +936,10 @@ export async function createMultiServerMonitorUI(
     // Pause the monitor
     if (intervalId) clearInterval(intervalId);
     if (spinnerIntervalId) clearInterval(spinnerIntervalId);
-    unregisterHandlers();
+
+    // Push empty blocking context to prevent main handlers from firing
+    // (This modal uses blessed's modal.key() directly, not KeyboardManager)
+    keyboardManager.pushContext('remove-server-dialog', {}, true);
 
     // Check if other servers use the same model
     const allServers = await stateManager.getAllServers();
@@ -1021,7 +1024,7 @@ export async function createMultiServerMonitorUI(
       modal.key(["escape"], () => {
         screen.remove(modal);
         screen.remove(overlay);
-        registerHandlers();
+        keyboardManager.popContext(); // Pop the blocking context
         startPolling();
         resolve();
       });
@@ -1093,7 +1096,8 @@ export async function createMultiServerMonitorUI(
           );
           selectedServerIndex = selectedRowIndex;
 
-          registerHandlers();
+          keyboardManager.popContext(); // Pop the blocking context
+          updateKeyboardContext(); // Update for list view
           startPolling();
           resolve();
         } catch (err) {
@@ -1101,7 +1105,7 @@ export async function createMultiServerMonitorUI(
           await showErrorModal(
             err instanceof Error ? err.message : "Unknown error",
           );
-          registerHandlers();
+          keyboardManager.popContext(); // Pop the blocking context
           startPolling();
           resolve();
         }
@@ -1114,7 +1118,9 @@ export async function createMultiServerMonitorUI(
     // Pause the monitor
     if (intervalId) clearInterval(intervalId);
     if (spinnerIntervalId) clearInterval(spinnerIntervalId);
-    unregisterHandlers();
+
+    // Push empty blocking context for create flow
+    keyboardManager.pushContext('create-server-flow', {}, true);
 
     // Step 1: Model selection
     const models = await modelScanner.scanModels();
@@ -1126,7 +1132,7 @@ export async function createMultiServerMonitorUI(
       const content = renderListView(lastSystemMetrics);
       contentBox.setContent(content);
       screen.render();
-      registerHandlers();
+      keyboardManager.popContext(); // Pop the blocking context
       startPolling();
       return;
     }
@@ -1237,7 +1243,7 @@ export async function createMultiServerMonitorUI(
       const content = renderListView(lastSystemMetrics);
       contentBox.setContent(content);
       screen.render();
-      registerHandlers();
+      keyboardManager.popContext(); // Pop the blocking context
       startPolling();
       return;
     }
@@ -1255,7 +1261,7 @@ export async function createMultiServerMonitorUI(
       const content = renderListView(lastSystemMetrics);
       contentBox.setContent(content);
       screen.render();
-      registerHandlers();
+      keyboardManager.popContext(); // Pop the blocking context
       startPolling();
       return;
     }
@@ -1562,7 +1568,7 @@ export async function createMultiServerMonitorUI(
       const content = renderListView(lastSystemMetrics);
       contentBox.setContent(content);
       screen.render();
-      registerHandlers();
+      keyboardManager.popContext(); // Pop the blocking context
       startPolling();
       return;
     }
@@ -1706,7 +1712,7 @@ export async function createMultiServerMonitorUI(
       selectedRowIndex = servers.length - 1;
       selectedServerIndex = selectedRowIndex;
 
-      registerHandlers();
+      keyboardManager.popContext(); // Pop the blocking context
       startPolling();
     } catch (err) {
       modalController.closeProgress(progressModal);
@@ -1717,12 +1723,73 @@ export async function createMultiServerMonitorUI(
       const content = renderListView(lastSystemMetrics);
       contentBox.setContent(content);
       screen.render();
-      registerHandlers();
+      keyboardManager.popContext(); // Pop the blocking context
       startPolling();
     }
   }
 
   // Store key handler references for cleanup when switching views
+  /**
+   * Helper function to update keyboard context based on current view state.
+   * Call this whenever viewMode or detailSubView changes.
+   */
+  function updateKeyboardContext() {
+    keyboardManager.updateCurrentContext(getHandlersForCurrentState());
+  }
+
+  /**
+   * Get keyboard handlers for the current view state.
+   * This function returns the appropriate handlers based on viewMode and detailSubView.
+   */
+  function getHandlersForCurrentState() {
+    const handlers: { [key: string]: () => void } = {};
+
+    // Always available keys
+    handlers['escape'] = keyHandlers.escape;
+    handlers['q'] = keyHandlers.quit;
+    handlers['Q'] = keyHandlers.quit;
+    handlers['C-c'] = keyHandlers.quit;
+
+    if (viewMode === 'list') {
+      // List view keys
+      handlers['up'] = keyHandlers.up;
+      handlers['k'] = keyHandlers.up;
+      handlers['down'] = keyHandlers.down;
+      handlers['j'] = keyHandlers.down;
+      handlers['enter'] = keyHandlers.enter;
+      handlers['m'] = keyHandlers.models;
+      handlers['M'] = keyHandlers.models;
+      handlers['r'] = keyHandlers.router;
+      handlers['R'] = keyHandlers.router;
+      handlers['h'] = keyHandlers.history;
+      handlers['H'] = keyHandlers.history;
+      handlers['n'] = keyHandlers.create;
+      handlers['N'] = keyHandlers.create;
+    } else if (viewMode === 'detail') {
+      if (detailSubView === 'status') {
+        // Detail status view keys
+        handlers['h'] = keyHandlers.history;
+        handlers['H'] = keyHandlers.history;
+        handlers['c'] = keyHandlers.config;
+        handlers['C'] = keyHandlers.config;
+        handlers['r'] = keyHandlers.remove;
+        handlers['R'] = keyHandlers.remove;
+        handlers['s'] = keyHandlers.startStop;
+        handlers['S'] = keyHandlers.startStop;
+        handlers['l'] = keyHandlers.logs;
+        handlers['L'] = keyHandlers.logs;
+      } else if (detailSubView === 'logs') {
+        // Logs view keys
+        handlers['r'] = keyHandlers.refreshLogs;
+        handlers['R'] = keyHandlers.refreshLogs;
+        handlers['f'] = keyHandlers.toggleLogsRefresh;
+        handlers['F'] = keyHandlers.toggleLogsRefresh;
+      }
+    }
+
+    return handlers;
+  }
+
   const keyHandlers = {
     up: () => {
       if (viewMode === "list") {
@@ -1747,41 +1814,37 @@ export async function createMultiServerMonitorUI(
         showLoading();
         selectedServerIndex = selectedRowIndex;
         viewMode = "detail";
+        updateKeyboardContext(); // Update handlers for new view
         fetchData();
       }
     },
     escape: () => {
-      // Don't handle ESC if modal is open or we're in historical view
-      if (modalController.isModalOpen() || inHistoricalView) return;
+      // Don't handle ESC if we're in historical view
+      // Note: No need to check modalController.isModalOpen() - KeyboardManager handles this!
+      if (inHistoricalView) return;
 
       if (viewMode === "detail" && detailSubView === "logs") {
         // Return from logs to detail status view
         detailSubView = "status";
         stopLogsAutoRefresh();
+        updateKeyboardContext(); // Update handlers for new sub-view
         render();
       } else if (viewMode === "detail") {
         showLoading();
         viewMode = "list";
         detailSubView = "status"; // Reset to status when going back to list
         cameFromDirectJump = false; // Clear direct jump flag when returning to list
+        updateKeyboardContext(); // Update handlers for new view
         fetchData();
-      } else if (viewMode === "list") {
-        // ESC in list view - exit
-        showLoading();
-        if (intervalId) clearInterval(intervalId);
-        if (spinnerIntervalId) clearInterval(spinnerIntervalId);
-        stopLogsAutoRefresh();
-        setTimeout(() => {
-          screen.destroy();
-          process.exit(0);
-        }, 100);
       }
+      // ESC in list view does nothing - use 'q' or Ctrl-C to quit
     },
     logs: () => {
       // Only available from detail view and not in historical view
       if (viewMode !== "detail" || inHistoricalView) return;
       if (detailSubView === "status") {
         detailSubView = "logs";
+        updateKeyboardContext(); // Update handlers for new sub-view
         render();
       }
     },
@@ -1924,7 +1987,6 @@ export async function createMultiServerMonitorUI(
         // Stop the server
         if (intervalId) clearInterval(intervalId);
         if (spinnerIntervalId) clearInterval(spinnerIntervalId);
-        unregisterHandlers();
 
         const progressModal = showProgressModal("Stopping server...");
 
@@ -1962,14 +2024,12 @@ export async function createMultiServerMonitorUI(
           await new Promise((resolve) => setTimeout(resolve, 800));
 
           modalController.closeProgress(progressModal);
-          registerHandlers();
           startPolling();
         } catch (err) {
           modalController.closeProgress(progressModal);
           await showErrorModal(
             err instanceof Error ? err.message : "Unknown error",
           );
-          registerHandlers();
           startPolling();
         }
         return;
@@ -1980,7 +2040,6 @@ export async function createMultiServerMonitorUI(
       // Pause the monitor
       if (intervalId) clearInterval(intervalId);
       if (spinnerIntervalId) clearInterval(spinnerIntervalId);
-      unregisterHandlers();
 
       const progressModal = showProgressModal("Starting server...");
 
@@ -2069,14 +2128,12 @@ export async function createMultiServerMonitorUI(
         await new Promise((resolve) => setTimeout(resolve, 800));
 
         modalController.closeProgress(progressModal);
-        registerHandlers();
         startPolling();
       } catch (err) {
         modalController.closeProgress(progressModal);
         await showErrorModal(
           err instanceof Error ? err.message : "Unknown error",
         );
-        registerHandlers();
         startPolling();
       }
     },
@@ -2099,74 +2156,14 @@ export async function createMultiServerMonitorUI(
     },
   };
 
-  // Unregister all keyboard handlers
-  function unregisterHandlers() {
-    screen.unkey("up", keyHandlers.up);
-    screen.unkey("k", keyHandlers.up);
-    screen.unkey("down", keyHandlers.down);
-    screen.unkey("j", keyHandlers.down);
-    screen.unkey("enter", keyHandlers.enter);
-    screen.unkey("escape", keyHandlers.escape);
-    screen.unkey("m", keyHandlers.models);
-    screen.unkey("M", keyHandlers.models);
-    screen.unkey("r", keyHandlers.router);
-    screen.unkey("R", keyHandlers.router);
-    screen.unkey("h", keyHandlers.history);
-    screen.unkey("H", keyHandlers.history);
-    screen.unkey("c", keyHandlers.config);
-    screen.unkey("C", keyHandlers.config);
-    screen.unkey("r", keyHandlers.remove);
-    screen.unkey("R", keyHandlers.remove);
-    screen.unkey("s", keyHandlers.startStop);
-    screen.unkey("S", keyHandlers.startStop);
-    screen.unkey("n", keyHandlers.create);
-    screen.unkey("N", keyHandlers.create);
-    screen.unkey("l", keyHandlers.logs);
-    screen.unkey("L", keyHandlers.logs);
-    screen.unkey("r", keyHandlers.refreshLogs);
-    screen.unkey("R", keyHandlers.refreshLogs);
-    screen.unkey("f", keyHandlers.toggleLogsRefresh);
-    screen.unkey("F", keyHandlers.toggleLogsRefresh);
-    screen.unkey("q", keyHandlers.quit);
-    screen.unkey("Q", keyHandlers.quit);
-    screen.unkey("C-c", keyHandlers.quit);
-  }
-
-  // Register keyboard handlers (context-sensitive)
-  function registerHandlers() {
-    // Always available
-    screen.key(["escape"], keyHandlers.escape);
-    screen.key(["q", "Q", "C-c"], keyHandlers.quit);
-
-    if (viewMode === "list") {
-      // List view keys
-      screen.key(["up", "k"], keyHandlers.up);
-      screen.key(["down", "j"], keyHandlers.down);
-      screen.key(["enter"], keyHandlers.enter);
-      screen.key(["m", "M"], keyHandlers.models);
-      screen.key(["r", "R"], keyHandlers.router);
-      screen.key(["h", "H"], keyHandlers.history);
-      screen.key(["n", "N"], keyHandlers.create);
-    } else if (viewMode === "detail") {
-      if (detailSubView === "status") {
-        // Detail status view keys
-        screen.key(["h", "H"], keyHandlers.history);
-        screen.key(["c", "C"], keyHandlers.config);
-        screen.key(["r", "R"], keyHandlers.remove);
-        screen.key(["s", "S"], keyHandlers.startStop);
-        screen.key(["l", "L"], keyHandlers.logs);
-      } else if (detailSubView === "logs") {
-        // Logs view keys
-        screen.key(["r", "R"], keyHandlers.refreshLogs);
-        screen.key(["f", "F"], keyHandlers.toggleLogsRefresh);
-      }
-    }
-  }
+  // NOTE: Old unregisterHandlers() and registerHandlers() functions removed.
+  // Keyboard handling now managed by KeyboardManager with context stack.
+  // See getHandlersForCurrentState() and updateKeyboardContext() above.
 
   // Controls object for pause/resume from other views
   const controls: MonitorUIControls = {
     pause: () => {
-      unregisterHandlers();
+      keyboardManager.popContext(); // Pop our context when pausing
       if (intervalId) clearInterval(intervalId);
       if (spinnerIntervalId) clearInterval(spinnerIntervalId);
       stopLogsAutoRefresh();
@@ -2176,7 +2173,7 @@ export async function createMultiServerMonitorUI(
       screen.append(contentBox);
       // Reset to status view when resuming
       detailSubView = "status";
-      registerHandlers();
+      keyboardManager.pushContext('multi-server-monitor', getHandlersForCurrentState(), false);
       // Re-render with last known data (instant, no loading)
       let content = "";
       if (viewMode === "list") {
@@ -2192,8 +2189,8 @@ export async function createMultiServerMonitorUI(
     getServers: () => servers,
   };
 
-  // Initial registration
-  registerHandlers();
+  // Initial keyboard context setup (non-blocking so other components can add contexts on top)
+  keyboardManager.pushContext('multi-server-monitor', getHandlersForCurrentState(), false);
 
   // Initial display - skip "Connecting" message when returning from another view
   if (!skipConnectingMessage) {
@@ -2207,6 +2204,7 @@ export async function createMultiServerMonitorUI(
   screen.on("destroy", () => {
     if (intervalId) clearInterval(intervalId);
     stopLogsAutoRefresh();
+    keyboardManager.clearAll(); // Clear all keyboard contexts
     // Note: macmon child processes will automatically die when parent exits
     // since they're spawned with detached: false
   });

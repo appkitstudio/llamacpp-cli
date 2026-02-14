@@ -9,6 +9,7 @@ import * as fs from 'fs/promises';
 import { createSearchUI } from './SearchApp.js';
 import { ModalController } from './shared/modal-controller.js';
 import { createOverlay } from './shared/overlay-utils.js';
+import { KeyboardManager } from '../lib/keyboard-manager.js';
 
 /**
  * Models management TUI
@@ -23,8 +24,9 @@ export async function createModelsUI(
   let selectedIndex = 0;
   let isLoading = false;
 
-  // Modal controller for centralized keyboard handling
-  const modalController = new ModalController(screen);
+  // Keyboard manager and modal controller for centralized keyboard handling
+  const keyboardManager = new KeyboardManager(screen);
+  const modalController = new ModalController(screen, keyboardManager);
 
   // Create content box
   const contentBox = blessed.box({

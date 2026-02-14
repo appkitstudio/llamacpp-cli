@@ -320,16 +320,16 @@ Press `H` from any view to see historical time-series charts.
 - `N` - Create new server
 - `M` - Switch to Models Management
 - `H` - View historical metrics (all servers)
-- `ESC` - Exit TUI
-- `Q` - Quit immediately
+- `Q` / `Ctrl-C` - Quit TUI
 
 **Detail View (Single-Server):**
 - `S` - Start/Stop server (toggles based on status)
 - `C` - Open configuration screen
 - `R` - Remove server (with confirmation)
 - `H` - View historical metrics (this server)
+- `L` - View server logs
 - `ESC` - Back to list view
-- `Q` - Quit immediately
+- `Q` / `Ctrl-C` - Quit TUI
 
 **Models View:**
 - `↑/↓` or `k/j` - Navigate model list

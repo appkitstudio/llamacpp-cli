@@ -5,6 +5,7 @@ import { stateManager } from '../lib/state-manager.js';
 import { formatBytes } from '../utils/format-utils.js';
 import { ModalController } from './shared/modal-controller.js';
 import { createOverlay } from './shared/overlay-utils.js';
+import { KeyboardManager } from '../lib/keyboard-manager.js';
 
 interface SearchState {
   query: string;
@@ -37,8 +38,9 @@ export async function createSearchUI(
     error: null,
   };
 
-  // Modal controller for centralized keyboard handling
-  const modalController = new ModalController(screen);
+  // Keyboard manager and modal controller for centralized keyboard handling
+  const keyboardManager = new KeyboardManager(screen);
+  const modalController = new ModalController(screen, keyboardManager);
 
   // Create content box for results
   const contentBox = blessed.box({

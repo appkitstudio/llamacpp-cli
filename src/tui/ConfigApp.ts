@@ -10,6 +10,7 @@ import { ModelInfo } from '../types/model-info.js';
 import { getLogsDir, getLaunchAgentsDir } from '../utils/file-utils.js';
 import { autoRotateIfNeeded } from '../utils/log-utils.js';
 import { ModalController } from './shared/modal-controller.js';
+import { KeyboardManager } from '../lib/keyboard-manager.js';
 
 interface ConfigField {
   key: string;
@@ -144,9 +145,9 @@ export async function createConfigUI(
     hasChanges: false,
   };
 
-  // Modal state flag to prevent screen handlers from executing when modals are open
-  // Modal controller for centralized keyboard handling
-  const modalController = new ModalController(screen);
+  // Keyboard manager and modal controller for centralized keyboard handling
+  const keyboardManager = new KeyboardManager(screen);
+  const modalController = new ModalController(screen, keyboardManager);
 
   // Create content box
   const contentBox = blessed.box({

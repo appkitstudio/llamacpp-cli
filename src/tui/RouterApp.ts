@@ -4,6 +4,7 @@ import { routerManager } from '../lib/router-manager.js';
 import { fileExists, getLogsDir } from '../utils/file-utils.js';
 import { getFileSize, formatFileSize } from '../utils/log-utils.js';
 import { ModalController } from './shared/modal-controller.js';
+import { KeyboardManager } from '../lib/keyboard-manager.js';
 
 type RouterView = 'status' | 'config' | 'logs';
 
@@ -57,8 +58,9 @@ export async function createRouterUI(
     logsRefreshInterval: null,
   };
 
-  // Modal controller for centralized keyboard handling
-  const modalController = new ModalController(screen);
+  // Keyboard manager and modal controller for centralized keyboard handling
+  const keyboardManager = new KeyboardManager(screen);
+  const modalController = new ModalController(screen, keyboardManager);
 
   // Initialize fields from config
   if (initialConfig) {
