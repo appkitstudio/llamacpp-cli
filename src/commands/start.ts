@@ -45,24 +45,28 @@ export async function startCommand(identifier: string): Promise<void> {
     console.log(chalk.yellow(`⚠️  Failed to rotate logs: ${(error as Error).message}`));
   }
 
-  // 4. Ensure plist exists (recreate if missing)
-  try {
+  // 4. Check if plist needs updating (only regenerate if old format)
+  const needsUpdate = await launchctlManager.needsPlistUpdate(server.plistPath);
+
+  if (needsUpdate) {
+    console.log(chalk.dim('Updating service configuration...'));
+
+    // Recreate plist with new wrapper format
     await launchctlManager.createPlist(server);
-  } catch (error) {
-    // May already exist, that's okay
+
+    // Unload old service to pick up new plist
+    try {
+      await launchctlManager.unloadService(server.plistPath);
+    } catch (error) {
+      // May not be loaded, that's okay
+    }
   }
 
-  // 5. Unload and reload service to ensure latest plist is used
-  try {
-    await launchctlManager.unloadService(server.plistPath);
-  } catch (error) {
-    // May not be loaded, that's okay
-  }
-
+  // 5. Load service (if not already loaded)
   try {
     await launchctlManager.loadService(server.plistPath);
   } catch (error) {
-    throw new Error(`Failed to load service: ${(error as Error).message}`);
+    // May already be loaded, that's okay
   }
 
   // 6. Start the service

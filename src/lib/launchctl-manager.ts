@@ -13,6 +13,25 @@ export interface ServiceStatus {
 
 export class LaunchctlManager {
   /**
+   * Check if plist needs updating (old format without wrapper)
+   */
+  async needsPlistUpdate(plistPath: string): Promise<boolean> {
+    try {
+      const plistContent = await fs.readFile(plistPath, 'utf-8');
+
+      // Check if it uses the wrapper (new format) or node directly (old format)
+      const hasWrapper = plistContent.includes('/launchers/llamacpp-server');
+      const hasProcessType = plistContent.includes('<key>ProcessType</key>');
+
+      // Needs update if missing wrapper or ProcessType
+      return !hasWrapper || !hasProcessType;
+    } catch (error) {
+      // If plist doesn't exist or can't be read, it needs to be created
+      return true;
+    }
+  }
+
+  /**
    * Get the path to the wrapper script
    * Handles both development (src/) and production (dist/) scenarios
    */
