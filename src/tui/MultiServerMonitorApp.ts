@@ -14,6 +14,7 @@ import { createConfigUI } from "./ConfigApp.js";
 import { stateManager } from "../lib/state-manager.js";
 import { launchctlManager } from "../lib/launchctl-manager.js";
 import { statusChecker } from "../lib/status-checker.js";
+import { serverLifecycleService } from "../lib/server-lifecycle-service.js";
 import { modelScanner } from "../lib/model-scanner.js";
 import { portManager } from "../lib/port-manager.js";
 import { configGenerator, ServerOptions } from "../lib/config-generator.js";
@@ -1991,30 +1992,31 @@ export async function createMultiServerMonitorUI(
         const progressModal = showProgressModal("Stopping server...");
 
         try {
-          // Unload service (this stops and unregisters it)
-          progressModal.setContent("\n  {cyan-fg}Stopping server...{/cyan-fg}");
-          screen.render();
-          await launchctlManager.unloadService(selectedServer.plistPath);
-
-          // Wait for shutdown
-          progressModal.setContent(
-            "\n  {cyan-fg}Waiting for server to stop...{/cyan-fg}",
+          // Use centralized lifecycle service
+          const result = await serverLifecycleService.stopServer(
+            selectedServer.id,
+            {
+              onProgress: (msg) => {
+                progressModal.setContent(`\n  {cyan-fg}${msg}{/cyan-fg}`);
+                screen.render();
+              },
+            }
           );
-          screen.render();
-          await launchctlManager.waitForServiceStop(selectedServer.label, 5000);
 
-          // Update server status
-          const updatedServer =
-            await statusChecker.updateServerStatus(selectedServer);
-          servers[selectedServerIndex] = updatedServer;
-          serverDataMap.set(updatedServer.id, {
-            server: updatedServer,
+          if (!result.success) {
+            throw new Error(result.error);
+          }
+
+          // Update local state
+          servers[selectedServerIndex] = result.server;
+          serverDataMap.set(result.server.id, {
+            server: result.server,
             data: null,
             error: null,
           });
 
-          // Save updated config
-          await stateManager.saveServerConfig(updatedServer);
+          // Immediately update UI so it reflects the new state before modal closes
+          await fetchData();
 
           // Show success briefly
           progressModal.setContent(
@@ -2044,86 +2046,31 @@ export async function createMultiServerMonitorUI(
       const progressModal = showProgressModal("Starting server...");
 
       try {
-        // Check if plist needs updating (only regenerate if old format)
-        const needsUpdate = await launchctlManager.needsPlistUpdate(selectedServer.plistPath);
-
-        if (needsUpdate) {
-          progressModal.setContent(
-            "\n  {cyan-fg}Updating service configuration...{/cyan-fg}",
-          );
-          screen.render();
-          await launchctlManager.createPlist(selectedServer);
-
-          // Unload service if loaded (to pick up new plist)
-          try {
-            await launchctlManager.unloadService(selectedServer.plistPath);
-          } catch (err) {
-            // May not be loaded, continue
+        // Use centralized lifecycle service
+        const result = await serverLifecycleService.startServer(
+          selectedServer.id,
+          {
+            onProgress: (msg) => {
+              progressModal.setContent(`\n  {cyan-fg}${msg}{/cyan-fg}`);
+              screen.render();
+            },
           }
-        }
-
-        // Load service
-        progressModal.setContent("\n  {cyan-fg}Loading service...{/cyan-fg}");
-        screen.render();
-        try {
-          await launchctlManager.loadService(selectedServer.plistPath);
-        } catch (err) {
-          // May already be loaded, continue
-        }
-
-        // Start service
-        progressModal.setContent("\n  {cyan-fg}Starting server...{/cyan-fg}");
-        screen.render();
-        await launchctlManager.startService(selectedServer.label);
-
-        // Wait for startup
-        progressModal.setContent(
-          "\n  {cyan-fg}Waiting for server to start...{/cyan-fg}",
-        );
-        screen.render();
-        const started = await launchctlManager.waitForServiceStart(
-          selectedServer.label,
-          5000,
         );
 
-        if (!started) {
-          throw new Error("Server failed to start. Check logs.");
+        if (!result.success) {
+          throw new Error(result.error);
         }
 
-        // Wait for port to be ready
-        progressModal.setContent(
-          "\n  {cyan-fg}Waiting for server to be ready...{/cyan-fg}",
-        );
-        screen.render();
-        const portTimeout = 10000;
-        const portStartTime = Date.now();
-        let portReady = false;
-        while (Date.now() - portStartTime < portTimeout) {
-          if (await isPortInUse(selectedServer.port)) {
-            portReady = true;
-            break;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 500));
-        }
-
-        if (!portReady) {
-          throw new Error(
-            "Server started but port not responding. Check logs.",
-          );
-        }
-
-        // Update server status
-        const updatedServer =
-          await statusChecker.updateServerStatus(selectedServer);
-        servers[selectedServerIndex] = updatedServer;
-        serverDataMap.set(updatedServer.id, {
-          server: updatedServer,
+        // Update local state
+        servers[selectedServerIndex] = result.server;
+        serverDataMap.set(result.server.id, {
+          server: result.server,
           data: null,
           error: null,
         });
 
-        // Save updated config
-        await stateManager.saveServerConfig(updatedServer);
+        // Immediately update UI so it reflects the new state before modal closes
+        await fetchData();
 
         // Show success briefly
         progressModal.setContent(

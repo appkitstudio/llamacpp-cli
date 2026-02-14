@@ -13,6 +13,7 @@ import { modelScanner } from './model-scanner';
 import { configGenerator } from './config-generator';
 import { portManager } from './port-manager';
 import { statusChecker } from './status-checker';
+import { serverLifecycleService } from './server-lifecycle-service';
 import { modelDownloader } from './model-downloader';
 import { modelSearch } from './model-search';
 import { downloadJobManager } from './download-job-manager';
@@ -516,45 +517,30 @@ class AdminServer {
    * Start server
    */
   private async handleStartServer(req: http.IncomingMessage, res: http.ServerResponse, serverId: string): Promise<void> {
-    const server = await stateManager.findServer(serverId);
-    if (!server) {
-      this.sendError(res, 404, 'Not Found', `Server not found: ${serverId}`, 'SERVER_NOT_FOUND');
-      return;
-    }
-
     try {
-      const status = await statusChecker.checkServer(server);
-      if (statusChecker.determineStatus(status, status.portListening) === 'running') {
-        this.sendError(res, 409, 'Conflict', 'Server is already running', 'ALREADY_RUNNING');
+      // Use centralized lifecycle service
+      const result = await serverLifecycleService.startServer(serverId);
+
+      if (!result.success) {
+        // Map common errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'SERVER_NOT_FOUND');
+        } else if (result.error?.includes('already running')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'ALREADY_RUNNING');
+        } else if (result.error?.includes('already starting')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'OPERATION_IN_PROGRESS');
+        } else {
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Unknown error', 'START_FAILED');
+        }
         return;
       }
 
-      // Recreate plist if missing
-      if (!(await fileExists(server.plistPath))) {
-        await launchctlManager.createPlist(server);
-      }
-
-      await launchctlManager.loadService(server.plistPath);
-      await launchctlManager.startService(server.label);
-      const started = await launchctlManager.waitForServiceStart(server.label, 5000);
-
-      if (!started) {
-        this.sendError(res, 500, 'Internal Server Error', 'Server failed to start', 'START_FAILED');
-        return;
-      }
-
-      // Give server a moment to fully start before checking status
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const newStatus = await statusChecker.checkServer(server);
-      await stateManager.updateServerConfig(server.id, {
-        status: statusChecker.determineStatus(newStatus, newStatus.portListening),
-        pid: newStatus.pid || undefined,
-        lastStarted: new Date().toISOString(),
+      // Return success with server details
+      this.sendJson(res, 200, {
+        server: result.server,
+        metalMemoryMB: result.metalMemoryMB,
+        rotatedLogs: result.rotatedLogs,
       });
-
-      const updatedServer = await stateManager.loadServerConfig(server.id);
-      this.sendJson(res, 200, { server: updatedServer });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'START_ERROR');
     }
@@ -564,30 +550,26 @@ class AdminServer {
    * Stop server
    */
   private async handleStopServer(req: http.IncomingMessage, res: http.ServerResponse, serverId: string): Promise<void> {
-    const server = await stateManager.findServer(serverId);
-    if (!server) {
-      this.sendError(res, 404, 'Not Found', `Server not found: ${serverId}`, 'SERVER_NOT_FOUND');
-      return;
-    }
-
     try {
-      const status = await statusChecker.checkServer(server);
-      if (statusChecker.determineStatus(status, status.portListening) !== 'running') {
-        this.sendError(res, 409, 'Conflict', 'Server is not running', 'NOT_RUNNING');
+      // Use centralized lifecycle service
+      const result = await serverLifecycleService.stopServer(serverId);
+
+      if (!result.success) {
+        // Map common errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'SERVER_NOT_FOUND');
+        } else if (result.error?.includes('already stopped')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'NOT_RUNNING');
+        } else if (result.error?.includes('already stopping')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'OPERATION_IN_PROGRESS');
+        } else {
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Unknown error', 'STOP_FAILED');
+        }
         return;
       }
 
-      await launchctlManager.unloadService(server.plistPath);
-      await launchctlManager.waitForServiceStop(server.label, 5000);
-
-      await stateManager.updateServerConfig(server.id, {
-        status: 'stopped',
-        pid: undefined,
-        lastStopped: new Date().toISOString(),
-      });
-
-      const updatedServer = await stateManager.loadServerConfig(server.id);
-      this.sendJson(res, 200, { server: updatedServer });
+      // Return success with server details
+      this.sendJson(res, 200, { server: result.server });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'STOP_ERROR');
     }
@@ -597,42 +579,28 @@ class AdminServer {
    * Restart server
    */
   private async handleRestartServer(req: http.IncomingMessage, res: http.ServerResponse, serverId: string): Promise<void> {
-    const server = await stateManager.findServer(serverId);
-    if (!server) {
-      this.sendError(res, 404, 'Not Found', `Server not found: ${serverId}`, 'SERVER_NOT_FOUND');
-      return;
-    }
-
     try {
-      // Stop if running
-      const status = await statusChecker.checkServer(server);
-      if (statusChecker.determineStatus(status, status.portListening) === 'running') {
-        await launchctlManager.unloadService(server.plistPath);
-        await launchctlManager.waitForServiceStop(server.label, 5000);
-      }
+      // Use centralized lifecycle service
+      const result = await serverLifecycleService.restartServer(serverId);
 
-      // Start
-      await launchctlManager.loadService(server.plistPath);
-      await launchctlManager.startService(server.label);
-      const started = await launchctlManager.waitForServiceStart(server.label, 5000);
-
-      if (!started) {
-        this.sendError(res, 500, 'Internal Server Error', 'Server failed to start', 'START_FAILED');
+      if (!result.success) {
+        // Map common errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'SERVER_NOT_FOUND');
+        } else if (result.error?.includes('Failed to stop')) {
+          this.sendError(res, 500, 'Internal Server Error', result.error, 'STOP_FAILED');
+        } else {
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Unknown error', 'RESTART_FAILED');
+        }
         return;
       }
 
-      // Give server a moment to fully start before checking status
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const newStatus = await statusChecker.checkServer(server);
-      await stateManager.updateServerConfig(server.id, {
-        status: statusChecker.determineStatus(newStatus, newStatus.portListening),
-        pid: newStatus.pid || undefined,
-        lastStarted: new Date().toISOString(),
+      // Return success with server details
+      this.sendJson(res, 200, {
+        server: result.server,
+        metalMemoryMB: result.metalMemoryMB,
+        rotatedLogs: result.rotatedLogs,
       });
-
-      const updatedServer = await stateManager.loadServerConfig(server.id);
-      this.sendJson(res, 200, { server: updatedServer });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'RESTART_ERROR');
     }
