@@ -32,6 +32,7 @@ export interface ServerConfig {
   // Logging
   stdoutPath: string;      // Path to stdout log
   stderrPath: string;      // Path to stderr log
+  httpLogPath: string;     // Path to filtered HTTP-only log
 }
 
 /**

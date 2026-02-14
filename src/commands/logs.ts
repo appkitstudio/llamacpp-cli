@@ -21,7 +21,8 @@ interface LogsOptions {
   errors?: boolean;
   verbose?: boolean;
   http?: boolean;
-  stdout?: boolean;
+  stderr?: boolean;  // View full stderr logs
+  stdout?: boolean;  // View stdout logs
   filter?: string;
   clear?: boolean;
   rotate?: boolean;
@@ -37,9 +38,21 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     throw new Error(`Server not found: ${identifier}\n\nUse: llamacpp ps`);
   }
 
-  // Determine log file (default to stderr where verbose logs go)
-  const logPath = options.stdout ? server.stdoutPath : server.stderrPath;
-  const logType = options.stdout ? 'stdout' : 'stderr';
+  // Determine log file (default to HTTP logs, or stderr/stdout if specified)
+  let logPath: string;
+  let logType: string;
+
+  if (options.stderr) {
+    logPath = server.stderrPath;
+    logType = 'stderr';
+  } else if (options.stdout) {
+    logPath = server.stdoutPath;
+    logType = 'stdout';
+  } else {
+    // Default to HTTP log file
+    logPath = server.httpLogPath;
+    logType = 'http';
+  }
 
   // Handle --clear-archived option (deletes only archived logs)
   if (options.clearArchived) {
@@ -63,6 +76,12 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     let totalFreed = 0;
     let currentSize = 0;
     let archivedSize = 0;
+
+    // Clear current HTTP log
+    if (await fileExists(server.httpLogPath)) {
+      currentSize += await getFileSize(server.httpLogPath);
+      await clearLogFile(server.httpLogPath);
+    }
 
     // Clear current stderr
     if (await fileExists(server.stderrPath)) {
@@ -146,7 +165,12 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
   // Whether to include health check requests (filtered by default)
   const includeHealth = options.includeHealth ?? false;
 
-  if (options.verbose) {
+  // HTTP logs are already in compact format - show them raw
+  if (logType === 'http') {
+    filterDesc = ' (HTTP requests)';
+    useCompactMode = false;
+    // HTTP logs pre-parsed: timestamp method endpoint ip status "message" tokensIn tokensOut timeMs
+  } else if (options.verbose) {
     // Show everything (no filter)
     filterDesc = ' (all messages)';
   } else if (options.errors) {
@@ -162,7 +186,7 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     filterPattern = options.filter;
     filterDesc = ` (filter: ${options.filter})`;
   } else {
-    // Default: Compact one-liner format
+    // Default for stderr/stdout: Compact one-liner format
     filterPattern = 'log_server_r';
     filterDesc = ' (compact)';
     useCompactMode = true;
@@ -189,7 +213,34 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
 
   if (options.follow) {
     // Follow logs in real-time with optional filtering
-    if (useCompactMode) {
+    if (logType === 'http') {
+      // HTTP logs are already compact - just filter health checks
+      const tailProcess = spawn('tail', ['-f', logPath]);
+      const rl = readline.createInterface({
+        input: tailProcess.stdout,
+        crlfDelay: Infinity,
+      });
+
+      rl.on('line', (line) => {
+        // Skip health check requests unless --include-health is set
+        if (!includeHealth && logParser.isHealthCheckRequest(line)) {
+          return;
+        }
+        console.log(line);
+      });
+
+      // Handle Ctrl+C gracefully
+      process.on('SIGINT', () => {
+        tailProcess.kill();
+        rl.close();
+        console.log();
+        process.exit(0);
+      });
+
+      tailProcess.on('exit', () => {
+        process.exit(0);
+      });
+    } else if (useCompactMode) {
       // Compact mode with follow: parse lines in real-time
       const tailProcess = spawn('tail', ['-f', logPath]);
       const rl = readline.createInterface({
@@ -198,7 +249,10 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
       });
 
       rl.on('line', (line) => {
-        if (line.includes('log_server_r')) {
+        // stderr/stdout need filtering
+        const shouldProcess = line.includes('log_server_r');
+
+        if (shouldProcess) {
           // Skip health check requests unless --include-health is set
           if (!includeHealth && logParser.isHealthCheckRequest(line)) {
             return;
@@ -260,12 +314,40 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     // Show last N lines with optional filtering
     const lines = options.lines || 50;
 
-    if (useCompactMode) {
+    if (logType === 'http') {
+      // HTTP logs are already compact - just filter health checks
+      try {
+        const command = `tail -n ${lines} "${logPath}"`;
+        const output = await execCommand(command);
+        const logLines = output.split('\n').filter((l) => l.trim());
+
+        if (logLines.length === 0) {
+          console.log(chalk.dim('No HTTP request logs found.'));
+          return;
+        }
+
+        // Filter health checks
+        const filteredLines = logLines.filter((line) => {
+          return includeHealth || !logParser.isHealthCheckRequest(line);
+        });
+
+        if (filteredLines.length === 0) {
+          console.log(chalk.dim('No HTTP request logs (all were health checks).'));
+          console.log(chalk.dim('Tip: Use --include-health to see health check requests.'));
+          return;
+        }
+
+        filteredLines.forEach((line) => console.log(line));
+      } catch (error) {
+        throw new Error(`Failed to read logs: ${(error as Error).message}`);
+      }
+    } else if (useCompactMode) {
       // Compact mode: read file and parse
       try {
         // Use large multiplier to account for verbose debug output between requests
         // Add || true to prevent grep from failing when no matches found
         const command = `tail -n ${lines * 100} "${logPath}" | grep -E "log_server_r" || true`;
+
         const output = await execCommand(command);
         const logLines = output.split('\n').filter((l) => l.trim());
 

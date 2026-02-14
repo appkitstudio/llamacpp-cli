@@ -16,33 +16,50 @@ export class LaunchctlManager {
    * Generate plist XML content for a server
    */
   generatePlist(config: ServerConfig): string {
-    // Build program arguments array
-    const args = [
-      '/opt/homebrew/bin/llama-server',
+    // Get path to llamacpp CLI (this binary)
+    const llamacppBin = process.argv[1]; // Path to the main CLI script
+
+    // Build arguments for llamacpp internal server-wrapper command
+    const wrapperArgs = [
+      llamacppBin,
+      'internal',
+      'server-wrapper',
+      '--http-log-path', config.httpLogPath,
+    ];
+
+    // Add verbose flag if enabled
+    if (config.verbose) {
+      wrapperArgs.push('--verbose');
+    }
+
+    // Add llama-server arguments
+    wrapperArgs.push(
+      '--',
       '--model', config.modelPath,
       '--host', config.host,
       '--port', config.port.toString(),
       '--threads', config.threads.toString(),
       '--ctx-size', config.ctxSize.toString(),
       '--gpu-layers', config.gpuLayers.toString(),
-    ];
+    );
 
     // Add flags
-    if (config.embeddings) args.push('--embeddings');
-    if (config.jinja) args.push('--jinja');
+    if (config.embeddings) wrapperArgs.push('--embeddings');
+    if (config.jinja) wrapperArgs.push('--jinja');
 
-    // Conditionally enable verbose HTTP logging for detailed request/response info
-    if (config.verbose) {
-      args.push('--log-verbose');
-    }
+    // Always enable verbose logging (so HTTP logs are generated)
+    wrapperArgs.push('--log-verbose');
 
     // Add custom flags
     if (config.customFlags && config.customFlags.length > 0) {
-      args.push(...config.customFlags);
+      wrapperArgs.push(...config.customFlags);
     }
 
-    // Generate XML array elements
-    const argsXml = args.map(arg => `      <string>${arg}</string>`).join('\n');
+    // Get Node.js binary path for execution
+    const nodePath = process.execPath;
+
+    // Build ProgramArguments array for plist
+    const programArguments = [nodePath, ...wrapperArgs].map(arg => `      <string>${arg}</string>`).join('\n');
 
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -54,7 +71,7 @@ export class LaunchctlManager {
 
     <key>ProgramArguments</key>
     <array>
-${argsXml}
+${programArguments}
     </array>
 
     <key>RunAtLoad</key>

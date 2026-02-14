@@ -160,9 +160,10 @@ export class LogParser {
 
       if (responseLine) {
         const responseJson = this.extractJson(responseLine);
-        if (responseJson) {
-          tokensIn = responseJson.usage?.prompt_tokens || 0;
-          tokensOut = responseJson.usage?.completion_tokens || 0;
+        if (responseJson && responseJson.usage) {
+          // Support both OpenAI and Anthropic formats
+          tokensIn = responseJson.usage.prompt_tokens || responseJson.usage.input_tokens || 0;
+          tokensOut = responseJson.usage.completion_tokens || responseJson.usage.output_tokens || 0;
           responseTimeMs = this.extractResponseTime(responseJson);
         }
       }
@@ -266,6 +267,9 @@ export class LogParser {
    * Format compact log line
    */
   private formatCompactLine(entry: CompactLogEntry): string {
+    // Use dash for timing when not available (0ms is unrealistic, means no timing data)
+    const timing = entry.responseTimeMs > 0 ? entry.responseTimeMs.toString() : '-';
+
     return [
       entry.timestamp,
       entry.method,
@@ -275,7 +279,7 @@ export class LogParser {
       `"${entry.userMessage}"`,
       entry.tokensIn,
       entry.tokensOut,
-      entry.responseTimeMs,
+      timing,
     ].join(' ');
   }
 }

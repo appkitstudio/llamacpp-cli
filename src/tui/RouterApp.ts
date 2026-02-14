@@ -313,15 +313,10 @@ export async function createRouterUI(
     const logTypeLabel = state.logType === 'stdout' ? 'Activity' : 'System';
     content += `{bold}{blue-fg}═══ Router Logs (${logTypeLabel}){/blue-fg}{/bold}\n`;
 
-    // Show last updated time and refresh status
-    if (state.logsLastUpdated) {
-      const timeStr = state.logsLastUpdated.toLocaleTimeString();
-      const refreshStatus = state.logsRefreshInterval ? 'ON' : 'OFF';
-      const refreshColor = state.logsRefreshInterval ? 'green' : 'gray';
-      content += `{gray-fg}Last updated: ${timeStr} | Auto-refresh: {/${refreshColor}-fg}${refreshStatus}{/${refreshColor}-fg}{/gray-fg}\n\n`;
-    } else {
-      content += '\n';
-    }
+    // Show refresh status
+    const refreshStatus = state.logsRefreshInterval ? 'ON' : 'OFF';
+    const refreshColor = state.logsRefreshInterval ? 'green' : 'gray';
+    content += `{gray-fg}Auto-refresh: {/${refreshColor}-fg}${refreshStatus}{/${refreshColor}-fg}{/gray-fg}\n\n`;
 
     const logPath = state.logType === 'stdout' ? state.config.stdoutPath : state.config.stderrPath;
 

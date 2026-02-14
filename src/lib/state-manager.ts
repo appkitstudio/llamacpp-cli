@@ -70,7 +70,16 @@ export class StateManager {
     if (!(await fileExists(configPath))) {
       return null;
     }
-    return await readJson<ServerConfig>(configPath);
+    const config = await readJson<ServerConfig>(configPath);
+
+    // Migration: Add httpLogPath if missing (for configs created before this feature)
+    if (!config.httpLogPath) {
+      config.httpLogPath = path.join(this.logsDir, `${config.id}.http`);
+      // Save the migrated config
+      await this.saveServerConfig(config);
+    }
+
+    return config;
   }
 
   /**

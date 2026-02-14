@@ -52,11 +52,17 @@ export async function startCommand(identifier: string): Promise<void> {
     // May already exist, that's okay
   }
 
-  // 5. Load service if needed
+  // 5. Unload and reload service to ensure latest plist is used
+  try {
+    await launchctlManager.unloadService(server.plistPath);
+  } catch (error) {
+    // May not be loaded, that's okay
+  }
+
   try {
     await launchctlManager.loadService(server.plistPath);
   } catch (error) {
-    // May already be loaded, that's okay
+    throw new Error(`Failed to load service: ${(error as Error).message}`);
   }
 
   // 6. Start the service

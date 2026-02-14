@@ -649,25 +649,32 @@ class AdminServer {
     }
 
     try {
-      const type = url.searchParams.get('type') || 'both'; // stdout, stderr, or both
+      const type = url.searchParams.get('type') || 'http'; // http (default), stdout, stderr, or all
       const lines = parseInt(url.searchParams.get('lines') || '100');
 
+      let http = '';
       let stdout = '';
       let stderr = '';
 
-      if ((type === 'stdout' || type === 'both') && (await fileExists(server.stdoutPath))) {
+      if ((type === 'http' || type === 'all') && (await fileExists(server.httpLogPath))) {
+        const content = await fs.readFile(server.httpLogPath, 'utf-8');
+        const logLines = content.split('\n');
+        http = logLines.slice(-lines).join('\n');
+      }
+
+      if ((type === 'stdout' || type === 'all') && (await fileExists(server.stdoutPath))) {
         const content = await fs.readFile(server.stdoutPath, 'utf-8');
         const logLines = content.split('\n');
         stdout = logLines.slice(-lines).join('\n');
       }
 
-      if ((type === 'stderr' || type === 'both') && (await fileExists(server.stderrPath))) {
+      if ((type === 'stderr' || type === 'all') && (await fileExists(server.stderrPath))) {
         const content = await fs.readFile(server.stderrPath, 'utf-8');
         const logLines = content.split('\n');
         stderr = logLines.slice(-lines).join('\n');
       }
 
-      this.sendJson(res, 200, { stdout, stderr });
+      this.sendJson(res, 200, { http, stdout, stderr });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'LOGS_ERROR');
     }

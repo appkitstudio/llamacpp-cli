@@ -1,27 +1,39 @@
-import blessed from 'blessed';
-import * as path from 'path';
-import * as fs from 'fs/promises';
-import { ServerConfig, sanitizeModelName } from '../types/server-config.js';
-import { MetricsAggregator } from '../lib/metrics-aggregator.js';
-import { SystemCollector } from '../lib/system-collector.js';
-import { MonitorData, SystemMetrics } from '../types/monitor-types.js';
-import { HistoryManager } from '../lib/history-manager.js';
-import { createHistoricalUI, createMultiServerHistoricalUI } from './HistoricalMonitorApp.js';
-import { createConfigUI } from './ConfigApp.js';
-import { stateManager } from '../lib/state-manager.js';
-import { launchctlManager } from '../lib/launchctl-manager.js';
-import { statusChecker } from '../lib/status-checker.js';
-import { modelScanner } from '../lib/model-scanner.js';
-import { portManager } from '../lib/port-manager.js';
-import { configGenerator, ServerOptions } from '../lib/config-generator.js';
-import { ModelInfo } from '../types/model-info.js';
-import { getLogsDir, getLaunchAgentsDir, ensureDir, parseMetalMemoryFromLog } from '../utils/file-utils.js';
-import { formatBytes, formatContextSize } from '../utils/format-utils.js';
-import { isPortInUse } from '../utils/process-utils.js';
-import { ModalController } from './shared/modal-controller.js';
-import { createOverlay } from './shared/overlay-utils.js';
+import blessed from "blessed";
+import * as path from "path";
+import * as fs from "fs/promises";
+import { ServerConfig, sanitizeModelName } from "../types/server-config.js";
+import { MetricsAggregator } from "../lib/metrics-aggregator.js";
+import { SystemCollector } from "../lib/system-collector.js";
+import { MonitorData, SystemMetrics } from "../types/monitor-types.js";
+import { HistoryManager } from "../lib/history-manager.js";
+import {
+  createHistoricalUI,
+  createMultiServerHistoricalUI,
+} from "./HistoricalMonitorApp.js";
+import { createConfigUI } from "./ConfigApp.js";
+import { stateManager } from "../lib/state-manager.js";
+import { launchctlManager } from "../lib/launchctl-manager.js";
+import { statusChecker } from "../lib/status-checker.js";
+import { modelScanner } from "../lib/model-scanner.js";
+import { portManager } from "../lib/port-manager.js";
+import { configGenerator, ServerOptions } from "../lib/config-generator.js";
+import { ModelInfo } from "../types/model-info.js";
+import {
+  getLogsDir,
+  getLaunchAgentsDir,
+  ensureDir,
+  parseMetalMemoryFromLog,
+  fileExists,
+} from "../utils/file-utils.js";
+import { formatBytes, formatContextSize } from "../utils/format-utils.js";
+import { isPortInUse } from "../utils/process-utils.js";
+import { ModalController } from "./shared/modal-controller.js";
+import { createOverlay } from "./shared/overlay-utils.js";
+import { getFileSize, formatFileSize } from "../utils/log-utils.js";
+import { LogParser } from "../utils/log-parser.js";
 
-type ViewMode = 'list' | 'detail';
+type ViewMode = "list" | "detail";
+type DetailSubView = "status" | "logs";
 
 interface ServerMonitorData {
   server: ServerConfig;
@@ -42,11 +54,11 @@ export async function createMultiServerMonitorUI(
   directJumpIndex?: number,
   onModels?: (controls: MonitorUIControls) => void,
   onRouter?: (controls: MonitorUIControls) => void,
-  onFirstRender?: () => void
+  onFirstRender?: () => void,
 ): Promise<MonitorUIControls> {
   let updateInterval = 5000;
   let intervalId: NodeJS.Timeout | null = null;
-  let viewMode: ViewMode = directJumpIndex !== undefined ? 'detail' : 'list';
+  let viewMode: ViewMode = directJumpIndex !== undefined ? "detail" : "list";
   let selectedServerIndex = directJumpIndex ?? 0;
   let selectedRowIndex = directJumpIndex ?? 0; // Track which row is highlighted in list view
   let isLoading = false;
@@ -54,12 +66,15 @@ export async function createMultiServerMonitorUI(
   let cameFromDirectJump = directJumpIndex !== undefined; // Track if we entered via ps <id>
   let inHistoricalView = false; // Track whether we're in historical view to prevent key conflicts
   let hasCalledFirstRender = false; // Track if we've called onFirstRender callback
+  let detailSubView: DetailSubView = "status"; // Track sub-view within detail view
+  let logsLastUpdated: Date | null = null;
+  let logsRefreshInterval: NodeJS.Timeout | null = null;
 
   // Modal controller for centralized keyboard handling
   const modalController = new ModalController(screen);
 
   // Spinner animation
-  const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+  const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   let spinnerFrameIndex = 0;
   let spinnerIntervalId: NodeJS.Timeout | null = null;
 
@@ -83,8 +98,8 @@ export async function createMultiServerMonitorUI(
   const contentBox = blessed.box({
     top: 0,
     left: 0,
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
     tags: true,
     scrollable: true,
     alwaysScroll: true,
@@ -92,9 +107,9 @@ export async function createMultiServerMonitorUI(
     vi: true,
     mouse: true,
     scrollbar: {
-      ch: '█',
+      ch: "█",
       style: {
-        fg: 'blue',
+        fg: "blue",
       },
     },
   });
@@ -104,17 +119,22 @@ export async function createMultiServerMonitorUI(
   function createProgressBar(percentage: number, width: number = 30): string {
     const filled = Math.round((percentage / 100) * width);
     const empty = width - filled;
-    return '[' + '█'.repeat(Math.max(0, filled)) + '░'.repeat(Math.max(0, empty)) + ']';
+    return (
+      "[" +
+      "█".repeat(Math.max(0, filled)) +
+      "░".repeat(Math.max(0, empty)) +
+      "]"
+    );
   }
 
   // Render system resources section (system-wide for list view)
   function renderSystemResources(systemMetrics: SystemMetrics | null): string {
-    let content = '';
+    let content = "";
 
-    content += '{bold}System Resources{/bold}\n';
+    content += "{bold}System Resources{/bold}\n";
     const termWidth = (screen.width as number) || 80;
-    const divider = '─'.repeat(termWidth - 2);
-    content += divider + '\n';
+    const divider = "─".repeat(termWidth - 2);
+    content += divider + "\n";
 
     if (systemMetrics) {
       if (systemMetrics.gpuUsage !== undefined) {
@@ -125,7 +145,7 @@ export async function createMultiServerMonitorUI(
           content += ` - ${Math.round(systemMetrics.temperature)}°C`;
         }
 
-        content += '\n';
+        content += "\n";
       }
 
       if (systemMetrics.cpuUsage !== undefined) {
@@ -139,19 +159,20 @@ export async function createMultiServerMonitorUI(
       }
 
       if (systemMetrics.memoryTotal > 0) {
-        const memoryUsedGB = systemMetrics.memoryUsed / (1024 ** 3);
-        const memoryTotalGB = systemMetrics.memoryTotal / (1024 ** 3);
-        const memoryPercentage = (systemMetrics.memoryUsed / systemMetrics.memoryTotal) * 100;
+        const memoryUsedGB = systemMetrics.memoryUsed / 1024 ** 3;
+        const memoryTotalGB = systemMetrics.memoryTotal / 1024 ** 3;
+        const memoryPercentage =
+          (systemMetrics.memoryUsed / systemMetrics.memoryTotal) * 100;
         const bar = createProgressBar(memoryPercentage);
         content += `Memory: {cyan-fg}${bar}{/cyan-fg} ${Math.round(memoryPercentage)}% `;
         content += `(${memoryUsedGB.toFixed(1)} / ${memoryTotalGB.toFixed(1)} GB)\n`;
       }
 
       if (systemMetrics.warnings && systemMetrics.warnings.length > 0) {
-        content += `\n{yellow-fg}⚠ ${systemMetrics.warnings.join(', ')}{/yellow-fg}\n`;
+        content += `\n{yellow-fg}⚠ ${systemMetrics.warnings.join(", ")}{/yellow-fg}\n`;
       }
     } else {
-      content += '{gray-fg}Collecting system metrics...{/gray-fg}\n';
+      content += "{gray-fg}Collecting system metrics...{/gray-fg}\n";
     }
 
     return content;
@@ -159,12 +180,12 @@ export async function createMultiServerMonitorUI(
 
   // Render aggregate model resources (all running servers in list view)
   function renderAggregateModelResources(): string {
-    let content = '';
+    let content = "";
 
-    content += '{bold}Server Resources{/bold}\n';
+    content += "{bold}Server Resources{/bold}\n";
     const termWidth = (screen.width as number) || 80;
-    const divider = '─'.repeat(termWidth - 2);
-    content += divider + '\n';
+    const divider = "─".repeat(termWidth - 2);
+    content += divider + "\n";
 
     // Aggregate CPU and memory across all running servers (skip stopped servers)
     let totalCpu = 0;
@@ -173,7 +194,11 @@ export async function createMultiServerMonitorUI(
 
     for (const serverData of serverDataMap.values()) {
       // Only count running servers with valid data
-      if (serverData.server.status === 'running' && serverData.data?.server && !serverData.data.server.stale) {
+      if (
+        serverData.server.status === "running" &&
+        serverData.data?.server &&
+        !serverData.data.server.stale
+      ) {
         if (serverData.data.server.processCpuUsage !== undefined) {
           totalCpu += serverData.data.server.processCpuUsage;
           serverCount++;
@@ -185,34 +210,37 @@ export async function createMultiServerMonitorUI(
     }
 
     if (serverCount === 0) {
-      content += '{gray-fg}No running servers{/gray-fg}\n';
+      content += "{gray-fg}No running servers{/gray-fg}\n";
       return content;
     }
 
     // CPU: Sum of all process CPU percentages
     const cpuBar = createProgressBar(Math.min(totalCpu, 100));
     content += `CPU:    {cyan-fg}${cpuBar}{/cyan-fg} ${Math.round(totalCpu)}%`;
-    content += ` {gray-fg}(${serverCount} ${serverCount === 1 ? 'server' : 'servers'}){/gray-fg}\n`;
+    content += ` {gray-fg}(${serverCount} ${serverCount === 1 ? "server" : "servers"}){/gray-fg}\n`;
 
     // Memory: Sum of all process memory
-    const totalMemoryGB = totalMemoryBytes / (1024 ** 3);
+    const totalMemoryGB = totalMemoryBytes / 1024 ** 3;
     const estimatedMaxGB = serverCount * 8; // Assume ~8GB per server max
-    const memoryPercentage = Math.min((totalMemoryGB / estimatedMaxGB) * 100, 100);
+    const memoryPercentage = Math.min(
+      (totalMemoryGB / estimatedMaxGB) * 100,
+      100,
+    );
     const memoryBar = createProgressBar(memoryPercentage);
     content += `Memory: {cyan-fg}${memoryBar}{/cyan-fg} ${totalMemoryGB.toFixed(2)} GB`;
-    content += ` {gray-fg}(${serverCount} ${serverCount === 1 ? 'server' : 'servers'}){/gray-fg}\n`;
+    content += ` {gray-fg}(${serverCount} ${serverCount === 1 ? "server" : "servers"}){/gray-fg}\n`;
 
     return content;
   }
 
   // Render model resources section (per-process for detail view)
   function renderModelResources(data: MonitorData): string {
-    let content = '';
+    let content = "";
 
-    content += '{bold}Server Resources{/bold}\n';
+    content += "{bold}Server Resources{/bold}\n";
     const termWidth = (screen.width as number) || 80;
-    const divider = '─'.repeat(termWidth - 2);
-    content += divider + '\n';
+    const divider = "─".repeat(termWidth - 2);
+    content += divider + "\n";
 
     // GPU: System-wide (can't get per-process on macOS)
     if (data.system && data.system.gpuUsage !== undefined) {
@@ -223,7 +251,7 @@ export async function createMultiServerMonitorUI(
         content += ` - ${Math.round(data.system.temperature)}°C`;
       }
 
-      content += '\n';
+      content += "\n";
     }
 
     // CPU: Per-process
@@ -234,15 +262,19 @@ export async function createMultiServerMonitorUI(
 
     // Memory: Per-process
     if (data.server.processMemory !== undefined) {
-      const memoryGB = data.server.processMemory / (1024 ** 3);
+      const memoryGB = data.server.processMemory / 1024 ** 3;
       const estimatedMax = 8;
       const memoryPercentage = Math.min((memoryGB / estimatedMax) * 100, 100);
       const bar = createProgressBar(memoryPercentage);
       content += `Memory: {cyan-fg}${bar}{/cyan-fg} ${memoryGB.toFixed(2)} GB\n`;
     }
 
-    if (data.system && data.system.warnings && data.system.warnings.length > 0) {
-      content += `\n{yellow-fg}⚠ ${data.system.warnings.join(', ')}{/yellow-fg}\n`;
+    if (
+      data.system &&
+      data.system.warnings &&
+      data.system.warnings.length > 0
+    ) {
+      content += `\n{yellow-fg}⚠ ${data.system.warnings.join(", ")}{/yellow-fg}\n`;
     }
 
     return content;
@@ -260,8 +292,8 @@ export async function createMultiServerMonitorUI(
       spinnerFrameIndex = (spinnerFrameIndex + 1) % spinnerFrames.length;
 
       // Re-render current view with updated spinner frame
-      let content = '';
-      if (viewMode === 'list') {
+      let content = "";
+      if (viewMode === "list") {
         content = renderListView(lastSystemMetrics);
       } else {
         content = renderDetailView(lastSystemMetrics);
@@ -271,8 +303,8 @@ export async function createMultiServerMonitorUI(
     }, 80);
 
     // Immediate first render
-    let content = '';
-    if (viewMode === 'list') {
+    let content = "";
+    if (viewMode === "list") {
       content = renderListView(lastSystemMetrics);
     } else {
       content = renderDetailView(lastSystemMetrics);
@@ -293,26 +325,27 @@ export async function createMultiServerMonitorUI(
   // Render list view
   function renderListView(systemMetrics: SystemMetrics | null): string {
     const termWidth = (screen.width as number) || 80;
-    const divider = '─'.repeat(termWidth - 2);
-    let content = '';
+    const divider = "─".repeat(termWidth - 2);
+    let content = "";
 
     // Header
-    content += '{bold}{blue-fg}═══ llama.cpp{/blue-fg}{/bold}\n\n';
+    content += "{bold}{blue-fg}═══ LLAMACPP{/blue-fg}{/bold}\n\n";
 
     // System resources
     content += renderSystemResources(systemMetrics);
-    content += '\n';
+    content += "\n";
 
     // Aggregate model resources (CPU + memory for all running servers)
     content += renderAggregateModelResources();
-    content += '\n';
+    content += "\n";
 
     // Server list header
-    const runningCount = servers.filter(s => s.status === 'running').length;
-    const stoppedCount = servers.filter(s => s.status !== 'running').length;
+    const runningCount = servers.filter((s) => s.status === "running").length;
+    const stoppedCount = servers.filter((s) => s.status !== "running").length;
     content += `{bold}Servers (${runningCount} running, ${stoppedCount} stopped){/bold}\n`;
-    content += '{gray-fg}Use arrow keys to navigate, Enter to view details{/gray-fg}\n';
-    content += divider + '\n';
+    content +=
+      "{gray-fg}Use arrow keys to navigate, Enter to view details{/gray-fg}\n";
+    content += divider + "\n";
 
     // Calculate Server ID column width (variable based on screen width)
     // Fixed columns breakdown:
@@ -323,13 +356,13 @@ export async function createMultiServerMonitorUI(
     const maxServerIdWidth = 60;
     const serverIdWidth = Math.max(
       minServerIdWidth,
-      Math.min(maxServerIdWidth, termWidth - fixedColumnsWidth)
+      Math.min(maxServerIdWidth, termWidth - fixedColumnsWidth),
     );
 
     // Table header with variable Server ID width
-    const serverIdHeader = 'Server ID'.padEnd(serverIdWidth);
+    const serverIdHeader = "Server ID".padEnd(serverIdWidth);
     content += `{bold}  │ ${serverIdHeader}│ Port │ Status │ Slots │ tok/s  │ Memory{/bold}\n`;
-    content += divider + '\n';
+    content += divider + "\n";
 
     // Server rows
     servers.forEach((server, index) => {
@@ -338,41 +371,45 @@ export async function createMultiServerMonitorUI(
 
       // Selection indicator (arrow for selected row)
       // Use plain arrow for selected (will be white), colored for unselected indicator
-      const indicator = isSelected ? '►' : ' ';
+      const indicator = isSelected ? "►" : " ";
 
       // Server ID (variable width, truncate if longer than available space)
       // Show alias in parens if present
-      const serverIdText = server.alias ? `${server.id} (${server.alias})` : server.id;
-      const serverId = serverIdText.padEnd(serverIdWidth).substring(0, serverIdWidth);
+      const serverIdText = server.alias
+        ? `${server.id} (${server.alias})`
+        : server.id;
+      const serverId = serverIdText
+        .padEnd(serverIdWidth)
+        .substring(0, serverIdWidth);
 
       // Port
       const port = server.port.toString().padStart(4);
 
       // Status - Check actual server status first, then health
       // Build two versions: colored for normal, plain for selected
-      let status = '';
-      let statusPlain = '';
-      if (server.status !== 'running') {
+      let status = "";
+      let statusPlain = "";
+      if (server.status !== "running") {
         // Server is stopped according to config
-        status = '{gray-fg}○ OFF{/gray-fg} ';
-        statusPlain = '○ OFF ';
+        status = "{gray-fg}○ OFF{/gray-fg} ";
+        statusPlain = "○ OFF ";
       } else if (serverData?.data) {
         // Server is running and we have data
         if (serverData.data.server.healthy) {
-          status = '{green-fg}● RUN{/green-fg} ';
-          statusPlain = '● RUN ';
+          status = "{green-fg}● RUN{/green-fg} ";
+          statusPlain = "● RUN ";
         } else {
-          status = '{red-fg}● ERR{/red-fg} ';
-          statusPlain = '● ERR ';
+          status = "{red-fg}● ERR{/red-fg} ";
+          statusPlain = "● ERR ";
         }
       } else {
         // Server is running but no data yet (still loading)
-        status = '{yellow-fg}● ...{/yellow-fg} ';
-        statusPlain = '● ... ';
+        status = "{yellow-fg}● ...{/yellow-fg} ";
+        statusPlain = "● ... ";
       }
 
       // Slots
-      let slots = '-   ';
+      let slots = "-   ";
       if (serverData?.data?.server) {
         const active = serverData.data.server.activeSlots;
         const total = serverData.data.server.totalSlots;
@@ -380,14 +417,18 @@ export async function createMultiServerMonitorUI(
       }
 
       // tok/s
-      let tokensPerSec = '-     ';
-      if (serverData?.data?.server.avgGenerateSpeed !== undefined &&
-          serverData.data.server.avgGenerateSpeed > 0) {
-        tokensPerSec = Math.round(serverData.data.server.avgGenerateSpeed).toString().padStart(6);
+      let tokensPerSec = "-     ";
+      if (
+        serverData?.data?.server.avgGenerateSpeed !== undefined &&
+        serverData.data.server.avgGenerateSpeed > 0
+      ) {
+        tokensPerSec = Math.round(serverData.data.server.avgGenerateSpeed)
+          .toString()
+          .padStart(6);
       }
 
       // Memory (actual process memory from top command)
-      let memory = '-      ';
+      let memory = "-      ";
       if (serverData?.data?.server.processMemory) {
         const bytes = serverData.data.server.processMemory;
         // Format as GB/MB depending on size
@@ -401,7 +442,7 @@ export async function createMultiServerMonitorUI(
       }
 
       // Build row content - use plain status for selected rows
-      let rowContent = '';
+      let rowContent = "";
       if (isSelected) {
         // Use color code 15 (bright white) with cyan background
         // When white-bg worked, it was probably auto-selecting bright white fg
@@ -411,12 +452,12 @@ export async function createMultiServerMonitorUI(
         rowContent = `${indicator} │ ${serverId} │ ${port} │ ${status}│ ${slots} │ ${tokensPerSec} │ ${memory}`;
       }
 
-      content += rowContent + '\n';
+      content += rowContent + "\n";
     });
 
     // Footer
-    content += '\n' + divider + '\n';
-    content += `{gray-fg}Updated: ${new Date().toLocaleTimeString()} | [N]ew [M]odels [R]outer [H]istory [Q]uit{/gray-fg}`;
+    content += "\n" + divider + "\n";
+    content += `{gray-fg}[N]ew [M]odels [R]outer [H]istory [Q]uit{/gray-fg}`;
 
     return content;
   }
@@ -426,32 +467,34 @@ export async function createMultiServerMonitorUI(
     const server = servers[selectedServerIndex];
     const serverData = serverDataMap.get(server.id);
     const termWidth = (screen.width as number) || 80;
-    const divider = '─'.repeat(termWidth - 2);
-    let content = '';
+    const divider = "─".repeat(termWidth - 2);
+    let content = "";
 
     // Header
-    const headerText = server.alias ? `${server.id} (${server.alias})` : server.id;
+    const headerText = server.alias
+      ? `${server.id} (${server.alias})`
+      : server.id;
     content += `{bold}{blue-fg}═══ ${headerText} (${server.port}){/blue-fg}{/bold}\n\n`;
 
     // Check if server is stopped
-    if (server.status !== 'running') {
+    if (server.status !== "running") {
       // Show minimal stopped server info
-      content += '{bold}Server Information{/bold}\n';
-      content += divider + '\n';
+      content += "{bold}Server Information{/bold}\n";
+      content += divider + "\n";
       content += `Status:   {gray-fg}○ STOPPED{/gray-fg}\n`;
       content += `Model:    ${server.modelName}\n`;
-      const displayHost = server.host || '127.0.0.1';
+      const displayHost = server.host || "127.0.0.1";
       content += `Endpoint: http://${displayHost}:${server.port}\n`;
 
       // Footer - show [S]tart for stopped servers
-      content += '\n' + divider + '\n';
-      content += `{gray-fg}[S]tart [C]onfig [R]emove [H]istory [ESC] Back [Q]uit{/gray-fg}`;
+      content += "\n" + divider + "\n";
+      content += `{gray-fg}[S]tart [C]onfig [R]emove [L]ogs [H]istory [ESC] Back [Q]uit{/gray-fg}`;
 
       return content;
     }
 
     if (!serverData?.data) {
-      content += '{yellow-fg}Loading server data...{/yellow-fg}\n';
+      content += "{yellow-fg}Loading server data...{/yellow-fg}\n";
       return content;
     }
 
@@ -459,59 +502,69 @@ export async function createMultiServerMonitorUI(
 
     // Model resources (per-process)
     content += renderModelResources(data);
-    content += '\n';
+    content += "\n";
 
     // Server Information
-    content += '{bold}Server Information{/bold}\n';
-    content += divider + '\n';
+    content += "{bold}Server Information{/bold}\n";
+    content += divider + "\n";
 
-    const statusIcon = data.server.healthy ? '{green-fg}●{/green-fg}' : '{red-fg}●{/red-fg}';
-    const statusText = data.server.healthy ? 'RUNNING' : 'UNHEALTHY';
+    const statusIcon = data.server.healthy
+      ? "{green-fg}●{/green-fg}"
+      : "{red-fg}●{/red-fg}";
+    const statusText = data.server.healthy ? "RUNNING" : "UNHEALTHY";
     content += `Status:   ${statusIcon} ${statusText}`;
 
     if (data.server.uptime) {
       content += `                    Uptime: ${data.server.uptime}`;
     }
-    content += '\n';
+    content += "\n";
 
     content += `Model:    ${server.modelName}`;
     if (data.server.contextSize) {
       content += `    Context: ${formatContextSize(data.server.contextSize)}/slot`;
     }
-    content += '\n';
+    content += "\n";
 
     // Handle null host (legacy configs) by defaulting to 127.0.0.1
-    const displayHost = server.host || '127.0.0.1';
+    const displayHost = server.host || "127.0.0.1";
     content += `Endpoint: http://${displayHost}:${server.port}\n`;
 
     content += `Slots:    ${data.server.activeSlots} active / ${data.server.totalSlots} total\n`;
-    content += '\n';
+    content += "\n";
 
     // Request Metrics
     if (data.server.totalSlots > 0) {
-      content += '{bold}Request Metrics{/bold}\n';
-      content += divider + '\n';
+      content += "{bold}Request Metrics{/bold}\n";
+      content += divider + "\n";
       content += `Active:   ${data.server.activeSlots} / ${data.server.totalSlots}\n`;
       content += `Idle:     ${data.server.idleSlots} / ${data.server.totalSlots}\n`;
 
-      if (data.server.avgPromptSpeed !== undefined && data.server.avgPromptSpeed > 0) {
+      if (
+        data.server.avgPromptSpeed !== undefined &&
+        data.server.avgPromptSpeed > 0
+      ) {
         content += `Prompt:   ${Math.round(data.server.avgPromptSpeed)} tokens/sec\n`;
       }
 
-      if (data.server.avgGenerateSpeed !== undefined && data.server.avgGenerateSpeed > 0) {
+      if (
+        data.server.avgGenerateSpeed !== undefined &&
+        data.server.avgGenerateSpeed > 0
+      ) {
         content += `Generate: ${Math.round(data.server.avgGenerateSpeed)} tokens/sec\n`;
       }
 
-      content += '\n';
+      content += "\n";
     }
 
     // Active Slots Detail
     if (data.server.slots.length > 0) {
-      const activeSlots = data.server.slots.filter(s => s.state === 'processing');
+      const activeSlots = data.server.slots.filter(
+        (s) => s.state === "processing",
+      );
 
       if (activeSlots.length > 0) {
-        content += '{bold}Active Slots{/bold}\n';
-        content += divider + '\n';
+        content += "{bold}Active Slots{/bold}\n";
+        content += divider + "\n";
 
         activeSlots.forEach((slot) => {
           content += `Slot #${slot.id}: {yellow-fg}PROCESSING{/yellow-fg}`;
@@ -525,47 +578,195 @@ export async function createMultiServerMonitorUI(
             if (slot.n_ctx) {
               content += ` / ${slot.n_ctx}`;
             }
-            content += ' tokens';
+            content += " tokens";
           }
 
-          content += '\n';
+          content += "\n";
         });
 
-        content += '\n';
+        content += "\n";
       }
     }
 
     // Footer - show [S]top for running servers
-    content += divider + '\n';
-    content += `{gray-fg}[S]top [C]onfig [R]emove [H]istory [ESC] Back [Q]uit{/gray-fg}`;
+    content += divider + "\n";
+    content += `{gray-fg}[S]top [C]onfig [R]emove [L]ogs [H]istory [ESC] Back [Q]uit{/gray-fg}`;
 
     return content;
+  }
+
+  // Render logs view for selected server (HTTP logs only)
+  async function renderServerLogs(): Promise<string> {
+    const server = servers[selectedServerIndex];
+    const termWidth = (screen.width as number) || 80;
+    const divider = "─".repeat(termWidth - 2);
+    let content = "";
+
+    // Header
+    const headerText = server.alias
+      ? `${server.id} (${server.alias})`
+      : server.id;
+    content += `{bold}{blue-fg}═══ ${headerText} - HTTP Logs{/blue-fg}{/bold}\n`;
+
+    // Show refresh status
+    const refreshStatus = logsRefreshInterval ? "ON" : "OFF";
+    const refreshColor = logsRefreshInterval ? "green" : "gray";
+    content += `{gray-fg}Auto-refresh: {${refreshColor}-fg}${refreshStatus}{/${refreshColor}-fg}{/gray-fg}\n\n`;
+
+    const logPath = server.httpLogPath; // Read from dedicated HTTP log file
+
+    // Check if log exists
+    if (!(await fileExists(logPath))) {
+      content += "{yellow-fg}No HTTP logs found{/yellow-fg}\n";
+      content += `The server may not have processed any requests yet.\n`;
+      content += `Log file: ${logPath}\n\n`;
+      content += divider + "\n";
+      content += "{gray-fg}[R]efresh [ESC] Back{/gray-fg}";
+      return content;
+    }
+
+    // Show log size
+    const size = await getFileSize(logPath);
+    content += `File: ${logPath}\n`;
+    content += `Size: ${formatFileSize(size)}\n\n`;
+
+    // Show HTTP requests (already in compact format from real-time parsing)
+    try {
+      const { execSync } = require("child_process");
+      // Read entire HTTP log file (pre-parsed compact format)
+      const output = execSync(`cat "${logPath}"`, { encoding: "utf-8" });
+      const lines = output.split("\n").filter((l: string) => l.trim());
+
+      content += divider + "\n";
+
+      if (lines.length === 0) {
+        content += "{yellow-fg}No HTTP requests logged yet{/yellow-fg}\n";
+        content +=
+          "{gray-fg}Send requests to the server to see them here{/gray-fg}\n";
+      } else {
+        // Filter out health check requests
+        const parser = new LogParser();
+        const filteredLines = lines.filter(
+          (line: string) => !parser.isHealthCheckRequest(line),
+        );
+
+        if (filteredLines.length === 0) {
+          content += "{gray-fg}No requests logged yet{/gray-fg}\n";
+        } else {
+          // Show last 30 lines, truncate to fit terminal width
+          const limitedLines = filteredLines.slice(-30);
+          const maxWidth = termWidth - 4;
+
+          for (const line of limitedLines) {
+            if (line.length > maxWidth) {
+              content += line.substring(0, maxWidth - 3) + "...\n";
+            } else {
+              content += line + "\n";
+            }
+          }
+        }
+      }
+
+      content += divider + "\n";
+    } catch (err) {
+      content += "{red-fg}Failed to read logs{/red-fg}\n";
+    }
+
+    const toggleRefreshText = logsRefreshInterval
+      ? "[F] Pause auto-refresh"
+      : "[F] Resume auto-refresh";
+    content += `{gray-fg}[R]efresh ${toggleRefreshText} [ESC] Back{/gray-fg}`;
+
+    // Update last updated time
+    logsLastUpdated = new Date();
+
+    return content;
+  }
+
+  // Start logs auto-refresh
+  function startLogsAutoRefresh(): void {
+    // Clear any existing interval
+    if (logsRefreshInterval) {
+      clearInterval(logsRefreshInterval);
+    }
+
+    // Set up auto-refresh every 3 seconds
+    logsRefreshInterval = setInterval(() => {
+      if (viewMode === "detail" && detailSubView === "logs") {
+        render();
+      }
+    }, 3000);
+  }
+
+  // Stop logs auto-refresh
+  function stopLogsAutoRefresh(): void {
+    if (logsRefreshInterval) {
+      clearInterval(logsRefreshInterval);
+      logsRefreshInterval = null;
+    }
+  }
+
+  // Render current view
+  async function render(): Promise<void> {
+    // Re-register handlers based on current view (for context-sensitive keys)
+    unregisterHandlers();
+    registerHandlers();
+
+    let content = "";
+    if (viewMode === "list") {
+      stopLogsAutoRefresh();
+      content = renderListView(lastSystemMetrics);
+    } else if (viewMode === "detail") {
+      if (detailSubView === "status") {
+        stopLogsAutoRefresh();
+        content = renderDetailView(lastSystemMetrics);
+      } else if (detailSubView === "logs") {
+        content = await renderServerLogs();
+        if (!logsRefreshInterval) {
+          startLogsAutoRefresh();
+        }
+      }
+    }
+    contentBox.setContent(content);
+    screen.render();
   }
 
   // Fetch and update display
   async function fetchData() {
     try {
+      // Skip fetching metrics if we're in logs view (don't need server data)
+      if (viewMode === "detail" && detailSubView === "logs") {
+        await render();
+        return;
+      }
+
       // Collect system metrics ONCE for all servers (not per-server)
       // This prevents spawning multiple macmon processes
       const systemMetricsPromise = systemCollector.collectSystemMetrics();
 
       // Batch collect process memory and CPU for ALL servers in parallel
       // This prevents spawning multiple top processes (5x speedup)
-      const { getBatchProcessMemory, getBatchProcessCpu } = await import('../utils/process-utils.js');
-      const pids = servers.filter(s => s.pid).map(s => s.pid!);
-      const memoryMapPromise = pids.length > 0
-        ? getBatchProcessMemory(pids)
-        : Promise.resolve(new Map<number, number | null>());
-      const cpuMapPromise = pids.length > 0
-        ? getBatchProcessCpu(pids)
-        : Promise.resolve(new Map<number, number | null>());
+      const { getBatchProcessMemory, getBatchProcessCpu } =
+        await import("../utils/process-utils.js");
+      const pids = servers.filter((s) => s.pid).map((s) => s.pid!);
+      const memoryMapPromise =
+        pids.length > 0
+          ? getBatchProcessMemory(pids)
+          : Promise.resolve(new Map<number, number | null>());
+      const cpuMapPromise =
+        pids.length > 0
+          ? getBatchProcessCpu(pids)
+          : Promise.resolve(new Map<number, number | null>());
 
       // Wait for both batches to complete
-      const [memoryMap, cpuMap] = await Promise.all([memoryMapPromise, cpuMapPromise]);
+      const [memoryMap, cpuMap] = await Promise.all([
+        memoryMapPromise,
+        cpuMapPromise,
+      ]);
 
       // Collect server metrics only for RUNNING servers (skip stopped servers)
       const promises = servers
-        .filter(server => server.status === 'running')
+        .filter((server) => server.status === "running")
         .map(async (server) => {
           const aggregator = aggregators.get(server.id)!;
           try {
@@ -574,8 +775,8 @@ export async function createMultiServerMonitorUI(
             // Pass pre-fetched memory and CPU to avoid spawning top per server
             const serverMetrics = await aggregator.collectServerMetrics(
               server,
-              server.pid ? memoryMap.get(server.pid) ?? null : null,
-              server.pid ? cpuMap.get(server.pid) ?? null : null
+              server.pid ? (memoryMap.get(server.pid) ?? null) : null,
+              server.pid ? (cpuMap.get(server.pid) ?? null) : null,
             );
 
             // Build MonitorData manually with shared system metrics
@@ -596,15 +797,15 @@ export async function createMultiServerMonitorUI(
             serverDataMap.set(server.id, {
               server,
               data: null,
-              error: err instanceof Error ? err.message : 'Unknown error',
+              error: err instanceof Error ? err.message : "Unknown error",
             });
           }
         });
 
       // Set null data for stopped servers (no metrics collection)
       servers
-        .filter(server => server.status !== 'running')
-        .forEach(server => {
+        .filter((server) => server.status !== "running")
+        .forEach((server) => {
           serverDataMap.set(server.id, {
             server,
             data: null,
@@ -629,25 +830,20 @@ export async function createMultiServerMonitorUI(
       // Append to history for each server (silent failure)
       // Only save history for servers that are healthy and not stale
       for (const [serverId, serverData] of serverDataMap) {
-        if (serverData.data && !serverData.data.server.stale && serverData.data.server.healthy) {
+        if (
+          serverData.data &&
+          !serverData.data.server.stale &&
+          serverData.data.server.healthy
+        ) {
           const manager = historyManagers.get(serverId);
-          manager?.appendSnapshot(serverData.data.server, serverData.data.system)
-            .catch(err => {
+          manager
+            ?.appendSnapshot(serverData.data.server, serverData.data.system)
+            .catch((err) => {
               // Don't interrupt monitoring on history write failure
               console.error(`Failed to save history for ${serverId}:`, err);
             });
         }
       }
-
-      // Render once with complete data
-      let content = '';
-      if (viewMode === 'list') {
-        content = renderListView(systemMetrics);
-      } else {
-        content = renderDetailView(systemMetrics);
-      }
-
-      contentBox.setContent(content);
 
       // Call onFirstRender callback before first render (to clean up splash screen)
       if (!hasCalledFirstRender && onFirstRender) {
@@ -655,17 +851,17 @@ export async function createMultiServerMonitorUI(
         onFirstRender();
       }
 
-      screen.render();
+      // Render once with complete data
+      await render();
 
       // Clear loading state
       hideLoading();
-
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      const errorMsg = err instanceof Error ? err.message : "Unknown error";
       contentBox.setContent(
-        '{bold}{red-fg}Error{/red-fg}{/bold}\n\n' +
-        `{red-fg}${errorMsg}{/red-fg}\n\n` +
-        '{gray-fg}Press [R] to retry or [Q] to quit{/gray-fg}'
+        "{bold}{red-fg}Error{/red-fg}{/bold}\n\n" +
+          `{red-fg}${errorMsg}{/red-fg}\n\n` +
+          "{gray-fg}Press [R] to retry or [Q] to quit{/gray-fg}",
       );
       screen.render();
 
@@ -688,7 +884,7 @@ export async function createMultiServerMonitorUI(
     if (!match) return null;
 
     const num = parseFloat(match[1]);
-    const hasK = match[2] === 'k';
+    const hasK = match[2] === "k";
 
     if (isNaN(num) || num <= 0) return null;
 
@@ -704,17 +900,21 @@ export async function createMultiServerMonitorUI(
   }
 
   // Helper to create modal boxes (matches ModalController styling)
-  function createModal(title: string, height: number | string = 'shrink', borderColor: string = 'cyan'): blessed.Widgets.BoxElement {
+  function createModal(
+    title: string,
+    height: number | string = "shrink",
+    borderColor: string = "cyan",
+  ): blessed.Widgets.BoxElement {
     return blessed.box({
       parent: screen,
-      top: 'center',
-      left: 'center',
-      width: '70%',
+      top: "center",
+      left: "center",
+      width: "70%",
       height,
-      border: { type: 'line' },
+      border: { type: "line" },
       style: {
         border: { fg: borderColor },
-        fg: 'white', // Matches ModalController
+        fg: "white", // Matches ModalController
       },
       tags: true,
       label: ` ${title} `,
@@ -741,7 +941,7 @@ export async function createMultiServerMonitorUI(
     // Check if other servers use the same model
     const allServers = await stateManager.getAllServers();
     const otherServersWithSameModel = allServers.filter(
-      s => s.id !== server.id && s.modelPath === server.modelPath
+      (s) => s.id !== server.id && s.modelPath === server.modelPath,
     );
 
     let deleteModelOption = false;
@@ -751,21 +951,25 @@ export async function createMultiServerMonitorUI(
 
     const overlay = createOverlay(screen);
     screen.append(overlay);
-    const modal = createModal('Remove Server', showDeleteModelOption ? 18 : 14, 'red');
+    const modal = createModal(
+      "Remove Server",
+      showDeleteModelOption ? 18 : 14,
+      "red",
+    );
 
     function renderDialog(): void {
-      let content = '\n';
+      let content = "\n";
       content += `  {bold}Remove server: ${server.id}{/bold}\n\n`;
       content += `  Model: ${server.modelName}\n`;
       content += `  Port:  ${server.port}\n`;
-      content += `  Status: ${server.status === 'running' ? '{green-fg}running{/green-fg}' : '{gray-fg}stopped{/gray-fg}'}\n\n`;
+      content += `  Status: ${server.status === "running" ? "{green-fg}running{/green-fg}" : "{gray-fg}stopped{/gray-fg}"}\n\n`;
 
-      if (server.status === 'running') {
+      if (server.status === "running") {
         content += `  {yellow-fg}⚠ Server will be stopped{/yellow-fg}\n\n`;
       }
 
       if (showDeleteModelOption) {
-        const checkbox = deleteModelOption ? '☑' : '☐';
+        const checkbox = deleteModelOption ? "☑" : "☐";
         const isCheckboxSelected = selectedOption === 0;
         if (isCheckboxSelected) {
           content += `  {cyan-bg}{15-fg}${checkbox} Also delete model file{/15-fg}{/cyan-bg}\n`;
@@ -793,28 +997,28 @@ export async function createMultiServerMonitorUI(
     modal.focus();
 
     return new Promise((resolve) => {
-      modal.key(['up', 'k'], () => {
+      modal.key(["up", "k"], () => {
         if (showDeleteModelOption && selectedOption === 1) {
           selectedOption = 0;
           renderDialog();
         }
       });
 
-      modal.key(['down', 'j'], () => {
+      modal.key(["down", "j"], () => {
         if (showDeleteModelOption && selectedOption === 0) {
           selectedOption = 1;
           renderDialog();
         }
       });
 
-      modal.key(['space'], () => {
+      modal.key(["space"], () => {
         if (showDeleteModelOption && selectedOption === 0) {
           deleteModelOption = !deleteModelOption;
           renderDialog();
         }
       });
 
-      modal.key(['escape'], () => {
+      modal.key(["escape"], () => {
         screen.remove(modal);
         screen.remove(overlay);
         registerHandlers();
@@ -822,17 +1026,19 @@ export async function createMultiServerMonitorUI(
         resolve();
       });
 
-      modal.key(['enter'], async () => {
+      modal.key(["enter"], async () => {
         screen.remove(modal);
         screen.remove(overlay);
 
         // Show progress
-        const progressModal = showProgressModal('Removing server...');
+        const progressModal = showProgressModal("Removing server...");
 
         try {
           // Stop and unload service if running
-          if (server.status === 'running') {
-            progressModal.setContent('\n  {cyan-fg}Stopping server...{/cyan-fg}');
+          if (server.status === "running") {
+            progressModal.setContent(
+              "\n  {cyan-fg}Stopping server...{/cyan-fg}",
+            );
             screen.render();
             try {
               await launchctlManager.unloadService(server.plistPath);
@@ -850,7 +1056,9 @@ export async function createMultiServerMonitorUI(
           }
 
           // Delete plist
-          progressModal.setContent('\n  {cyan-fg}Removing configuration...{/cyan-fg}');
+          progressModal.setContent(
+            "\n  {cyan-fg}Removing configuration...{/cyan-fg}",
+          );
           screen.render();
           await launchctlManager.deletePlist(server.plistPath);
 
@@ -859,7 +1067,9 @@ export async function createMultiServerMonitorUI(
 
           // Delete model if requested
           if (deleteModelOption && showDeleteModelOption) {
-            progressModal.setContent('\n  {cyan-fg}Deleting model file...{/cyan-fg}');
+            progressModal.setContent(
+              "\n  {cyan-fg}Deleting model file...{/cyan-fg}",
+            );
             screen.render();
             await fs.unlink(server.modelPath);
           }
@@ -867,7 +1077,7 @@ export async function createMultiServerMonitorUI(
           modalController.closeProgress(progressModal);
 
           // Remove server from our arrays
-          const idx = servers.findIndex(s => s.id === server.id);
+          const idx = servers.findIndex((s) => s.id === server.id);
           if (idx !== -1) {
             servers.splice(idx, 1);
             aggregators.delete(server.id);
@@ -876,17 +1086,21 @@ export async function createMultiServerMonitorUI(
           }
 
           // Go back to list view
-          viewMode = 'list';
-          selectedRowIndex = Math.min(selectedRowIndex, Math.max(0, servers.length - 1));
+          viewMode = "list";
+          selectedRowIndex = Math.min(
+            selectedRowIndex,
+            Math.max(0, servers.length - 1),
+          );
           selectedServerIndex = selectedRowIndex;
 
           registerHandlers();
           startPolling();
           resolve();
-
         } catch (err) {
           modalController.closeProgress(progressModal);
-          await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
+          await showErrorModal(
+            err instanceof Error ? err.message : "Unknown error",
+          );
           registerHandlers();
           startPolling();
           resolve();
@@ -905,7 +1119,9 @@ export async function createMultiServerMonitorUI(
     // Step 1: Model selection
     const models = await modelScanner.scanModels();
     if (models.length === 0) {
-      await showErrorModal('No models found in ~/models directory.\nUse [M]odels → [S]earch to download models.');
+      await showErrorModal(
+        "No models found in ~/models directory.\nUse [M]odels → [S]earch to download models.",
+      );
       // Immediately render with cached data for instant feedback
       const content = renderListView(lastSystemMetrics);
       contentBox.setContent(content);
@@ -917,7 +1133,7 @@ export async function createMultiServerMonitorUI(
 
     // Check which models already have servers
     const allServers = await stateManager.getAllServers();
-    const modelsWithServers = new Set(allServers.map(s => s.modelPath));
+    const modelsWithServers = new Set(allServers.map((s) => s.modelPath));
 
     let selectedModelIndex = 0;
     let scrollOffset = 0;
@@ -925,7 +1141,10 @@ export async function createMultiServerMonitorUI(
 
     const modelOverlay = createOverlay(screen);
     screen.append(modelOverlay);
-    const modelModal = createModal('Create Server - Select Model', maxVisible + 8);
+    const modelModal = createModal(
+      "Create Server - Select Model",
+      maxVisible + 8,
+    );
 
     function renderModelPicker(): void {
       // Adjust scroll offset
@@ -935,29 +1154,34 @@ export async function createMultiServerMonitorUI(
         scrollOffset = selectedModelIndex - maxVisible + 1;
       }
 
-      let content = '\n';
-      content += '  {bold}Select a model to create a server for:{/bold}\n\n';
+      let content = "\n";
+      content += "  {bold}Select a model to create a server for:{/bold}\n\n";
 
-      const visibleModels = models.slice(scrollOffset, scrollOffset + maxVisible);
+      const visibleModels = models.slice(
+        scrollOffset,
+        scrollOffset + maxVisible,
+      );
 
       for (let i = 0; i < visibleModels.length; i++) {
         const model = visibleModels[i];
         const actualIndex = scrollOffset + i;
         const isSelected = actualIndex === selectedModelIndex;
         const hasServer = modelsWithServers.has(model.path);
-        const indicator = isSelected ? '►' : ' ';
+        const indicator = isSelected ? "►" : " ";
 
         // Truncate filename if too long
         let displayName = model.filename;
         const maxLen = 40;
         if (displayName.length > maxLen) {
-          displayName = displayName.substring(0, maxLen - 3) + '...';
+          displayName = displayName.substring(0, maxLen - 3) + "...";
         }
         displayName = displayName.padEnd(maxLen);
 
         const size = model.sizeFormatted.padStart(8);
-        const serverIndicator = hasServer ? ' {yellow-fg}(has server){/yellow-fg}' : '';
-        const serverIndicatorPlain = hasServer ? ' (has server)' : '';
+        const serverIndicator = hasServer
+          ? " {yellow-fg}(has server){/yellow-fg}"
+          : "";
+        const serverIndicatorPlain = hasServer ? " (has server)" : "";
 
         if (isSelected) {
           content += `  {cyan-bg}{15-fg}${indicator} ${displayName} ${size}${serverIndicatorPlain}{/15-fg}{/cyan-bg}\n`;
@@ -972,7 +1196,8 @@ export async function createMultiServerMonitorUI(
         content += `\n  {gray-fg}${scrollInfo}{/gray-fg}`;
       }
 
-      content += '\n\n  {gray-fg}[↑/↓] Navigate  [Enter] Select  [ESC] Cancel{/gray-fg}';
+      content +=
+        "\n\n  {gray-fg}[↑/↓] Navigate  [Enter] Select  [ESC] Cancel{/gray-fg}";
       modelModal.setContent(content);
       screen.render();
     }
@@ -981,23 +1206,26 @@ export async function createMultiServerMonitorUI(
     modelModal.focus();
 
     const selectedModel = await new Promise<ModelInfo | null>((resolve) => {
-      modelModal.key(['up', 'k'], () => {
+      modelModal.key(["up", "k"], () => {
         selectedModelIndex = Math.max(0, selectedModelIndex - 1);
         renderModelPicker();
       });
 
-      modelModal.key(['down', 'j'], () => {
-        selectedModelIndex = Math.min(models.length - 1, selectedModelIndex + 1);
+      modelModal.key(["down", "j"], () => {
+        selectedModelIndex = Math.min(
+          models.length - 1,
+          selectedModelIndex + 1,
+        );
         renderModelPicker();
       });
 
-      modelModal.key(['escape'], () => {
+      modelModal.key(["escape"], () => {
         screen.remove(modelModal);
         screen.remove(modelOverlay);
         resolve(null);
       });
 
-      modelModal.key(['enter'], () => {
+      modelModal.key(["enter"], () => {
         screen.remove(modelModal);
         screen.remove(modelOverlay);
         resolve(models[selectedModelIndex]);
@@ -1018,9 +1246,11 @@ export async function createMultiServerMonitorUI(
     const model = selectedModel;
 
     // Check if server already exists for this model
-    const existingServer = allServers.find(s => s.modelPath === model.path);
+    const existingServer = allServers.find((s) => s.modelPath === model.path);
     if (existingServer) {
-      await showErrorModal(`Server already exists for this model.\nServer ID: ${existingServer.id}\nPort: ${existingServer.port}`);
+      await showErrorModal(
+        `Server already exists for this model.\nServer ID: ${existingServer.id}\nPort: ${existingServer.port}`,
+      );
       // Immediately render with cached data for instant feedback
       const content = renderListView(lastSystemMetrics);
       contentBox.setContent(content);
@@ -1046,21 +1276,24 @@ export async function createMultiServerMonitorUI(
 
     // Smart context size based on model size
     let defaultCtxSize = 4096;
-    if (modelSize < 1024 * 1024 * 1024) { // < 1GB
+    if (modelSize < 1024 * 1024 * 1024) {
+      // < 1GB
       defaultCtxSize = 2048;
-    } else if (modelSize < 3 * 1024 * 1024 * 1024) { // < 3GB
+    } else if (modelSize < 3 * 1024 * 1024 * 1024) {
+      // < 3GB
       defaultCtxSize = 4096;
-    } else if (modelSize < 6 * 1024 * 1024 * 1024) { // < 6GB
+    } else if (modelSize < 6 * 1024 * 1024 * 1024) {
+      // < 6GB
       defaultCtxSize = 8192;
     } else {
       defaultCtxSize = 16384;
     }
 
-    const os = await import('os');
+    const os = await import("os");
     const defaultThreads = Math.max(1, Math.floor(os.cpus().length / 2));
 
     const config: CreateConfig = {
-      host: '127.0.0.1',
+      host: "127.0.0.1",
       port: defaultPort,
       threads: defaultThreads,
       ctxSize: defaultCtxSize,
@@ -1070,37 +1303,42 @@ export async function createMultiServerMonitorUI(
 
     // Configuration fields
     const fields = [
-      { key: 'host', label: 'Host', type: 'select', options: ['127.0.0.1', '0.0.0.0'] },
-      { key: 'port', label: 'Port', type: 'number' },
-      { key: 'threads', label: 'Threads', type: 'number' },
-      { key: 'ctxSize', label: 'Context Size', type: 'number' },
-      { key: 'gpuLayers', label: 'GPU Layers', type: 'number' },
-      { key: 'verbose', label: 'Verbose Logs', type: 'toggle' },
+      {
+        key: "host",
+        label: "Host",
+        type: "select",
+        options: ["127.0.0.1", "0.0.0.0"],
+      },
+      { key: "port", label: "Port", type: "number" },
+      { key: "threads", label: "Threads", type: "number" },
+      { key: "ctxSize", label: "Context Size", type: "number" },
+      { key: "gpuLayers", label: "GPU Layers", type: "number" },
+      { key: "verbose", label: "Verbose Logs", type: "toggle" },
     ];
 
     let selectedFieldIndex = 0;
     const configOverlay = createOverlay(screen);
     screen.append(configOverlay);
-    const configModal = createModal('Create Server - Configuration', 20);
+    const configModal = createModal("Create Server - Configuration", 20);
 
     function formatConfigValue(key: string, value: any): string {
-      if (key === 'verbose') return value ? 'Enabled' : 'Disabled';
-      if (key === 'ctxSize') return formatContextSize(value);
+      if (key === "verbose") return value ? "Enabled" : "Disabled";
+      if (key === "ctxSize") return formatContextSize(value);
       return String(value);
     }
 
     function renderConfigScreen(): void {
-      let content = '\n';
+      let content = "\n";
       content += `  {bold}Model:{/bold} ${model.filename}\n`;
       content += `  {bold}Size:{/bold}  ${model.sizeFormatted}\n\n`;
 
-      content += '  {bold}Server Configuration:{/bold}\n';
-      content += '  ─'.repeat(30) + '\n';
+      content += "  {bold}Server Configuration:{/bold}\n";
+      content += "  ─".repeat(30) + "\n";
 
       for (let i = 0; i < fields.length; i++) {
         const field = fields[i];
         const isSelected = i === selectedFieldIndex;
-        const indicator = isSelected ? '►' : ' ';
+        const indicator = isSelected ? "►" : " ";
         const label = field.label.padEnd(14);
         const value = formatConfigValue(field.key, (config as any)[field.key]);
 
@@ -1111,7 +1349,7 @@ export async function createMultiServerMonitorUI(
         }
       }
 
-      content += '\n';
+      content += "\n";
       const createSelected = selectedFieldIndex === fields.length;
       if (createSelected) {
         content += `  {green-bg}{15-fg}[ Create Server ]{/15-fg}{/green-bg}\n`;
@@ -1119,7 +1357,8 @@ export async function createMultiServerMonitorUI(
         content += `  {green-fg}[ Create Server ]{/green-fg}\n`;
       }
 
-      content += '\n  {gray-fg}[↑/↓] Navigate  [Enter] Edit/Create  [ESC] Cancel{/gray-fg}';
+      content +=
+        "\n  {gray-fg}[↑/↓] Navigate  [Enter] Edit/Create  [ESC] Cancel{/gray-fg}";
       configModal.setContent(content);
       screen.render();
     }
@@ -1128,23 +1367,23 @@ export async function createMultiServerMonitorUI(
     configModal.focus();
 
     const shouldCreate = await new Promise<boolean>((resolve) => {
-      configModal.key(['up', 'k'], () => {
+      configModal.key(["up", "k"], () => {
         selectedFieldIndex = Math.max(0, selectedFieldIndex - 1);
         renderConfigScreen();
       });
 
-      configModal.key(['down', 'j'], () => {
+      configModal.key(["down", "j"], () => {
         selectedFieldIndex = Math.min(fields.length, selectedFieldIndex + 1);
         renderConfigScreen();
       });
 
-      configModal.key(['escape'], () => {
+      configModal.key(["escape"], () => {
         screen.remove(configModal);
         screen.remove(configOverlay);
         resolve(false);
       });
 
-      configModal.key(['enter'], async () => {
+      configModal.key(["enter"], async () => {
         if (selectedFieldIndex === fields.length) {
           // Create button selected
           screen.remove(configModal);
@@ -1154,7 +1393,7 @@ export async function createMultiServerMonitorUI(
           // Edit field
           const field = fields[selectedFieldIndex];
 
-          if (field.type === 'select') {
+          if (field.type === "select") {
             // Show select dialog
             const options = field.options!;
             let optionIndex = options.indexOf((config as any)[field.key]);
@@ -1165,20 +1404,22 @@ export async function createMultiServerMonitorUI(
             const selectModal = createModal(field.label, options.length + 6);
 
             function renderSelectOptions(): void {
-              let content = '\n';
+              let content = "\n";
               for (let i = 0; i < options.length; i++) {
                 const isOpt = i === optionIndex;
-                const ind = isOpt ? '●' : '○';
+                const ind = isOpt ? "●" : "○";
                 if (isOpt) {
                   content += `  {cyan-fg}${ind} ${options[i]}{/cyan-fg}\n`;
                 } else {
                   content += `  {gray-fg}${ind} ${options[i]}{/gray-fg}\n`;
                 }
               }
-              if (field.key === 'host' && options[optionIndex] === '0.0.0.0') {
-                content += '\n  {yellow-fg}⚠ Warning: Exposes server to network{/yellow-fg}';
+              if (field.key === "host" && options[optionIndex] === "0.0.0.0") {
+                content +=
+                  "\n  {yellow-fg}⚠ Warning: Exposes server to network{/yellow-fg}";
               }
-              content += '\n\n  {gray-fg}[↑/↓] Select  [Enter] Confirm{/gray-fg}';
+              content +=
+                "\n\n  {gray-fg}[↑/↓] Select  [Enter] Confirm{/gray-fg}";
               selectModal.setContent(content);
               screen.render();
             }
@@ -1187,21 +1428,21 @@ export async function createMultiServerMonitorUI(
             selectModal.focus();
 
             await new Promise<void>((resolveSelect) => {
-              selectModal.key(['up', 'k'], () => {
+              selectModal.key(["up", "k"], () => {
                 optionIndex = Math.max(0, optionIndex - 1);
                 renderSelectOptions();
               });
-              selectModal.key(['down', 'j'], () => {
+              selectModal.key(["down", "j"], () => {
                 optionIndex = Math.min(options.length - 1, optionIndex + 1);
                 renderSelectOptions();
               });
-              selectModal.key(['enter'], () => {
+              selectModal.key(["enter"], () => {
                 (config as any)[field.key] = options[optionIndex];
                 screen.remove(selectModal);
                 screen.remove(selectOverlay);
                 resolveSelect();
               });
-              selectModal.key(['escape'], () => {
+              selectModal.key(["escape"], () => {
                 screen.remove(selectModal);
                 screen.remove(selectOverlay);
                 resolveSelect();
@@ -1210,17 +1451,18 @@ export async function createMultiServerMonitorUI(
 
             renderConfigScreen();
             configModal.focus();
-
-          } else if (field.type === 'toggle') {
+          } else if (field.type === "toggle") {
             (config as any)[field.key] = !(config as any)[field.key];
             renderConfigScreen();
-
-          } else if (field.type === 'number') {
+          } else if (field.type === "number") {
             // Number input
-            const isCtxSize = field.key === 'ctxSize';
+            const isCtxSize = field.key === "ctxSize";
             const inputOverlay = createOverlay(screen);
             screen.append(inputOverlay);
-            const inputModal = createModal(`Edit ${field.label}`, isCtxSize ? 11 : 10);
+            const inputModal = createModal(
+              `Edit ${field.label}`,
+              isCtxSize ? 11 : 10,
+            );
 
             const currentDisplay = isCtxSize
               ? formatContextSize((config as any)[field.key])
@@ -1240,7 +1482,8 @@ export async function createMultiServerMonitorUI(
                 parent: inputModal,
                 top: 2,
                 left: 2,
-                content: '{gray-fg}Accepts: 4096, 4k, 8k, 16k, 32k, 64k, 128k{/gray-fg}',
+                content:
+                  "{gray-fg}Accepts: 4096, 4k, 8k, 16k, 32k, 64k, 128k{/gray-fg}",
                 tags: true,
               });
             }
@@ -1252,10 +1495,10 @@ export async function createMultiServerMonitorUI(
               right: 2,
               height: 3,
               inputOnFocus: true,
-              border: { type: 'line' },
+              border: { type: "line" },
               style: {
-                border: { fg: 'white' },
-                focus: { border: { fg: 'green' } },
+                border: { fg: "white" },
+                focus: { border: { fg: "green" } },
               },
             });
 
@@ -1263,7 +1506,7 @@ export async function createMultiServerMonitorUI(
               parent: inputModal,
               bottom: 1,
               left: 2,
-              content: '{gray-fg}[Enter] Confirm  [ESC] Cancel{/gray-fg}',
+              content: "{gray-fg}[Enter] Confirm  [ESC] Cancel{/gray-fg}",
               tags: true,
             });
 
@@ -1276,7 +1519,7 @@ export async function createMultiServerMonitorUI(
             inputBox.focus();
 
             await new Promise<void>((resolveInput) => {
-              inputBox.on('submit', (value: string) => {
+              inputBox.on("submit", (value: string) => {
                 let numValue: number | null;
 
                 if (isCtxSize) {
@@ -1294,13 +1537,13 @@ export async function createMultiServerMonitorUI(
                 resolveInput();
               });
 
-              inputBox.on('cancel', () => {
+              inputBox.on("cancel", () => {
                 screen.remove(inputModal);
                 screen.remove(inputOverlay);
                 resolveInput();
               });
 
-              inputBox.key(['escape'], () => {
+              inputBox.key(["escape"], () => {
                 screen.remove(inputModal);
                 screen.remove(inputOverlay);
                 resolveInput();
@@ -1325,7 +1568,7 @@ export async function createMultiServerMonitorUI(
     }
 
     // Step 3: Create the server
-    const progressModal = showProgressModal('Creating server...');
+    const progressModal = showProgressModal("Creating server...");
 
     try {
       // Generate full server config
@@ -1338,7 +1581,9 @@ export async function createMultiServerMonitorUI(
         verbose: config.verbose,
       };
 
-      progressModal.setContent('\n  {cyan-fg}Generating configuration...{/cyan-fg}');
+      progressModal.setContent(
+        "\n  {cyan-fg}Generating configuration...{/cyan-fg}",
+      );
       screen.render();
 
       const serverConfig = await configGenerator.generateConfig(
@@ -1346,14 +1591,16 @@ export async function createMultiServerMonitorUI(
         model.filename,
         model.size,
         config.port,
-        serverOptions
+        serverOptions,
       );
 
       // Ensure log directory exists
       await ensureDir(path.dirname(serverConfig.stdoutPath));
 
       // Create plist
-      progressModal.setContent('\n  {cyan-fg}Creating launchctl service...{/cyan-fg}');
+      progressModal.setContent(
+        "\n  {cyan-fg}Creating launchctl service...{/cyan-fg}",
+      );
       screen.render();
       await launchctlManager.createPlist(serverConfig);
 
@@ -1366,7 +1613,7 @@ export async function createMultiServerMonitorUI(
       }
 
       // Start service
-      progressModal.setContent('\n  {cyan-fg}Starting server...{/cyan-fg}');
+      progressModal.setContent("\n  {cyan-fg}Starting server...{/cyan-fg}");
       screen.render();
       try {
         await launchctlManager.startService(serverConfig.label);
@@ -1377,18 +1624,25 @@ export async function createMultiServerMonitorUI(
       }
 
       // Wait for startup
-      progressModal.setContent('\n  {cyan-fg}Waiting for server to start...{/cyan-fg}');
+      progressModal.setContent(
+        "\n  {cyan-fg}Waiting for server to start...{/cyan-fg}",
+      );
       screen.render();
-      const started = await launchctlManager.waitForServiceStart(serverConfig.label, 5000);
+      const started = await launchctlManager.waitForServiceStart(
+        serverConfig.label,
+        5000,
+      );
 
       if (!started) {
         await launchctlManager.unloadService(serverConfig.plistPath);
         await launchctlManager.deletePlist(serverConfig.plistPath);
-        throw new Error('Server failed to start. Check logs.');
+        throw new Error("Server failed to start. Check logs.");
       }
 
       // Wait for port to be ready (server may take a moment to bind)
-      progressModal.setContent('\n  {cyan-fg}Waiting for server to be ready...{/cyan-fg}');
+      progressModal.setContent(
+        "\n  {cyan-fg}Waiting for server to be ready...{/cyan-fg}",
+      );
       screen.render();
       const portTimeout = 10000; // 10 seconds
       const portStartTime = Date.now();
@@ -1398,23 +1652,27 @@ export async function createMultiServerMonitorUI(
           portReady = true;
           break;
         }
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
       if (!portReady) {
         await launchctlManager.unloadService(serverConfig.plistPath);
         await launchctlManager.deletePlist(serverConfig.plistPath);
-        throw new Error('Server started but port not responding. Check logs.');
+        throw new Error("Server started but port not responding. Check logs.");
       }
 
       // Update config with running status
       let updatedConfig = await statusChecker.updateServerStatus(serverConfig);
 
       // Parse Metal memory allocation (wait a bit for model to load)
-      progressModal.setContent('\n  {cyan-fg}Detecting GPU memory allocation...{/cyan-fg}');
+      progressModal.setContent(
+        "\n  {cyan-fg}Detecting GPU memory allocation...{/cyan-fg}",
+      );
       screen.render();
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      const metalMemoryMB = await parseMetalMemoryFromLog(updatedConfig.stderrPath);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const metalMemoryMB = await parseMetalMemoryFromLog(
+        updatedConfig.stderrPath,
+      );
       if (metalMemoryMB) {
         updatedConfig = { ...updatedConfig, metalMemoryMB };
       }
@@ -1423,16 +1681,21 @@ export async function createMultiServerMonitorUI(
       await stateManager.saveServerConfig(updatedConfig);
 
       // Show success message briefly
-      progressModal.setContent('\n  {green-fg}✓ Server created successfully!{/green-fg}');
+      progressModal.setContent(
+        "\n  {green-fg}✓ Server created successfully!{/green-fg}",
+      );
       screen.render();
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       modalController.closeProgress(progressModal);
 
       // Add to our arrays
       servers.push(updatedConfig);
       aggregators.set(updatedConfig.id, new MetricsAggregator(updatedConfig));
-      historyManagers.set(updatedConfig.id, new HistoryManager(updatedConfig.id));
+      historyManagers.set(
+        updatedConfig.id,
+        new HistoryManager(updatedConfig.id),
+      );
       serverDataMap.set(updatedConfig.id, {
         server: updatedConfig,
         data: null,
@@ -1445,10 +1708,11 @@ export async function createMultiServerMonitorUI(
 
       registerHandlers();
       startPolling();
-
     } catch (err) {
       modalController.closeProgress(progressModal);
-      await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
+      await showErrorModal(
+        err instanceof Error ? err.message : "Unknown error",
+      );
       // Immediately render with cached data for instant feedback
       const content = renderListView(lastSystemMetrics);
       contentBox.setContent(content);
@@ -1461,7 +1725,7 @@ export async function createMultiServerMonitorUI(
   // Store key handler references for cleanup when switching views
   const keyHandlers = {
     up: () => {
-      if (viewMode === 'list') {
+      if (viewMode === "list") {
         selectedRowIndex = Math.max(0, selectedRowIndex - 1);
         // Re-render immediately for responsive feel
         const content = renderListView(lastSystemMetrics);
@@ -1470,7 +1734,7 @@ export async function createMultiServerMonitorUI(
       }
     },
     down: () => {
-      if (viewMode === 'list') {
+      if (viewMode === "list") {
         selectedRowIndex = Math.min(servers.length - 1, selectedRowIndex + 1);
         // Re-render immediately for responsive feel
         const content = renderListView(lastSystemMetrics);
@@ -1479,10 +1743,10 @@ export async function createMultiServerMonitorUI(
       }
     },
     enter: () => {
-      if (viewMode === 'list') {
+      if (viewMode === "list") {
         showLoading();
         selectedServerIndex = selectedRowIndex;
-        viewMode = 'detail';
+        viewMode = "detail";
         fetchData();
       }
     },
@@ -1490,31 +1754,61 @@ export async function createMultiServerMonitorUI(
       // Don't handle ESC if modal is open or we're in historical view
       if (modalController.isModalOpen() || inHistoricalView) return;
 
-      if (viewMode === 'detail') {
+      if (viewMode === "detail" && detailSubView === "logs") {
+        // Return from logs to detail status view
+        detailSubView = "status";
+        stopLogsAutoRefresh();
+        render();
+      } else if (viewMode === "detail") {
         showLoading();
-        viewMode = 'list';
+        viewMode = "list";
+        detailSubView = "status"; // Reset to status when going back to list
         cameFromDirectJump = false; // Clear direct jump flag when returning to list
         fetchData();
-      } else if (viewMode === 'list') {
+      } else if (viewMode === "list") {
         // ESC in list view - exit
         showLoading();
         if (intervalId) clearInterval(intervalId);
         if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+        stopLogsAutoRefresh();
         setTimeout(() => {
           screen.destroy();
           process.exit(0);
         }, 100);
       }
     },
+    logs: () => {
+      // Only available from detail view and not in historical view
+      if (viewMode !== "detail" || inHistoricalView) return;
+      if (detailSubView === "status") {
+        detailSubView = "logs";
+        render();
+      }
+    },
+    refreshLogs: () => {
+      if (viewMode === "detail" && detailSubView === "logs") {
+        render();
+      }
+    },
+    toggleLogsRefresh: () => {
+      if (viewMode === "detail" && detailSubView === "logs") {
+        if (logsRefreshInterval) {
+          stopLogsAutoRefresh();
+        } else {
+          startLogsAutoRefresh();
+        }
+        render();
+      }
+    },
     models: async () => {
-      if (onModels && viewMode === 'list' && !inHistoricalView) {
+      if (onModels && viewMode === "list" && !inHistoricalView) {
         // Pause monitor (don't destroy - we'll resume when returning)
         controls.pause();
         await onModels(controls);
       }
     },
     router: async () => {
-      if (onRouter && viewMode === 'list' && !inHistoricalView) {
+      if (onRouter && viewMode === "list" && !inHistoricalView) {
         // Pause monitor (don't destroy - we'll resume when returning)
         controls.pause();
         await onRouter(controls);
@@ -1534,18 +1828,23 @@ export async function createMultiServerMonitorUI(
       // Mark that we're in historical view
       inHistoricalView = true;
 
-      if (viewMode === 'list') {
+      if (viewMode === "list") {
         // Show multi-server historical view
-        await createMultiServerHistoricalUI(screen, servers, selectedServerIndex, () => {
-          // Mark that we've left historical view
-          inHistoricalView = false;
-          // Re-attach content box when returning from history
-          screen.append(contentBox);
-          // Re-render the list view
-          const content = renderListView(lastSystemMetrics);
-          contentBox.setContent(content);
-          screen.render();
-        });
+        await createMultiServerHistoricalUI(
+          screen,
+          servers,
+          selectedServerIndex,
+          () => {
+            // Mark that we've left historical view
+            inHistoricalView = false;
+            // Re-attach content box when returning from history
+            screen.append(contentBox);
+            // Re-render the list view
+            const content = renderListView(lastSystemMetrics);
+            contentBox.setContent(content);
+            screen.render();
+          },
+        );
       } else {
         // Show single-server historical view for selected server
         const selectedServer = servers[selectedServerIndex];
@@ -1563,7 +1862,7 @@ export async function createMultiServerMonitorUI(
     },
     config: async () => {
       // Only available from detail view and not in historical view
-      if (viewMode !== 'detail' || inHistoricalView) return;
+      if (viewMode !== "detail" || inHistoricalView) return;
 
       // Pause monitor
       controls.pause();
@@ -1578,8 +1877,14 @@ export async function createMultiServerMonitorUI(
             aggregators.delete(selectedServer.id);
             historyManagers.delete(selectedServer.id);
             serverDataMap.delete(selectedServer.id);
-            aggregators.set(updatedServer.id, new MetricsAggregator(updatedServer));
-            historyManagers.set(updatedServer.id, new HistoryManager(updatedServer.id));
+            aggregators.set(
+              updatedServer.id,
+              new MetricsAggregator(updatedServer),
+            );
+            historyManagers.set(
+              updatedServer.id,
+              new HistoryManager(updatedServer.id),
+            );
             serverDataMap.set(updatedServer.id, {
               server: updatedServer,
               data: null,
@@ -1601,7 +1906,7 @@ export async function createMultiServerMonitorUI(
     },
     remove: async () => {
       // Only available from detail view and not in historical view
-      if (viewMode !== 'detail' || inHistoricalView) return;
+      if (viewMode !== "detail" || inHistoricalView) return;
 
       const selectedServer = servers[selectedServerIndex];
 
@@ -1610,32 +1915,35 @@ export async function createMultiServerMonitorUI(
     },
     startStop: async () => {
       // Only available from detail view and not in historical view
-      if (viewMode !== 'detail' || inHistoricalView) return;
+      if (viewMode !== "detail" || inHistoricalView) return;
 
       const selectedServer = servers[selectedServerIndex];
 
       // If running, stop it. If stopped, start it.
-      if (selectedServer.status === 'running') {
+      if (selectedServer.status === "running") {
         // Stop the server
         if (intervalId) clearInterval(intervalId);
         if (spinnerIntervalId) clearInterval(spinnerIntervalId);
         unregisterHandlers();
 
-        const progressModal = showProgressModal('Stopping server...');
+        const progressModal = showProgressModal("Stopping server...");
 
         try {
           // Unload service (this stops and unregisters it)
-          progressModal.setContent('\n  {cyan-fg}Stopping server...{/cyan-fg}');
+          progressModal.setContent("\n  {cyan-fg}Stopping server...{/cyan-fg}");
           screen.render();
           await launchctlManager.unloadService(selectedServer.plistPath);
 
           // Wait for shutdown
-          progressModal.setContent('\n  {cyan-fg}Waiting for server to stop...{/cyan-fg}');
+          progressModal.setContent(
+            "\n  {cyan-fg}Waiting for server to stop...{/cyan-fg}",
+          );
           screen.render();
           await launchctlManager.waitForServiceStop(selectedServer.label, 5000);
 
           // Update server status
-          const updatedServer = await statusChecker.updateServerStatus(selectedServer);
+          const updatedServer =
+            await statusChecker.updateServerStatus(selectedServer);
           servers[selectedServerIndex] = updatedServer;
           serverDataMap.set(updatedServer.id, {
             server: updatedServer,
@@ -1647,17 +1955,20 @@ export async function createMultiServerMonitorUI(
           await stateManager.saveServerConfig(updatedServer);
 
           // Show success briefly
-          progressModal.setContent('\n  {green-fg}✓ Server stopped successfully!{/green-fg}');
+          progressModal.setContent(
+            "\n  {green-fg}✓ Server stopped successfully!{/green-fg}",
+          );
           screen.render();
-          await new Promise(resolve => setTimeout(resolve, 800));
+          await new Promise((resolve) => setTimeout(resolve, 800));
 
           modalController.closeProgress(progressModal);
           registerHandlers();
           startPolling();
-
         } catch (err) {
           modalController.closeProgress(progressModal);
-          await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
+          await showErrorModal(
+            err instanceof Error ? err.message : "Unknown error",
+          );
           registerHandlers();
           startPolling();
         }
@@ -1671,19 +1982,24 @@ export async function createMultiServerMonitorUI(
       if (spinnerIntervalId) clearInterval(spinnerIntervalId);
       unregisterHandlers();
 
-      const progressModal = showProgressModal('Starting server...');
+      const progressModal = showProgressModal("Starting server...");
 
       try {
         // Recreate plist if needed
-        const plistExists = await fs.access(selectedServer.plistPath).then(() => true).catch(() => false);
+        const plistExists = await fs
+          .access(selectedServer.plistPath)
+          .then(() => true)
+          .catch(() => false);
         if (!plistExists) {
-          progressModal.setContent('\n  {cyan-fg}Recreating plist...{/cyan-fg}');
+          progressModal.setContent(
+            "\n  {cyan-fg}Recreating plist...{/cyan-fg}",
+          );
           screen.render();
           await launchctlManager.createPlist(selectedServer);
         }
 
         // Load service
-        progressModal.setContent('\n  {cyan-fg}Loading service...{/cyan-fg}');
+        progressModal.setContent("\n  {cyan-fg}Loading service...{/cyan-fg}");
         screen.render();
         try {
           await launchctlManager.loadService(selectedServer.plistPath);
@@ -1692,21 +2008,28 @@ export async function createMultiServerMonitorUI(
         }
 
         // Start service
-        progressModal.setContent('\n  {cyan-fg}Starting server...{/cyan-fg}');
+        progressModal.setContent("\n  {cyan-fg}Starting server...{/cyan-fg}");
         screen.render();
         await launchctlManager.startService(selectedServer.label);
 
         // Wait for startup
-        progressModal.setContent('\n  {cyan-fg}Waiting for server to start...{/cyan-fg}');
+        progressModal.setContent(
+          "\n  {cyan-fg}Waiting for server to start...{/cyan-fg}",
+        );
         screen.render();
-        const started = await launchctlManager.waitForServiceStart(selectedServer.label, 5000);
+        const started = await launchctlManager.waitForServiceStart(
+          selectedServer.label,
+          5000,
+        );
 
         if (!started) {
-          throw new Error('Server failed to start. Check logs.');
+          throw new Error("Server failed to start. Check logs.");
         }
 
         // Wait for port to be ready
-        progressModal.setContent('\n  {cyan-fg}Waiting for server to be ready...{/cyan-fg}');
+        progressModal.setContent(
+          "\n  {cyan-fg}Waiting for server to be ready...{/cyan-fg}",
+        );
         screen.render();
         const portTimeout = 10000;
         const portStartTime = Date.now();
@@ -1716,15 +2039,18 @@ export async function createMultiServerMonitorUI(
             portReady = true;
             break;
           }
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await new Promise((resolve) => setTimeout(resolve, 500));
         }
 
         if (!portReady) {
-          throw new Error('Server started but port not responding. Check logs.');
+          throw new Error(
+            "Server started but port not responding. Check logs.",
+          );
         }
 
         // Update server status
-        const updatedServer = await statusChecker.updateServerStatus(selectedServer);
+        const updatedServer =
+          await statusChecker.updateServerStatus(selectedServer);
         servers[selectedServerIndex] = updatedServer;
         serverDataMap.set(updatedServer.id, {
           server: updatedServer,
@@ -1736,24 +2062,27 @@ export async function createMultiServerMonitorUI(
         await stateManager.saveServerConfig(updatedServer);
 
         // Show success briefly
-        progressModal.setContent('\n  {green-fg}✓ Server started successfully!{/green-fg}');
+        progressModal.setContent(
+          "\n  {green-fg}✓ Server started successfully!{/green-fg}",
+        );
         screen.render();
-        await new Promise(resolve => setTimeout(resolve, 800));
+        await new Promise((resolve) => setTimeout(resolve, 800));
 
         modalController.closeProgress(progressModal);
         registerHandlers();
         startPolling();
-
       } catch (err) {
         modalController.closeProgress(progressModal);
-        await showErrorModal(err instanceof Error ? err.message : 'Unknown error');
+        await showErrorModal(
+          err instanceof Error ? err.message : "Unknown error",
+        );
         registerHandlers();
         startPolling();
       }
     },
     create: async () => {
       // Only available from list view and not in historical view
-      if (viewMode !== 'list' || inHistoricalView) return;
+      if (viewMode !== "list" || inHistoricalView) return;
 
       // Show create server flow
       await showCreateServerFlow();
@@ -1772,45 +2101,66 @@ export async function createMultiServerMonitorUI(
 
   // Unregister all keyboard handlers
   function unregisterHandlers() {
-    screen.unkey('up', keyHandlers.up);
-    screen.unkey('k', keyHandlers.up);
-    screen.unkey('down', keyHandlers.down);
-    screen.unkey('j', keyHandlers.down);
-    screen.unkey('enter', keyHandlers.enter);
-    screen.unkey('escape', keyHandlers.escape);
-    screen.unkey('m', keyHandlers.models);
-    screen.unkey('M', keyHandlers.models);
-    screen.unkey('r', keyHandlers.router);
-    screen.unkey('R', keyHandlers.router);
-    screen.unkey('h', keyHandlers.history);
-    screen.unkey('H', keyHandlers.history);
-    screen.unkey('c', keyHandlers.config);
-    screen.unkey('C', keyHandlers.config);
-    screen.unkey('r', keyHandlers.remove);
-    screen.unkey('R', keyHandlers.remove);
-    screen.unkey('s', keyHandlers.startStop);
-    screen.unkey('S', keyHandlers.startStop);
-    screen.unkey('n', keyHandlers.create);
-    screen.unkey('N', keyHandlers.create);
-    screen.unkey('q', keyHandlers.quit);
-    screen.unkey('Q', keyHandlers.quit);
-    screen.unkey('C-c', keyHandlers.quit);
+    screen.unkey("up", keyHandlers.up);
+    screen.unkey("k", keyHandlers.up);
+    screen.unkey("down", keyHandlers.down);
+    screen.unkey("j", keyHandlers.down);
+    screen.unkey("enter", keyHandlers.enter);
+    screen.unkey("escape", keyHandlers.escape);
+    screen.unkey("m", keyHandlers.models);
+    screen.unkey("M", keyHandlers.models);
+    screen.unkey("r", keyHandlers.router);
+    screen.unkey("R", keyHandlers.router);
+    screen.unkey("h", keyHandlers.history);
+    screen.unkey("H", keyHandlers.history);
+    screen.unkey("c", keyHandlers.config);
+    screen.unkey("C", keyHandlers.config);
+    screen.unkey("r", keyHandlers.remove);
+    screen.unkey("R", keyHandlers.remove);
+    screen.unkey("s", keyHandlers.startStop);
+    screen.unkey("S", keyHandlers.startStop);
+    screen.unkey("n", keyHandlers.create);
+    screen.unkey("N", keyHandlers.create);
+    screen.unkey("l", keyHandlers.logs);
+    screen.unkey("L", keyHandlers.logs);
+    screen.unkey("r", keyHandlers.refreshLogs);
+    screen.unkey("R", keyHandlers.refreshLogs);
+    screen.unkey("f", keyHandlers.toggleLogsRefresh);
+    screen.unkey("F", keyHandlers.toggleLogsRefresh);
+    screen.unkey("q", keyHandlers.quit);
+    screen.unkey("Q", keyHandlers.quit);
+    screen.unkey("C-c", keyHandlers.quit);
   }
 
-  // Register keyboard handlers
+  // Register keyboard handlers (context-sensitive)
   function registerHandlers() {
-    screen.key(['up', 'k'], keyHandlers.up);
-    screen.key(['down', 'j'], keyHandlers.down);
-    screen.key(['enter'], keyHandlers.enter);
-    screen.key(['escape'], keyHandlers.escape);
-    screen.key(['m', 'M'], keyHandlers.models);
-    screen.key(['r', 'R'], keyHandlers.router);
-    screen.key(['h', 'H'], keyHandlers.history);
-    screen.key(['c', 'C'], keyHandlers.config);
-    screen.key(['r', 'R'], keyHandlers.remove);
-    screen.key(['s', 'S'], keyHandlers.startStop);
-    screen.key(['n', 'N'], keyHandlers.create);
-    screen.key(['q', 'Q', 'C-c'], keyHandlers.quit);
+    // Always available
+    screen.key(["escape"], keyHandlers.escape);
+    screen.key(["q", "Q", "C-c"], keyHandlers.quit);
+
+    if (viewMode === "list") {
+      // List view keys
+      screen.key(["up", "k"], keyHandlers.up);
+      screen.key(["down", "j"], keyHandlers.down);
+      screen.key(["enter"], keyHandlers.enter);
+      screen.key(["m", "M"], keyHandlers.models);
+      screen.key(["r", "R"], keyHandlers.router);
+      screen.key(["h", "H"], keyHandlers.history);
+      screen.key(["n", "N"], keyHandlers.create);
+    } else if (viewMode === "detail") {
+      if (detailSubView === "status") {
+        // Detail status view keys
+        screen.key(["h", "H"], keyHandlers.history);
+        screen.key(["c", "C"], keyHandlers.config);
+        screen.key(["r", "R"], keyHandlers.remove);
+        screen.key(["s", "S"], keyHandlers.startStop);
+        screen.key(["l", "L"], keyHandlers.logs);
+      } else if (detailSubView === "logs") {
+        // Logs view keys
+        screen.key(["r", "R"], keyHandlers.refreshLogs);
+        screen.key(["f", "F"], keyHandlers.toggleLogsRefresh);
+      }
+    }
   }
 
   // Controls object for pause/resume from other views
@@ -1819,14 +2169,17 @@ export async function createMultiServerMonitorUI(
       unregisterHandlers();
       if (intervalId) clearInterval(intervalId);
       if (spinnerIntervalId) clearInterval(spinnerIntervalId);
+      stopLogsAutoRefresh();
       screen.remove(contentBox);
     },
     resume: () => {
       screen.append(contentBox);
+      // Reset to status view when resuming
+      detailSubView = "status";
       registerHandlers();
       // Re-render with last known data (instant, no loading)
-      let content = '';
-      if (viewMode === 'list') {
+      let content = "";
+      if (viewMode === "list") {
         content = renderListView(lastSystemMetrics);
       } else {
         content = renderDetailView(lastSystemMetrics);
@@ -1844,15 +2197,16 @@ export async function createMultiServerMonitorUI(
 
   // Initial display - skip "Connecting" message when returning from another view
   if (!skipConnectingMessage) {
-    contentBox.setContent('{cyan-fg}⏳ Connecting to servers...{/cyan-fg}');
+    contentBox.setContent("{cyan-fg}⏳ Connecting to servers...{/cyan-fg}");
     screen.render();
   }
 
   startPolling();
 
   // Cleanup
-  screen.on('destroy', () => {
+  screen.on("destroy", () => {
     if (intervalId) clearInterval(intervalId);
+    stopLogsAutoRefresh();
     // Note: macmon child processes will automatically die when parent exits
     // since they're spawned with detached: false
   });

@@ -85,6 +85,7 @@ export class ConfigGenerator {
     const logsDir = getLogsDir();
     const stdoutPath = path.join(logsDir, `${id}.stdout`);
     const stderrPath = path.join(logsDir, `${id}.stderr`);
+    const httpLogPath = path.join(logsDir, `${id}.http`);
 
     const config: ServerConfig = {
       id,
@@ -106,6 +107,7 @@ export class ConfigGenerator {
       label,
       stdoutPath,
       stderrPath,
+      httpLogPath,
     };
 
     return config;

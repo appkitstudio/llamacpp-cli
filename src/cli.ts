@@ -32,6 +32,7 @@ import { adminRestartCommand } from './commands/admin/restart';
 import { adminConfigCommand } from './commands/admin/config';
 import { adminLogsCommand } from './commands/admin/logs';
 import { launchClaude } from './commands/launch/claude';
+import { serverWrapperCommand } from './commands/internal/server-wrapper';
 import packageJson from '../package.json';
 
 const program = new Command();
@@ -295,15 +296,16 @@ server
 // View logs
 server
   .command('logs')
-  .description('View server logs (default: compact one-line per request)')
+  .description('View server logs (default: HTTP logs - compact one-line per request)')
   .argument('<identifier>', 'Server identifier: alias, port (9000), server ID (llama-3-2-3b), or partial model name')
   .option('-f, --follow', 'Follow log output in real-time')
   .option('-n, --lines <number>', 'Number of lines to show (default: 50)', parseInt)
+  .option('--stderr', 'View full stderr logs (verbose diagnostics)')
+  .option('--stdout', 'View stdout logs (rarely used)')
   .option('--http', 'Show full HTTP JSON request/response logs')
   .option('--errors', 'Show only error messages')
   .option('--verbose', 'Show all messages including debug internals')
   .option('--filter <pattern>', 'Custom grep pattern for filtering')
-  .option('--stdout', 'Show stdout instead of stderr (rarely needed)')
   .option('--clear', 'Clear (truncate) log file to zero bytes')
   .option('--clear-archived', 'Delete only archived logs (preserves current logs)')
   .option('--clear-all', 'Clear current logs AND delete all archived logs')
@@ -545,6 +547,27 @@ launch
       await launchClaude({ ...options, claudeArgs });
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Internal commands (not meant for direct user invocation)
+const internal = program
+  .command('internal')
+  .description('Internal commands (not for direct use)');
+
+// Server wrapper for launchctl
+internal
+  .command('server-wrapper [args...]')
+  .description('Wrapper for llama-server (invoked by launchctl)')
+  .requiredOption('--http-log-path <path>', 'Path to HTTP log file')
+  .option('--verbose', 'Pass through all logs to stderr')
+  .allowUnknownOption()
+  .action(async (args: string[], options: any) => {
+    try {
+      await serverWrapperCommand(args, options);
+    } catch (error) {
+      console.error('❌ Server wrapper error:', (error as Error).message);
       process.exit(1);
     }
   });
