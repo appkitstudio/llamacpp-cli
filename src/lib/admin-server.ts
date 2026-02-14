@@ -14,6 +14,8 @@ import { configGenerator } from './config-generator';
 import { portManager } from './port-manager';
 import { statusChecker } from './status-checker';
 import { serverLifecycleService } from './server-lifecycle-service';
+import { serverConfigService } from './server-config-service';
+import { modelManagementService } from './model-management-service';
 import { modelDownloader } from './model-downloader';
 import { modelSearch } from './model-search';
 import { downloadJobManager } from './download-job-manager';
@@ -394,92 +396,57 @@ class AdminServer {
     }
 
     try {
-      // Build updates object
-      const updates: Partial<ServerConfig> = {};
-
-      if (data.model !== undefined) {
-        const modelPath = await modelScanner.resolveModelPath(data.model);
-        if (!modelPath) {
-          this.sendError(res, 404, 'Not Found', `Model not found: ${data.model}`, 'MODEL_NOT_FOUND');
-          return;
-        }
-        updates.modelPath = modelPath;
-        updates.modelName = path.basename(modelPath);
-      }
-
-      if (data.port !== undefined) {
-        portManager.validatePort(data.port);
-        const available = await portManager.isPortAvailable(data.port);
-        if (!available && data.port !== server.port) {
-          this.sendError(res, 409, 'Conflict', `Port ${data.port} is already in use`, 'PORT_IN_USE');
-          return;
-        }
-        updates.port = data.port;
-      }
-
-      if (data.host !== undefined) updates.host = data.host;
-      if (data.threads !== undefined) updates.threads = data.threads;
-      if (data.ctxSize !== undefined) updates.ctxSize = data.ctxSize;
-      if (data.gpuLayers !== undefined) updates.gpuLayers = data.gpuLayers;
-      if (data.verbose !== undefined) updates.verbose = data.verbose;
+      // Parse custom flags
+      let customFlags: string[] | undefined;
       if (data.customFlags !== undefined) {
-        updates.customFlags = Array.isArray(data.customFlags)
+        customFlags = Array.isArray(data.customFlags)
           ? data.customFlags
           : data.customFlags.split(',').map((f: string) => f.trim()).filter((f: string) => f.length > 0);
       }
-      if (data.alias !== undefined) {
-        // Empty string or null means remove alias
-        if (data.alias === '' || data.alias === null) {
-          updates.alias = undefined;
+
+      // Handle alias empty string/null -> null conversion
+      let aliasValue: string | null | undefined = data.alias;
+      if (data.alias === '' || data.alias === null) {
+        aliasValue = null; // null means remove alias
+      }
+
+      // Delegate to serverConfigService (FIX: now handles model migration properly)
+      const result = await serverConfigService.updateConfig({
+        serverId: server.id,
+        updates: {
+          model: data.model,
+          port: data.port,
+          host: data.host,
+          threads: data.threads,
+          ctxSize: data.ctxSize,
+          gpuLayers: data.gpuLayers,
+          verbose: data.verbose,
+          customFlags,
+          alias: aliasValue,
+        },
+        restartIfNeeded: data.restart === true,
+      });
+
+      if (!result.success) {
+        // Map common errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'NOT_FOUND');
+        } else if (result.error?.includes('already in use') || result.error?.includes('already exists')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'CONFLICT');
+        } else if (result.error?.includes('Invalid')) {
+          this.sendError(res, 400, 'Bad Request', result.error, 'VALIDATION_ERROR');
         } else {
-          // Validate alias format
-          const aliasError = validateAlias(data.alias);
-          if (aliasError) {
-            this.sendError(res, 400, 'Bad Request', `Invalid alias: ${aliasError}`, 'INVALID_ALIAS');
-            return;
-          }
-
-          // Check uniqueness (exclude current server)
-          const conflictingServerId = await stateManager.isAliasAvailable(data.alias, server.id);
-          if (conflictingServerId) {
-            this.sendError(res, 409, 'Conflict', `Alias "${data.alias}" is already used by server: ${conflictingServerId}`, 'ALIAS_IN_USE');
-            return;
-          }
-
-          updates.alias = data.alias;
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Update failed', 'UPDATE_ERROR');
         }
+        return;
       }
 
-      // Check if server is running
-      const status = await statusChecker.checkServer(server);
-      const isRunning = statusChecker.determineStatus(status, status.portListening) === 'running';
-
-      // Apply updates
-      await stateManager.updateServerConfig(server.id, updates);
-
-      // Regenerate plist with new config
-      const updatedServer = await stateManager.loadServerConfig(server.id);
-      if (updatedServer) {
-        await launchctlManager.createPlist(updatedServer);
-
-        // Restart if requested and running
-        if (data.restart && isRunning) {
-          await launchctlManager.unloadService(updatedServer.plistPath);
-          await launchctlManager.loadService(updatedServer.plistPath);
-          await launchctlManager.startService(updatedServer.label);
-          await launchctlManager.waitForServiceStart(updatedServer.label, 5000);
-
-          const newStatus = await statusChecker.checkServer(updatedServer);
-          await stateManager.updateServerConfig(updatedServer.id, {
-            status: statusChecker.determineStatus(newStatus, newStatus.portListening),
-            pid: newStatus.pid || undefined,
-            lastStarted: new Date().toISOString(),
-          });
-        }
-      }
-
-      const finalServer = await stateManager.loadServerConfig(server.id);
-      this.sendJson(res, 200, { server: finalServer });
+      // Return updated server (with migration info if applicable)
+      this.sendJson(res, 200, {
+        server: result.server,
+        migrated: result.migrated,
+        oldServerId: result.oldServerId,
+      });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'UPDATE_ERROR');
     }
@@ -813,57 +780,38 @@ class AdminServer {
 
   /**
    * Delete model
+   * FIX: Now uses modelManagementService which filters by modelPath (not modelName)
    */
   private async handleDeleteModel(req: http.IncomingMessage, res: http.ServerResponse, modelName: string, url: URL): Promise<void> {
     try {
       const cascade = url.searchParams.get('cascade') === 'true';
 
-      // Find servers using this model
-      const servers = await stateManager.getAllServers();
-      const usingServers = servers.filter(s => s.modelName === modelName);
+      // Delegate to modelManagementService (FIX: now filters by modelPath correctly)
+      const result = await modelManagementService.deleteModel({
+        modelIdentifier: modelName,
+        cascade,
+      });
 
-      // Block deletion if servers exist and cascade not specified
-      if (usingServers.length > 0 && !cascade) {
-        this.sendError(
-          res,
-          409,
-          'Conflict',
-          `Model is used by ${usingServers.length} server(s). Use ?cascade=true to delete model and servers.`,
-          'MODEL_IN_USE'
-        );
-        return;
-      }
-
-      // Delete servers if cascade
-      const deletedServers: string[] = [];
-      if (cascade) {
-        for (const server of usingServers) {
-          const status = await statusChecker.checkServer(server);
-          if (statusChecker.determineStatus(status, status.portListening) === 'running') {
-            await launchctlManager.unloadService(server.plistPath);
-            await launchctlManager.waitForServiceStop(server.label, 5000);
-          }
-          await launchctlManager.deletePlist(server.plistPath);
-          await stateManager.deleteServerConfig(server.id);
-          deletedServers.push(server.id);
+      if (!result.success) {
+        // Map errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'MODEL_NOT_FOUND');
+        } else if (result.error?.includes('used by')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'MODEL_IN_USE');
+        } else {
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Delete failed', 'DELETE_ERROR');
         }
-      }
-
-      // Delete model file
-      const modelPath = await modelScanner.resolveModelPath(modelName);
-      if (!modelPath) {
-        this.sendError(res, 404, 'Not Found', `Model not found: ${modelName}`, 'MODEL_NOT_FOUND');
         return;
       }
 
-      await fs.unlink(modelPath);
-
+      // Success - return deleted servers info
       this.sendJson(res, 200, {
         success: true,
-        deletedServers: deletedServers.length > 0 ? deletedServers : undefined,
+        modelPath: result.modelPath,
+        deletedServers: result.deletedServers,
       });
     } catch (error) {
-      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'DELETE_MODEL_ERROR');
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'DELETE_ERROR');
     }
   }
 

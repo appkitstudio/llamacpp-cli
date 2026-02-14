@@ -1,14 +1,7 @@
 import chalk from 'chalk';
 import * as path from 'path';
-import * as fs from 'fs/promises';
 import { stateManager } from '../lib/state-manager';
-import { statusChecker } from '../lib/status-checker';
-import { launchctlManager } from '../lib/launchctl-manager';
-import { configGenerator } from '../lib/config-generator';
-import { autoRotateIfNeeded } from '../utils/log-utils';
-import { modelScanner } from '../lib/model-scanner';
-import { sanitizeModelName, validateAlias } from '../types/server-config';
-import { getLogsDir, getLaunchAgentsDir } from '../utils/file-utils';
+import { serverConfigService } from '../lib/server-config-service';
 
 export interface ConfigUpdateOptions {
   model?: string;
@@ -76,90 +69,29 @@ export async function serverConfigCommand(
     process.exit(1);
   }
 
-  // Resolve model path if model option is provided
-  let newModelPath: string | undefined;
-  let newModelName: string | undefined;
-  let newServerId: string | undefined;
-  let isModelMigration = false;
-
-  if (options.model !== undefined) {
-    const resolvedPath = await modelScanner.resolveModelPath(options.model);
-    if (!resolvedPath) {
-      console.error(chalk.red(`❌ Model not found: ${options.model}`));
-      console.log(chalk.dim('\nRun: llamacpp ls'));
-      process.exit(1);
-    }
-    newModelPath = resolvedPath;
-    newModelName = path.basename(resolvedPath);
-    newServerId = sanitizeModelName(newModelName);
-
-    // Check if this is a model migration (ID will change)
-    if (newServerId !== server.id) {
-      isModelMigration = true;
-
-      // Check for ID conflict
-      const existingServer = await stateManager.loadServerConfig(newServerId);
-      if (existingServer) {
-        console.error(chalk.red(`❌ A server with ID "${newServerId}" already exists`));
-        console.log(chalk.dim('\nChanging the model would create this server ID, but it conflicts with an existing server.'));
-        console.log(chalk.dim('Delete the existing server first:'));
-        console.log(chalk.dim(`  llamacpp server rm ${newServerId}`));
-        process.exit(1);
-      }
-
-      console.log(chalk.yellow('⚠️  Changing the model will migrate to a new server ID'));
-      console.log(chalk.dim(`   Old ID: ${server.id}`));
-      console.log(chalk.dim(`   New ID: ${newServerId}\n`));
-    }
-  }
-
-  // Validate alias if provided
-  let aliasUpdate: string | undefined | null = undefined;  // undefined = no change, null = remove, string = set/update
-  if (options.alias !== undefined) {
-    if (options.alias === '') {
-      // Empty string means remove alias
-      aliasUpdate = null;
+  // Parse custom flags if provided
+  let customFlags: string[] | undefined;
+  if (options.flags !== undefined) {
+    if (options.flags === '') {
+      customFlags = undefined;
     } else {
-      // Validate format
-      const validationError = validateAlias(options.alias);
-      if (validationError) {
-        console.error(chalk.red(`❌ Invalid alias: ${validationError}`));
-        process.exit(1);
-      }
-
-      // Check uniqueness (exclude current server)
-      const conflictingServerId = await stateManager.isAliasAvailable(options.alias, server.id);
-      if (conflictingServerId) {
-        console.error(chalk.red(`❌ Alias "${options.alias}" is already used by server: ${conflictingServerId}`));
-        process.exit(1);
-      }
-
-      aliasUpdate = options.alias;
+      customFlags = options.flags.split(',').map(f => f.trim()).filter(f => f.length > 0);
     }
   }
 
-  // Check current status
-  const updatedServer = await statusChecker.updateServerStatus(server);
-  const wasRunning = updatedServer.status === 'running';
-
-  if (wasRunning && !options.restart) {
-    console.warn(chalk.yellow('⚠️  Server is currently running'));
-    console.log(chalk.dim('Changes will require a restart to take effect.'));
-    console.log(chalk.dim('Use --restart flag to automatically restart the server.\n'));
+  // Handle alias empty string -> null conversion
+  let aliasValue: string | null | undefined = options.alias;
+  if (options.alias === '') {
+    aliasValue = null; // null means remove alias
   }
 
-  // Show what will change
+  // Show what will change (before calling service)
   console.log(chalk.bold('Configuration Changes:'));
   console.log('─'.repeat(70));
 
-  if (newModelPath !== undefined && newModelName !== undefined) {
+  if (options.model !== undefined) {
     const oldModelName = path.basename(server.modelPath);
-    console.log(`${chalk.bold('Model:')}          ${chalk.dim(oldModelName)} → ${chalk.green(newModelName)}`);
-    console.log(`${chalk.dim('                  ')}${chalk.dim(server.modelPath)}`);
-    console.log(`${chalk.dim('                  ')}${chalk.dim(newModelPath)}`);
-    if (isModelMigration && newServerId) {
-      console.log(`${chalk.bold('Server ID:')}      ${chalk.dim(server.id)} → ${chalk.green(newServerId)}`);
-    }
+    console.log(`${chalk.bold('Model:')}          ${chalk.dim(oldModelName)} → ${chalk.green(options.model)}`);
   }
   if (options.host !== undefined) {
     console.log(`${chalk.bold('Host:')}           ${chalk.dim(server.host)} → ${chalk.green(options.host)}`);
@@ -190,172 +122,55 @@ export async function serverConfigCommand(
     const newValue = options.flags || 'none';
     console.log(`${chalk.bold('Custom Flags:')}   ${chalk.dim(oldValue)} → ${chalk.green(newValue)}`);
   }
-  if (aliasUpdate !== undefined) {
+  if (options.alias !== undefined) {
     const oldValue = server.alias || '(none)';
-    const newValue = aliasUpdate === null ? '(none)' : aliasUpdate;
+    const newValue = aliasValue === null ? '(none)' : (aliasValue || server.alias || '(none)');
     console.log(`${chalk.bold('Alias:')}          ${chalk.dim(oldValue)} → ${chalk.cyan(newValue)}`);
   }
   console.log('');
 
-  // Parse custom flags if provided
-  let customFlags: string[] | undefined;
-  if (options.flags !== undefined) {
-    if (options.flags === '') {
-      customFlags = undefined;
-    } else {
-      customFlags = options.flags.split(',').map(f => f.trim()).filter(f => f.length > 0);
-    }
+  // Delegate to serverConfigService
+  const result = await serverConfigService.updateConfig({
+    serverId: identifier,
+    updates: {
+      model: options.model,
+      port: undefined, // Port changes not supported via config command
+      host: options.host,
+      threads: options.threads,
+      ctxSize: options.ctxSize,
+      gpuLayers: options.gpuLayers,
+      verbose: options.verbose,
+      customFlags,
+      alias: aliasValue,
+    },
+    restartIfNeeded: options.restart,
+    onProgress: (message) => {
+      console.log(chalk.dim(message));
+    },
+  });
+
+  if (!result.success) {
+    console.error(chalk.red(`❌ ${result.error}`));
+    process.exit(1);
   }
 
-  // Handle model migration (different code path when server ID changes)
-  if (isModelMigration && newServerId && newModelPath && newModelName) {
-    // Stop old server if running
-    if (wasRunning) {
-      console.log(chalk.dim('Stopping old server...'));
-      await launchctlManager.unloadService(server.plistPath);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    // Delete old plist and config
-    console.log(chalk.dim('Removing old server configuration...'));
-    try {
-      await fs.unlink(server.plistPath);
-    } catch (err) {
-      // Plist might not exist, that's ok
-    }
-    await stateManager.deleteServerConfig(server.id);
-
-    // Create new config with new ID and all settings
-    const logsDir = getLogsDir();
-    const plistDir = getLaunchAgentsDir();
-
-    const newConfig = {
-      ...server,
-      id: newServerId,
-      modelPath: newModelPath,
-      modelName: newModelName,
-      ...(options.host !== undefined && { host: options.host }),
-      ...(options.threads !== undefined && { threads: options.threads }),
-      ...(options.ctxSize !== undefined && { ctxSize: options.ctxSize }),
-      ...(options.gpuLayers !== undefined && { gpuLayers: options.gpuLayers }),
-      ...(options.verbose !== undefined && { verbose: options.verbose }),
-      ...(options.flags !== undefined && { customFlags }),
-      // Handle alias: preserve existing, or update/remove if specified
-      ...(aliasUpdate !== undefined && (aliasUpdate === null ? { alias: undefined } : { alias: aliasUpdate })),
-      // Update plist-related paths
-      label: `com.llama.${newServerId}`,
-      plistPath: path.join(plistDir, `com.llama.${newServerId}.plist`),
-      stdoutPath: path.join(logsDir, `${newServerId}.stdout`),
-      stderrPath: path.join(logsDir, `${newServerId}.stderr`),
-      status: 'stopped' as const,
-      pid: undefined,
-      lastStopped: new Date().toISOString(),
-    };
-
-    console.log(chalk.dim('Creating new server configuration...'));
-    await stateManager.saveServerConfig(newConfig);
-    await launchctlManager.createPlist(newConfig);
-
-    // Start new server if restart flag is set
-    if (wasRunning && options.restart) {
-      console.log(chalk.dim('Starting new server...'));
-      await launchctlManager.loadService(newConfig.plistPath);
-      await launchctlManager.startService(newConfig.label);
-
-      // Wait and verify
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const finalStatus = await statusChecker.updateServerStatus(newConfig);
-
-      if (finalStatus.status === 'running') {
-        console.log(chalk.green(`✅ Server migrated successfully to new ID: ${newServerId}`));
-        console.log(chalk.dim(`   Port: http://localhost:${finalStatus.port}`));
-        if (finalStatus.pid) {
-          console.log(chalk.dim(`   PID: ${finalStatus.pid}`));
-        }
-      } else {
-        console.error(chalk.red('❌ Server failed to start with new configuration'));
-        console.log(chalk.dim('   Check logs: ') + `llamacpp server logs ${newServerId} --errors`);
-        process.exit(1);
-      }
-    } else {
-      console.log(chalk.green(`✅ Server migrated successfully to new ID: ${newServerId}`));
-      if (!wasRunning) {
-        console.log(chalk.dim('\n   Start server: ') + `llamacpp server start ${newServerId}`);
-      } else {
-        console.log(chalk.dim('\n   Start server: ') + `llamacpp server start ${newServerId}`);
-      }
-    }
-
-    return; // Exit early for migration path
-  }
-
-  // Normal config update (no model migration)
-  // Unload service if running and restart flag is set
-  if (wasRunning && options.restart) {
-    console.log(chalk.dim('Stopping server...'));
-    await launchctlManager.unloadService(server.plistPath);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-
-  const updatedConfig = {
-    ...server,
-    ...(newModelPath !== undefined && { modelPath: newModelPath, modelName: newModelName }),
-    ...(options.host !== undefined && { host: options.host }),
-    ...(options.threads !== undefined && { threads: options.threads }),
-    ...(options.ctxSize !== undefined && { ctxSize: options.ctxSize }),
-    ...(options.gpuLayers !== undefined && { gpuLayers: options.gpuLayers }),
-    ...(options.verbose !== undefined && { verbose: options.verbose }),
-    ...(options.flags !== undefined && { customFlags }),
-    ...(aliasUpdate !== undefined && (aliasUpdate === null ? { alias: undefined } : { alias: aliasUpdate })),
-  };
-
-  await stateManager.updateServerConfig(server.id, updatedConfig);
-
-  console.log(chalk.dim('Regenerating service configuration...'));
-  await launchctlManager.createPlist(updatedConfig);
-
-  // Restart server if it was running and restart flag is set
-  if (wasRunning && options.restart) {
-    // Auto-rotate logs if they exceed 100MB
-    try {
-      const result = await autoRotateIfNeeded(updatedConfig.stdoutPath, updatedConfig.stderrPath, 100);
-      if (result.rotated) {
-        console.log(chalk.dim('Auto-rotated large log files:'));
-        for (const file of result.files) {
-          console.log(chalk.dim(`  → ${file}`));
-        }
-      }
-    } catch (error) {
-      // Non-fatal, just warn
-      console.log(chalk.yellow(`⚠️  Failed to rotate logs: ${(error as Error).message}`));
-    }
-
-    console.log(chalk.dim('Starting server with new configuration...'));
-    await launchctlManager.loadService(updatedConfig.plistPath);
-    await launchctlManager.startService(updatedConfig.label);
-
-    // Wait and verify
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    const finalStatus = await statusChecker.updateServerStatus(updatedConfig);
-
-    if (finalStatus.status === 'running') {
-      console.log(chalk.green(`✅ Server restarted successfully with new configuration`));
-      console.log(chalk.dim(`   Port: http://localhost:${finalStatus.port}`));
-      if (finalStatus.pid) {
-        console.log(chalk.dim(`   PID: ${finalStatus.pid}`));
-      }
-    } else {
-      console.error(chalk.red('❌ Server failed to start with new configuration'));
-      console.log(chalk.dim('   Check logs: ') + `llamacpp server logs ${server.id} --errors`);
-      process.exit(1);
-    }
+  // Display results
+  if (result.migrated) {
+    console.log(chalk.green(`✅ Server migrated successfully to new ID: ${result.server.id}`));
+    console.log(chalk.dim(`   Old ID: ${result.oldServerId}`));
   } else {
     console.log(chalk.green('✅ Configuration updated successfully'));
-    if (wasRunning && !options.restart) {
-      console.log(chalk.yellow('\n⚠️  Server is still running with old configuration'));
-      console.log(chalk.dim('   Restart to apply changes: ') + `llamacpp server stop ${server.id} && llamacpp server start ${server.id}`);
-    } else if (!wasRunning) {
-      console.log(chalk.dim('\n   Start server: ') + `llamacpp server start ${server.id}`);
+  }
+
+  if (result.restarted) {
+    console.log(chalk.dim(`   Port: http://localhost:${result.server.port}`));
+    if (result.server.pid) {
+      console.log(chalk.dim(`   PID: ${result.server.pid}`));
     }
+  } else if (result.wasRunning && !options.restart) {
+    console.log(chalk.yellow('\n⚠️  Server is still running with old configuration'));
+    console.log(chalk.dim('   Restart to apply changes: ') + `llamacpp server stop ${result.server.id} && llamacpp server start ${result.server.id}`);
+  } else if (!result.wasRunning) {
+    console.log(chalk.dim('\n   Start server: ') + `llamacpp server start ${result.server.id}`);
   }
 }
