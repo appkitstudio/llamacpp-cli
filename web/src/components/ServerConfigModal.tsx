@@ -74,11 +74,6 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
         .map(f => f.trim())
         .filter(f => f.length > 0);
 
-      // If alias changed, include it (empty string means remove, same value means don't change)
-      const aliasUpdate = formData.alias.trim() === (server.alias || '')
-        ? undefined
-        : formData.alias.trim() || null;
-
       // Check if model changed
       const modelUpdate = formData.model !== server.modelName ? formData.model : undefined;
 
@@ -86,7 +81,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
         id: server.id,
         data: {
           ...(modelUpdate && { model: modelUpdate }),
-          ...(aliasUpdate !== undefined && { alias: aliasUpdate }),
+          alias: formData.alias.trim() || null,
           port: formData.port,
           host: formData.host,
           threads: formData.threads,
