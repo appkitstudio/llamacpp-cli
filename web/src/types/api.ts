@@ -34,6 +34,12 @@ export interface Model {
   exists: boolean;
   serversUsing: number;
   serverIds: string[];
+  // Shard metadata (optional - only present for multi-file models)
+  isSharded?: boolean;
+  shardCount?: number;
+  shardIndex?: number;
+  shardPaths?: string[];
+  baseModelName?: string;
 }
 
 export interface SystemStatus {

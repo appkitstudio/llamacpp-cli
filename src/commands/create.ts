@@ -68,10 +68,37 @@ export async function createCommand(model: string, options: CreateOptions): Prom
     }
   }
 
-  // 6. Get model size
-  const modelSize = await modelScanner.getModelSize(modelName);
-  if (!modelSize) {
+  // 6. Get model info and validate (supports sharded models)
+  const modelInfo = await modelScanner.getModelInfo(modelName);
+  if (!modelInfo) {
     throw new Error(`Failed to read model file: ${modelPath}`);
+  }
+
+  const modelSize = modelInfo.size;
+
+  // Validate sharded models
+  if (modelInfo.isSharded) {
+    console.log(chalk.blue(`📦 Detected sharded model: ${modelInfo.shardCount} files`));
+
+    // Check if all shards are present
+    if (!modelInfo.exists) {
+      const { validateShardCompleteness } = require('../utils/shard-utils');
+      const validation = validateShardCompleteness(
+        modelInfo.shardPaths || [],
+        modelInfo.shardCount || 0
+      );
+
+      if (!validation.complete) {
+        throw new Error(
+          `Incomplete sharded model. Missing shards: ${validation.missing.join(', ')}\n` +
+          `Expected ${modelInfo.shardCount} files, found ${modelInfo.shardPaths?.length || 0}`
+        );
+      }
+    }
+
+    console.log(chalk.green(`✅ All ${modelInfo.shardPaths?.length || 0} shards present`));
+    console.log(chalk.dim(`   Total size: ${modelInfo.sizeFormatted}`));
+    console.log();
   }
 
   // 7. Determine port

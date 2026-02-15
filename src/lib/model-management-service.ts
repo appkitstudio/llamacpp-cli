@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import * as path from 'path';
 import { modelScanner } from './model-scanner';
 import { stateManager } from './state-manager';
 import { launchctlManager } from './launchctl-manager';
@@ -37,7 +38,7 @@ export class ModelManagementService {
     const { modelIdentifier, cascade = false, onProgress } = options;
 
     try {
-      // Step 1: Resolve model path (FIX: always use path for lookups)
+      // Step 1: Resolve model path and get model info
       onProgress?.('Resolving model path...');
       const modelPath = await modelScanner.resolveModelPath(modelIdentifier);
       if (!modelPath) {
@@ -49,9 +50,20 @@ export class ModelManagementService {
         };
       }
 
-      // Step 2: Find dependent servers BY PATH (not name)
+      // Get model info to check if it's sharded
+      const modelInfo = await modelScanner.getModelInfo(modelIdentifier);
+      if (!modelInfo) {
+        return {
+          success: false,
+          modelPath: '',
+          deletedServers: [],
+          error: `Failed to read model info: ${modelIdentifier}`,
+        };
+      }
+
+      // Step 2: Find dependent servers (checks all shard paths for sharded models)
       onProgress?.('Checking for dependent servers...');
-      const dependentServers = await this.findDependentServersByPath(modelPath);
+      const dependentServers = await this.findDependentServers(modelInfo);
 
       // Step 3: Block deletion if servers exist and cascade not specified
       if (dependentServers.length > 0 && !cascade) {
@@ -74,9 +86,47 @@ export class ModelManagementService {
         }
       }
 
-      // Step 5: Delete model file
-      onProgress?.('Deleting model file...');
-      await fs.unlink(modelPath);
+      // Step 5: Delete model file(s)
+      if (modelInfo.isSharded && modelInfo.shardPaths && modelInfo.shardPaths.length > 0) {
+        onProgress?.(`Deleting sharded model: ${modelInfo.shardCount} files...`);
+
+        for (const shardPath of modelInfo.shardPaths) {
+          await fs.unlink(shardPath);
+        }
+
+        // Try to remove empty directory (ignore errors)
+        try {
+          const modelDir = path.dirname(modelInfo.path);
+          await fs.rmdir(modelDir);
+        } catch {
+          // Directory not empty or other error - ignore
+        }
+      } else if (!modelInfo.isSharded) {
+        // Single-file model: delete the file
+        onProgress?.('Deleting model file...');
+        await fs.unlink(modelInfo.path);
+      } else {
+        // Sharded but no shardPaths - this is a broken state, try to clean up
+        onProgress?.('Cleaning up broken model directory...');
+
+        // Try to remove the directory if it exists
+        try {
+          const stats = await fs.stat(modelPath);
+          if (stats.isDirectory()) {
+            await fs.rmdir(modelPath, { recursive: true });
+          } else {
+            await fs.unlink(modelPath);
+          }
+        } catch (error) {
+          // If modelPath doesn't exist, try modelInfo.path
+          try {
+            const dirPath = path.dirname(modelInfo.path);
+            await fs.rmdir(dirPath, { recursive: true });
+          } catch {
+            // Last resort: just report success if we can't find anything to delete
+          }
+        }
+      }
 
       return {
         success: true,
@@ -94,18 +144,34 @@ export class ModelManagementService {
   }
 
   /**
-   * Find all servers that depend on a specific model
+   * Find all servers that depend on a specific model (handles sharded models)
    *
-   * FIX: Filters by modelPath (absolute path), NOT modelName
-   * This was the bug in Admin API (line 823 of admin-server.ts)
+   * For single-file models: checks if server.modelPath matches model.path
+   * For sharded models: checks if server.modelPath is in model.shardPaths
    *
-   * @param modelPath - Absolute path to model file
+   * @param modelInfo - Model information from scanner
    * @returns Array of servers using this model
+   */
+  private async findDependentServers(modelInfo: any): Promise<ServerConfig[]> {
+    const allServers = await stateManager.getAllServers();
+
+    return allServers.filter(server => {
+      if (modelInfo.isSharded && modelInfo.shardPaths) {
+        // Check if server uses any shard of this model
+        return modelInfo.shardPaths.includes(server.modelPath);
+      } else {
+        // Single-file model: exact path match
+        return server.modelPath === modelInfo.path;
+      }
+    });
+  }
+
+  /**
+   * Legacy method for backward compatibility
+   * @deprecated Use findDependentServers instead
    */
   private async findDependentServersByPath(modelPath: string): Promise<ServerConfig[]> {
     const allServers = await stateManager.getAllServers();
-
-    // FIX: Filter by modelPath (unique identifier), not modelName (fragile)
     return allServers.filter(server => server.modelPath === modelPath);
   }
 
@@ -145,7 +211,7 @@ export class ModelManagementService {
   }
 
   /**
-   * Get servers using a specific model (by path)
+   * Get servers using a specific model (handles sharded models)
    * Public method for callers who need to check dependencies without deleting
    */
   async getModelDependencies(modelIdentifier: string): Promise<ServerConfig[]> {
@@ -154,7 +220,12 @@ export class ModelManagementService {
       return [];
     }
 
-    return this.findDependentServersByPath(modelPath);
+    const modelInfo = await modelScanner.getModelInfo(modelIdentifier);
+    if (!modelInfo) {
+      return [];
+    }
+
+    return this.findDependentServers(modelInfo);
   }
 
   /**

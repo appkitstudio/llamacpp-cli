@@ -302,6 +302,11 @@ export async function createSearchUI(
     // Get models directory
     const modelsDir = await stateManager.getModelsDirectory();
 
+    // Detect if this is a sharded model (show info in progress modal)
+    const { parseShardFilename } = require('../utils/shard-utils');
+    const basename = filename.split('/').pop() || filename;
+    const shardInfo = parseShardFilename(basename);
+
     // Create overlay for progress modal
     const progressOverlay = createOverlay(screen);
 
@@ -332,8 +337,14 @@ export async function createSearchUI(
       const empty = barLength - filled;
       const bar = '█'.repeat(Math.max(0, filled)) + '░'.repeat(Math.max(0, empty));
 
-      let content = `{bold}Downloading: ${progress.filename}{/bold}\n\n`;
-      content += `[${bar}] ${percentage}%\n\n`;
+      let content = `{bold}Downloading: ${progress.filename}{/bold}\n`;
+
+      // Show sharded model info if applicable
+      if (shardInfo.isSharded) {
+        content += `{cyan-fg}📦 Sharded model: ${shardInfo.shardCount} files will be downloaded{/cyan-fg}\n`;
+      }
+
+      content += `\n[${bar}] ${percentage}%\n\n`;
       content += `Downloaded: ${formatBytes(progress.downloaded)} / ${formatBytes(progress.total)}\n`;
       content += `Speed: ${progress.speed}\n\n`;
       content += '{gray-fg}Press ESC or Ctrl+C to cancel{/gray-fg}';

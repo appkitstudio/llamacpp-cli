@@ -118,8 +118,8 @@ class ApiClient {
     });
   }
 
-  async getServerLogs(id: string, type: 'stdout' | 'stderr' | 'both' = 'both', lines = 100) {
-    return this.request<{ stdout: string; stderr: string }>(
+  async getServerLogs(id: string, type: 'stdout' | 'stderr' | 'http' | 'all' = 'all', lines = 100) {
+    return this.request<{ http: string; stdout: string; stderr: string }>(
       `/api/servers/${id}/logs?type=${type}&lines=${lines}`
     );
   }

@@ -616,22 +616,31 @@ class AdminServer {
   }
 
   /**
-   * List models
+   * List models (handles sharded models correctly)
    */
   private async handleListModels(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
       const models = await modelScanner.scanModels();
-      const modelsWithServers = await Promise.all(
-        models.map(async (model) => {
-          const servers = await stateManager.getAllServers();
-          const usingServers = servers.filter(s => s.modelName === model.filename);
-          return {
-            ...model,
-            serversUsing: usingServers.length,
-            serverIds: usingServers.map(s => s.id),
-          };
-        })
-      );
+      const allServers = await stateManager.getAllServers();
+
+      const modelsWithServers = models.map((model) => {
+        // Find servers using this model (handles sharded models)
+        const usingServers = allServers.filter(server => {
+          if (model.isSharded && model.shardPaths) {
+            // Check if server uses any shard of this model
+            return model.shardPaths.includes(server.modelPath);
+          } else {
+            // Single-file model: exact path match
+            return server.modelPath === model.path;
+          }
+        });
+
+        return {
+          ...model,
+          serversUsing: usingServers.length,
+          serverIds: usingServers.map(s => s.id),
+        };
+      });
 
       this.sendJson(res, 200, { models: modelsWithServers });
     } catch (error) {

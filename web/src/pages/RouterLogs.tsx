@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, ChevronDown } from 'lucide-react';
 import { useRouterLogs } from '../hooks/useApi';
+import { renderAnsiLine, stripAnsiCodes } from '../utils/ansi-parser';
 
 type LogType = 'stdout' | 'stderr' | 'both';
 type LogSort = 'newest' | 'oldest';
@@ -40,6 +41,13 @@ export function RouterLogs() {
   const getFilteredLogs = (): string[] => {
     if (!logsData) return [];
 
+    // Debug: log the data lengths
+    console.log('[RouterLogs] Data lengths:', {
+      stdout: logsData.stdout?.length || 0,
+      stderr: logsData.stderr?.length || 0,
+      logType,
+    });
+
     let logs: string;
     if (logType === 'stdout') {
       logs = logsData.stdout || '';
@@ -52,7 +60,18 @@ export function RouterLogs() {
       logs = [stderr, stdout].filter(l => l.trim()).join('\n');
     }
 
-    const lines = logs.split('\n').filter(line => line.trim());
+    const lines = logs.split('\n').filter(line => {
+      // Remove lines that are empty or only contain ANSI codes
+      const stripped = stripAnsiCodes(line).trim();
+      return stripped.length > 0;
+    });
+
+    console.log('[RouterLogs] After filtering:', {
+      logType,
+      totalLines: logs.split('\n').length,
+      filteredLines: lines.length,
+      firstLine: lines[0]?.substring(0, 100),
+    });
 
     // Apply sort
     if (sortOrder === 'oldest') {
@@ -177,9 +196,9 @@ export function RouterLogs() {
             {filteredLogs.map((line, index) => (
               <div
                 key={index}
-                className="text-gray-300 break-all whitespace-pre-wrap leading-relaxed"
+                className="break-all whitespace-pre-wrap leading-relaxed"
               >
-                {line}
+                {renderAnsiLine(line, index)}
               </div>
             ))}
           </div>

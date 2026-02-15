@@ -94,15 +94,47 @@ export async function createModelsUI(
       const isSelected = i === selectedIndex;
 
       // Count servers using this model
-      const serversUsingModel = allServers.filter(s => s.modelPath === model.path);
+      const serversUsingModel = allServers.filter(s => {
+        if (model.isSharded) {
+          return model.shardPaths?.includes(s.modelPath);
+        } else {
+          return s.modelPath === model.path;
+        }
+      });
       const serverCount = serversUsingModel.length;
 
       // Selection indicator
       const indicator = isSelected ? '►' : ' ';
 
-      // Model filename (truncate if too long)
+      // Model filename with error status (truncate if too long)
       const maxFilenameLen = 46;
-      let filename = model.filename;
+      let filename: string;
+      let hasError = false;
+
+      if (model.isSharded) {
+        // Show shard status as fraction: (1/2 incomplete) or (2/2)
+        const foundShards = model.shardPaths?.length || 0;
+        const totalShards = model.shardCount || 0;
+
+        if (foundShards < totalShards) {
+          filename = `${model.baseModelName} (${foundShards}/${totalShards} incomplete)`;
+          hasError = true;
+        } else {
+          filename = `${model.baseModelName} (${foundShards}/${totalShards})`;
+        }
+      } else {
+        // Single-file model - check for errors
+        if (!model.exists) {
+          filename = `${model.filename} (missing)`;
+          hasError = true;
+        } else if (model.size === 0) {
+          filename = `${model.filename} (empty)`;
+          hasError = true;
+        } else {
+          filename = model.filename;
+        }
+      }
+
       if (filename.length > maxFilenameLen) {
         filename = filename.substring(0, maxFilenameLen - 3) + '...';
       }
@@ -131,14 +163,24 @@ export async function createModelsUI(
         }
       }
 
+      // Apply color and warning symbol for models with errors
+      let displayFilename = filename;
+      const warningSymbol = hasError ? '⚠ ' : '';
+
+      if (hasError && !isSelected) {
+        // Yellow for incomplete/missing/empty models (non-selected only)
+        displayFilename = `{yellow-fg}⚠ ${filename}{/yellow-fg}`;
+      }
+
       // Build row content
       let rowContent = '';
       if (isSelected) {
-        // Selected row: cyan background with bright white text
-        rowContent = `{cyan-bg}{15-fg}${indicator} │ ${filename} │ ${size} │ ${modified} │ ${serversTextPlain}{/15-fg}{/cyan-bg}`;
+        // Selected row: cyan background with bright white text (show warning symbol but no color)
+        const selectedFilename = hasError ? `⚠ ${filename}` : filename;
+        rowContent = `{cyan-bg}{15-fg}${indicator} │ ${selectedFilename} │ ${size} │ ${modified} │ ${serversTextPlain}{/15-fg}{/cyan-bg}`;
       } else {
-        // Normal row: with colored server text
-        rowContent = `${indicator} │ ${filename} │ ${size} │ ${modified} │ ${serversText}`;
+        // Normal row: with colored server text and filename
+        rowContent = `${indicator} │ ${displayFilename} │ ${size} │ ${modified} │ ${serversText}`;
       }
 
       content += rowContent + '\n';

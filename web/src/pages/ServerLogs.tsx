@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Loader2, ChevronDown, Trash2 } from 'lucide-react';
+import { ArrowLeft, Loader2, ChevronDown, Trash2, Check } from 'lucide-react';
 import { useServerLogs, useServer } from '../hooks/useApi';
+import { renderAnsiLine, stripAnsiCodes } from '../utils/ansi-parser';
 
-type LogFilter = 'all' | 'requests' | 'errors' | 'warnings' | 'system';
 type LogSort = 'newest' | 'oldest';
-type ViewMode = 'formatted' | 'raw';
+type ViewMode = 'activity' | 'verbose';
 
 interface ParsedLogLine {
   raw: string;
@@ -84,6 +84,25 @@ function extractResponseTime(responseJson: any): number {
     return Math.round((timings.prompt_ms || 0) + (timings.predicted_ms || 0));
   }
   return 0;
+}
+
+function parseHttpLog(line: string): ParsedLogLine | null {
+  // Parse HTTP log format: "2026-02-15 16:41:05 GET /slots 127.0.0.1 200 "" 0 0 -"
+  const httpMatch = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(GET|POST|PUT|DELETE|PATCH)\s+(\S+)\s+(\S+)\s+(\d+)/);
+  if (!httpMatch) return null;
+
+  const [, timestamp, , endpoint] = httpMatch;
+
+  // Check if this is a health check request
+  const isHealthCheck = HEALTH_CHECK_ENDPOINTS.some(ep => endpoint === ep);
+
+  return {
+    raw: line,
+    formatted: line, // HTTP logs are already formatted nicely
+    timestamp,
+    type: 'request',
+    isHealthCheck,
+  };
 }
 
 function parseLogsToFormatted(lines: string[]): ParsedLogLine[] {
@@ -198,6 +217,14 @@ function parseLogsToFormatted(lines: string[]): ParsedLogLine[] {
   };
 
   for (const line of lines) {
+    // Try parsing as HTTP log first
+    const httpLog = parseHttpLog(line);
+    if (httpLog) {
+      results.push(httpLog);
+      continue;
+    }
+
+    // Otherwise, parse as verbose log
     if (isRequestStatusLine(line)) {
       if (isBuffering) {
         // Process previous buffer
@@ -238,11 +265,10 @@ export function ServerLogs() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [activeFilter, setActiveFilter] = useState<LogFilter>('all');
   const [sortOrder, setSortOrder] = useState<LogSort>('newest');
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('serverLogs.viewMode');
-    return (saved === 'raw' || saved === 'formatted') ? saved : 'formatted';
+    return (saved === 'activity' || saved === 'verbose') ? saved : 'activity';
   });
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -284,11 +310,23 @@ export function ServerLogs() {
   const getFilteredLogs = (): { logs: ParsedLogLine[]; hasRawLogs: boolean; formattedCount: number } => {
     if (!logsData) return { logs: [], hasRawLogs: false, formattedCount: 0 };
 
-    // Combine stdout and stderr
-    const allLines = [
+    // Parse HTTP logs first (these have timestamps)
+    const httpLines = (logsData.http || '').split('\n').filter(line => {
+      const stripped = stripAnsiCodes(line).trim();
+      return stripped.length > 0;
+    });
+
+    // Parse verbose logs (these don't have timestamps)
+    const verboseLines = [
       ...(logsData.stderr || '').split('\n'),
       ...(logsData.stdout || '').split('\n'),
-    ].filter(line => line.trim());
+    ].filter(line => {
+      const stripped = stripAnsiCodes(line).trim();
+      return stripped.length > 0;
+    });
+
+    // Combine all lines (HTTP first for better timestamp availability)
+    const allLines = [...httpLines, ...verboseLines];
 
     // Parse logs
     const parsed = parseLogsToFormatted(allLines);
@@ -297,33 +335,19 @@ export function ServerLogs() {
     const hasRawLogs = allLines.length > 0;
     const formattedCount = parsed.filter(log => log.formatted && !log.isHealthCheck).length;
 
-    // In formatted view, only show request logs (lines with formatted output)
+    // Filter by view mode
     let filtered = parsed;
-    if (viewMode === 'formatted') {
-      filtered = parsed.filter(log => log.formatted);
+    if (viewMode === 'activity') {
+      // Show only HTTP logs (simple format with timestamps)
+      filtered = parsed.filter(log => log.timestamp && log.formatted);
+    } else {
+      // Show only verbose logs (stderr/stdout without formatted output from HTTP)
+      filtered = parsed.filter(log => !log.timestamp || !log.formatted || log.type !== 'request');
     }
 
     // Filter out health check requests unless toggle is enabled
     if (!showHealthChecks) {
       filtered = filtered.filter(log => !log.isHealthCheck);
-    }
-
-    // Apply filter
-    if (activeFilter !== 'all') {
-      filtered = filtered.filter(log => {
-        switch (activeFilter) {
-          case 'requests':
-            return log.type === 'request';
-          case 'errors':
-            return log.type === 'error';
-          case 'warnings':
-            return log.type === 'warning';
-          case 'system':
-            return log.type === 'system';
-          default:
-            return true;
-        }
-      });
     }
 
     // Apply sort
@@ -335,14 +359,6 @@ export function ServerLogs() {
   };
 
   const { logs: filteredLogs, hasRawLogs, formattedCount } = getFilteredLogs();
-
-  const filters: { id: LogFilter; label: string }[] = [
-    { id: 'all', label: 'All' },
-    { id: 'requests', label: 'Requests' },
-    { id: 'errors', label: 'Errors' },
-    { id: 'warnings', label: 'Warnings' },
-    { id: 'system', label: 'System' },
-  ];
 
   const getLogTypeColor = (type: string): string => {
     switch (type) {
@@ -401,61 +417,47 @@ export function ServerLogs() {
 
       {/* Filter Bar */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
-        {/* Filter Pills */}
+        {/* View Mode Toggle */}
         <div className="flex items-center gap-2">
-          {filters.map((filter) => (
+          <div className="flex items-center bg-white border border-gray-200 rounded-lg overflow-hidden">
             <button
-              key={filter.id}
-              onClick={() => setActiveFilter(filter.id)}
-              className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-colors cursor-pointer ${
-                activeFilter === filter.id
-                  ? 'bg-gray-900 text-white border-gray-900'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+              onClick={() => setViewMode('activity')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
+                viewMode === 'activity'
+                  ? 'bg-gray-100 text-gray-900'
+                  : 'text-gray-600 hover:bg-gray-50'
               }`}
             >
-              {filter.label}
+              Activity
             </button>
-          ))}
+            <button
+              onClick={() => setViewMode('verbose')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
+                viewMode === 'verbose'
+                  ? 'bg-gray-100 text-gray-900'
+                  : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              Verbose
+            </button>
+          </div>
         </div>
 
-        {/* Health Checks Toggle + View Mode + Sort */}
+        {/* Health Checks Toggle + Sort */}
         <div className="flex items-center gap-2">
           {/* Health Checks Toggle */}
           <button
             onClick={() => setShowHealthChecks(!showHealthChecks)}
-            className={`px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors cursor-pointer ${
+            className={`flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors cursor-pointer ${
               showHealthChecks
                 ? 'bg-blue-50 text-blue-700 border-blue-200'
                 : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:bg-gray-50'
             }`}
             title="Show /health, /slots, /props requests (filtered by default)"
           >
+            {showHealthChecks && <Check className="w-4 h-4" />}
             Health Checks
           </button>
-
-          {/* View Mode Toggle */}
-          <div className="flex items-center bg-white border border-gray-200 rounded-lg overflow-hidden">
-            <button
-              onClick={() => setViewMode('formatted')}
-              className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                viewMode === 'formatted'
-                  ? 'bg-gray-100 text-gray-900'
-                  : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              Formatted
-            </button>
-            <button
-              onClick={() => setViewMode('raw')}
-              className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                viewMode === 'raw'
-                  ? 'bg-gray-100 text-gray-900'
-                  : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              Raw
-            </button>
-          </div>
 
           {/* Sort Dropdown */}
           <div className="relative" ref={dropdownRef}>
@@ -508,31 +510,32 @@ export function ServerLogs() {
         ) : filteredLogs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
             <Trash2 className="w-8 h-8 mb-2 opacity-50" />
-            <p>No {viewMode === 'formatted' ? 'formatted ' : ''}logs found</p>
-            {viewMode === 'formatted' && hasRawLogs && formattedCount === 0 ? (
+            <p>No {viewMode === 'activity' ? 'activity ' : viewMode === 'verbose' ? 'verbose ' : ''}logs found</p>
+            {viewMode === 'activity' && hasRawLogs && formattedCount === 0 ? (
               <p className="text-sm mt-1">
                 No HTTP requests yet.{' '}
                 <button
-                  onClick={() => setViewMode('raw')}
+                  onClick={() => setViewMode('verbose')}
                   className="text-blue-400 hover:text-blue-300 underline cursor-pointer"
                 >
-                  View raw logs
+                  View verbose logs
                 </button>
               </p>
-            ) : activeFilter !== 'all' ? (
-              <p className="text-sm mt-1">Try selecting a different filter</p>
             ) : null}
           </div>
         ) : (
           <div className="space-y-0.5">
-            {filteredLogs.map((log, index) => (
-              <div
-                key={index}
-                className={`${getLogTypeColor(log.type)} break-all whitespace-pre-wrap leading-relaxed`}
-              >
-                {viewMode === 'formatted' && log.formatted ? log.formatted : log.raw}
-              </div>
-            ))}
+            {filteredLogs.map((log, index) => {
+              const content = log.formatted || log.raw;
+              return (
+                <div
+                  key={index}
+                  className={`${getLogTypeColor(log.type)} break-all whitespace-pre-wrap leading-relaxed`}
+                >
+                  {renderAnsiLine(content, index)}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -541,7 +544,6 @@ export function ServerLogs() {
       <div className="flex items-center justify-between px-4 py-2 border-t border-gray-200 bg-gray-50 text-sm text-gray-500">
         <span>
           {filteredLogs.length} {filteredLogs.length === 1 ? 'line' : 'lines'}
-          {activeFilter !== 'all' && ` (filtered)`}
         </span>
         <span className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full ${autoScroll ? 'bg-green-500' : 'bg-gray-300'}`} />

@@ -104,7 +104,7 @@ export function useRestartServer() {
 export function useServerLogs(serverId: string | null, lines = 500) {
   return useQuery({
     queryKey: ['serverLogs', serverId, lines],
-    queryFn: () => api.getServerLogs(serverId!, 'both', lines),
+    queryFn: () => api.getServerLogs(serverId!, 'all', lines),
     enabled: !!serverId,
     refetchInterval: 2000, // Auto-refresh every 2s
   });
