@@ -1,6 +1,7 @@
 {
   "name": "@appkit/llamacpp-cli",
   "version": "2.0.0",
+  "type": "module",
   "description": "CLI tool to manage local llama.cpp servers on macOS",
   "main": "dist/cli.js",
   "bin": {
@@ -20,6 +21,13 @@
     "postbuild": "cp -r src/launchers dist/ && chmod +x dist/launchers/llamacpp-server",
     "start": "node dist/cli.js",
     "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "test:validation": "vitest run src/lib/validation-service.test.ts",
+    "test:model": "vitest run src/lib/model-management-service.test.ts",
+    "test:config": "vitest run src/lib/server-config-service.test.ts",
     "verify-package": "node scripts/verify-package.js",
     "prepublishOnly": "npm run build && cd web && npm install && npm run build && cd .. && npm run verify-package",
     "release": "commit-and-tag-version",
@@ -60,9 +68,12 @@
     "@types/asciichart": "^1.5.8",
     "@types/blessed": "^0.1.27",
     "@types/node": "^20.12.7",
+    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/ui": "^2.1.9",
     "commit-and-tag-version": "^12.6.1",
     "tsx": "^4.7.2",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "vitest": "^2.1.9"
   },
   "engines": {
     "node": ">=18.0.0"
