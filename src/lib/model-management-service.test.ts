@@ -86,6 +86,15 @@ describe('ModelManagementService', () => {
       it('should delete model when no servers depend on it', async () => {
         const modelPath = '/test/models/llama.gguf';
         mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+        mockScanner.getModelInfo.mockResolvedValue({
+          filename: 'llama.gguf',
+          path: modelPath,
+          size: 1000000,
+          sizeFormatted: '1 MB',
+          modified: new Date(),
+          exists: true,
+          isSharded: false,
+        });
         mockState.getAllServers.mockResolvedValue([]);
 
         const result = await service.deleteModel({
@@ -106,6 +115,15 @@ describe('ModelManagementService', () => {
         const server2 = createServerConfig({ id: 'server-2', modelPath });
 
         mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+        mockScanner.getModelInfo.mockResolvedValue({
+          filename: 'llama.gguf',
+          path: modelPath,
+          size: 1000000,
+          sizeFormatted: '1 MB',
+          modified: new Date(),
+          exists: true,
+          isSharded: false,
+        });
         mockState.getAllServers.mockResolvedValue([server1, server2]);
 
         const result = await service.deleteModel({
@@ -135,6 +153,15 @@ describe('ModelManagementService', () => {
         });
 
         mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+        mockScanner.getModelInfo.mockResolvedValue({
+          filename: 'llama.gguf',
+          path: modelPath,
+          size: 1000000,
+          sizeFormatted: '1 MB',
+          modified: new Date(),
+          exists: true,
+          isSharded: false,
+        });
         mockState.getAllServers.mockResolvedValue([server1, server2]);
 
         const result = await service.deleteModel({
@@ -172,6 +199,15 @@ describe('ModelManagementService', () => {
         });
 
         mockScanner.resolveModelPath.mockResolvedValue(modelPath1);
+        mockScanner.getModelInfo.mockResolvedValue({
+          filename: 'model.gguf',
+          path: modelPath1,
+          size: 1000000,
+          sizeFormatted: '1 MB',
+          modified: new Date(),
+          exists: true,
+          isSharded: false,
+        });
         mockState.getAllServers.mockResolvedValue([server1, server2, otherServer]);
 
         const result = await service.deleteModel({
@@ -200,6 +236,15 @@ describe('ModelManagementService', () => {
         });
 
         mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+        mockScanner.getModelInfo.mockResolvedValue({
+          filename: 'llama.gguf',
+          path: modelPath,
+          size: 1000000,
+          sizeFormatted: '1 MB',
+          modified: new Date(),
+          exists: true,
+          isSharded: false,
+        });
         mockState.getAllServers.mockResolvedValue([runningServer]);
         mockStatus.checkServer.mockResolvedValue({
           running: true,
@@ -239,6 +284,15 @@ describe('ModelManagementService', () => {
         });
 
         mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+        mockScanner.getModelInfo.mockResolvedValue({
+          filename: 'llama.gguf',
+          path: modelPath,
+          size: 1000000,
+          sizeFormatted: '1 MB',
+          modified: new Date(),
+          exists: true,
+          isSharded: false,
+        });
         mockState.getAllServers.mockResolvedValue([server1, server2]);
         mockStatus.checkServer.mockResolvedValueOnce({
           running: true,
@@ -272,6 +326,15 @@ describe('ModelManagementService', () => {
         const server2 = createServerConfig({ id: 'server-2', modelPath });
 
         mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+        mockScanner.getModelInfo.mockResolvedValue({
+          filename: 'llama.gguf',
+          path: modelPath,
+          size: 1000000,
+          sizeFormatted: '1 MB',
+          modified: new Date(),
+          exists: true,
+          isSharded: false,
+        });
         mockState.getAllServers.mockResolvedValue([server1, server2]);
 
         const progressMessages: string[] = [];
@@ -292,6 +355,15 @@ describe('ModelManagementService', () => {
       it('should report progress when deleting model with no dependencies', async () => {
         const modelPath = '/test/models/llama.gguf';
         mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+        mockScanner.getModelInfo.mockResolvedValue({
+          filename: 'llama.gguf',
+          path: modelPath,
+          size: 1000000,
+          sizeFormatted: '1 MB',
+          modified: new Date(),
+          exists: true,
+          isSharded: false,
+        });
         mockState.getAllServers.mockResolvedValue([]);
 
         const progressMessages: string[] = [];
@@ -310,6 +382,15 @@ describe('ModelManagementService', () => {
       it('should catch and return error if file deletion fails', async () => {
         const modelPath = '/test/models/llama.gguf';
         mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+        mockScanner.getModelInfo.mockResolvedValue({
+          filename: 'llama.gguf',
+          path: modelPath,
+          size: 1000000,
+          sizeFormatted: '1 MB',
+          modified: new Date(),
+          exists: true,
+          isSharded: false,
+        });
         mockState.getAllServers.mockResolvedValue([]);
         mockFsUnlink.mockRejectedValue(new Error('Permission denied'));
 
@@ -326,6 +407,15 @@ describe('ModelManagementService', () => {
         const server = createServerConfig({ id: 'server-1', modelPath });
 
         mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+        mockScanner.getModelInfo.mockResolvedValue({
+          filename: 'llama.gguf',
+          path: modelPath,
+          size: 1000000,
+          sizeFormatted: '1 MB',
+          modified: new Date(),
+          exists: true,
+          isSharded: false,
+        });
         mockState.getAllServers.mockResolvedValue([server]);
         mockLaunchctl.deletePlist.mockRejectedValue(new Error('Plist not found'));
 
@@ -349,6 +439,15 @@ describe('ModelManagementService', () => {
       const server2 = createServerConfig({ id: 'server-2', modelPath });
 
       mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+      mockScanner.getModelInfo.mockResolvedValue({
+        filename: 'llama.gguf',
+        path: modelPath,
+        size: 1000000,
+        sizeFormatted: '1 MB',
+        modified: new Date(),
+        exists: true,
+        isSharded: false,
+      });
       mockState.getAllServers.mockResolvedValue([server1, server2]);
 
       const deps = await service.getModelDependencies('llama.gguf');
@@ -367,6 +466,15 @@ describe('ModelManagementService', () => {
     it('should return empty array if no servers use model', async () => {
       const modelPath = '/test/models/llama.gguf';
       mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+      mockScanner.getModelInfo.mockResolvedValue({
+        filename: 'llama.gguf',
+        path: modelPath,
+        size: 1000000,
+        sizeFormatted: '1 MB',
+        modified: new Date(),
+        exists: true,
+        isSharded: false,
+      });
       mockState.getAllServers.mockResolvedValue([]);
 
       const deps = await service.getModelDependencies('llama.gguf');
@@ -390,6 +498,15 @@ describe('ModelManagementService', () => {
       });
 
       mockScanner.resolveModelPath.mockResolvedValue(modelPath1);
+      mockScanner.getModelInfo.mockResolvedValue({
+        filename: 'model.gguf',
+        path: modelPath1,
+        size: 1000000,
+        sizeFormatted: '1 MB',
+        modified: new Date(),
+        exists: true,
+        isSharded: false,
+      });
       mockState.getAllServers.mockResolvedValue([server1, otherServer]);
 
       const deps = await service.getModelDependencies('model.gguf');
@@ -404,6 +521,15 @@ describe('ModelManagementService', () => {
     it('should return true if no dependencies', async () => {
       const modelPath = '/test/models/llama.gguf';
       mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+      mockScanner.getModelInfo.mockResolvedValue({
+        filename: 'llama.gguf',
+        path: modelPath,
+        size: 1000000,
+        sizeFormatted: '1 MB',
+        modified: new Date(),
+        exists: true,
+        isSharded: false,
+      });
       mockState.getAllServers.mockResolvedValue([]);
 
       const canDelete = await service.canDeleteModel('llama.gguf');
@@ -416,6 +542,15 @@ describe('ModelManagementService', () => {
       const server = createServerConfig({ id: 'server-1', modelPath });
 
       mockScanner.resolveModelPath.mockResolvedValue(modelPath);
+      mockScanner.getModelInfo.mockResolvedValue({
+        filename: 'llama.gguf',
+        path: modelPath,
+        size: 1000000,
+        sizeFormatted: '1 MB',
+        modified: new Date(),
+        exists: true,
+        isSharded: false,
+      });
       mockState.getAllServers.mockResolvedValue([server]);
 
       const canDelete = await service.canDeleteModel('llama.gguf');
