@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Loader2, Save, RotateCcw, HardDrive, AlertTriangle } from 'lucide-react';
+import { X, Loader2, Save, RotateCcw, AlertTriangle } from 'lucide-react';
 import { useUpdateServer, useModels } from '../hooks/useApi';
 import type { Server } from '../types/api';
 
@@ -153,46 +153,35 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
                 No models available
               </div>
             ) : (
-              <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
+              <select
+                value={formData.model}
+                onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent bg-white"
+              >
                 {models.map((model) => {
                   const isCurrentModel = model.filename === server.modelName;
                   const hasOtherServer = model.serversUsing > 0 && !isCurrentModel;
                   const canSelect = isCurrentModel || !hasOtherServer;
+
+                  let label = model.filename.replace('.gguf', '');
+                  if (isCurrentModel) {
+                    label += ' (current)';
+                  } else if (hasOtherServer) {
+                    label += ' (in use)';
+                  }
+                  label += ` - ${formatSize(model.size)}`;
+
                   return (
-                    <button
+                    <option
                       key={model.filename}
-                      type="button"
-                      onClick={() => canSelect && setFormData({ ...formData, model: model.filename })}
+                      value={model.filename}
                       disabled={!canSelect}
-                      className={`w-full text-left px-3 py-2 transition-colors ${
-                        formData.model === model.filename
-                          ? 'bg-gray-100 cursor-pointer'
-                          : !canSelect
-                          ? 'bg-gray-50 opacity-50 cursor-not-allowed'
-                          : 'hover:bg-gray-50 cursor-pointer'
-                      }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <HardDrive className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                          <span className="text-sm text-gray-900 truncate">
-                            {model.filename.replace('.gguf', '')}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 ml-2">
-                          <span className="text-xs text-gray-500">{formatSize(model.size)}</span>
-                          {isCurrentModel && (
-                            <span className="text-xs text-blue-600">current</span>
-                          )}
-                          {hasOtherServer && (
-                            <span className="text-xs text-orange-600">in use</span>
-                          )}
-                        </div>
-                      </div>
-                    </button>
+                      {label}
+                    </option>
                   );
                 })}
-              </div>
+              </select>
             )}
             {modelChanged && (
               <div className="flex items-start gap-2 mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
