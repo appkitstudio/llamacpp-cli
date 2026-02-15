@@ -39,6 +39,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
 
   const [restartAfterSave, setRestartAfterSave] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [gpuLayersInput, setGpuLayersInput] = useState('60');
 
   const models = modelsData?.models || [];
 
@@ -56,6 +57,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
         verbose: server.verbose,
         customFlags: server.customFlags?.join(', ') || '',
       });
+      setGpuLayersInput(server.gpuLayers.toString());
       setError(null);
     }
   }, [server]);
@@ -89,7 +91,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
           host: formData.host,
           threads: formData.threads,
           ctxSize: formData.ctxSize,
-          gpuLayers: formData.gpuLayers,
+          gpuLayers: isNaN(formData.gpuLayers) ? 60 : formData.gpuLayers,
           verbose: formData.verbose,
           customFlags: customFlags.length > 0 ? customFlags : undefined,
           restart: server.status === 'running' && restartAfterSave,
@@ -329,13 +331,71 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
             </label>
             <input
               type="number"
-              value={formData.gpuLayers}
-              onChange={(e) => setFormData({ ...formData, gpuLayers: parseInt(e.target.value) || 0 })}
-              min={0}
+              value={gpuLayersInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                setGpuLayersInput(value);
+                // Only update formData if it's a valid number
+                if (value !== '' && value !== '-') {
+                  const num = parseInt(value);
+                  if (!isNaN(num)) {
+                    setFormData({ ...formData, gpuLayers: num });
+                  }
+                }
+              }}
+              onBlur={() => {
+                // On blur, ensure we have a valid number
+                const num = parseInt(gpuLayersInput);
+                if (isNaN(num) || gpuLayersInput === '' || gpuLayersInput === '-' || num < -1 || num > 999) {
+                  setGpuLayersInput('60');
+                  setFormData({ ...formData, gpuLayers: 60 });
+                }
+              }}
+              min={-1}
               max={999}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent"
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent ${
+                (() => {
+                  const num = parseInt(gpuLayersInput);
+                  const isComplete = gpuLayersInput !== '' && gpuLayersInput !== '-' && !isNaN(num);
+                  const isInvalid = isComplete && (num < -1 || num > 999);
+                  return isInvalid
+                    ? 'border-red-500 focus:ring-red-200'
+                    : 'border-gray-200 focus:ring-gray-200';
+                })()
+              }`}
             />
-            <p className="text-xs text-gray-500 mt-1">Layers to offload to GPU (0 = CPU only)</p>
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, gpuLayers: -1 });
+                  setGpuLayersInput('-1');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                All (-1)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, gpuLayers: 60 });
+                  setGpuLayersInput('60');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                Recommended (60)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, gpuLayers: 0 });
+                  setGpuLayersInput('0');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                CPU only (0)
+              </button>
+            </div>
           </div>
 
           {/* Verbose */}

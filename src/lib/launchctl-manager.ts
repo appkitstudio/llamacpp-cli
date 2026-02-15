@@ -85,7 +85,7 @@ export class LaunchctlManager {
       '--port', config.port.toString(),
       '--threads', config.threads.toString(),
       '--ctx-size', config.ctxSize.toString(),
-      '--gpu-layers', config.gpuLayers.toString(),
+      '--gpu-layers', config.gpuLayers === -1 ? 'all' : config.gpuLayers.toString(),
     );
 
     // Add flags

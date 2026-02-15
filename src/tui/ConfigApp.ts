@@ -120,7 +120,7 @@ export async function createConfigUI(
         value: server.gpuLayers,
         originalValue: server.gpuLayers,
         validation: (value: number) => {
-          if (value < 0) return 'Must be at least 0';
+          if (value < -1) return 'Must be -1 (all) or a non-negative integer';
           if (value > 999) return 'Must be at most 999';
           return null;
         },

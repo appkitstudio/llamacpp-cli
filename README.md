@@ -1430,6 +1430,12 @@ llamacpp-cli automatically configures optimal settings based on model size:
 
 All servers include `--embeddings` and `--jinja` flags by default.
 
+**GPU Layers explained:**
+- **Default: 60** - Conservative value that works reliably on all Apple Silicon devices
+- **-1 (all)** - Maximum performance, uses all available GPU layers. May cause OOM on very large models with limited VRAM.
+- **0 (CPU only)** - Useful for testing or when GPU is busy with other tasks
+- **Specific number** - Fine-tune based on your GPU memory and model size
+
 ## How It Works
 
 llamacpp-cli uses macOS launchctl to manage llama-server processes:

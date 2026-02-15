@@ -42,8 +42,10 @@ export class ConfigGenerator {
       ctxSize = 16384;       // 6GB+: very large
     }
 
-    // GPU layers - always max for Metal (macOS)
-    const gpuLayers = 60;  // llama.cpp auto-detects optimal value
+    // GPU layers - conservative default of 60 works reliably on all Apple Silicon devices
+    // Users can override with -1 to use all available layers (max performance, may OOM on large models)
+    // or 0 for CPU-only mode. llama-server auto-detects optimal layer distribution.
+    const gpuLayers = 60;
 
     // Threads - use half of available cores (better performance)
     const cpuCount = os.cpus().length;
