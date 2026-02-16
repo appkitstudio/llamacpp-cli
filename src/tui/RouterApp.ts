@@ -430,10 +430,6 @@ export async function createRouterUI(
 
   // Render current view
   async function render(): Promise<void> {
-    // Re-register handlers based on current view (for context-sensitive keys)
-    unregisterHandlers();
-    registerHandlers();
-
     if (state.view === 'status') {
       stopLogsAutoRefresh();
       renderStatus();
@@ -447,6 +443,39 @@ export async function createRouterUI(
   }
 
   // Create a centered modal box
+  // Helper to create modal element (for custom modals with special logic)
+  function createModal(title: string, height: number | string = 'shrink'): blessed.Widgets.BoxElement {
+    return blessed.box({
+      parent: screen,
+      top: 'center',
+      left: 'center',
+      width: '60%',
+      height,
+      border: { type: 'line' },
+      style: {
+        border: { fg: 'cyan' },
+        fg: 'white',
+      },
+      tags: true,
+      label: ` ${title} `,
+    });
+  }
+
+  // Helper to create semi-transparent overlay
+  function createOverlay(): blessed.Widgets.BoxElement {
+    return blessed.box({
+      parent: screen,
+      top: 0,
+      left: 0,
+      width: '100%',
+      height: '100%',
+      style: {
+        bg: 'black',
+        transparent: true,
+      },
+    });
+  }
+
   // Modal helper functions now use ModalController
   /**
    * Show error modal
@@ -476,54 +505,158 @@ export async function createRouterUI(
 
   // Number input modal
   async function editNumber(field: ConfigField): Promise<void> {
-    unregisterHandlers(); // Remove screen handlers before modal opens
-    const result = await modalController.showNumberInput(
-      field.label,
-      field.value as number,
-      field.validation as ((value: number) => string | null) | undefined,
-      () => {
+    unregisterHandlers();
+    return new Promise((resolve) => {
+      const handleClose = () => {
         registerHandlers();
         render();
-      }
-    );
+      };
 
-    if (result !== null) {
-      field.value = result;
-      updateHasChanges();
-      await render();
-    }
+      const overlay = createOverlay();
+      const modal = createModal(`Edit ${field.label}`, 10);
+
+      const infoText = blessed.text({
+        parent: modal,
+        top: 1,
+        left: 2,
+        content: `Current: ${field.value}`,
+        tags: true,
+      });
+
+      const inputBox = blessed.textbox({
+        parent: modal,
+        top: 3,
+        left: 2,
+        right: 2,
+        height: 3,
+        inputOnFocus: true,
+        border: { type: 'line' },
+        style: {
+          border: { fg: 'white' },
+          focus: { border: { fg: 'green' } },
+        },
+      });
+
+      blessed.text({
+        parent: modal,
+        bottom: 1,
+        left: 2,
+        content: '{gray-fg}[Enter] Confirm  [ESC] Cancel{/gray-fg}',
+        tags: true,
+      });
+
+      inputBox.setValue(String(field.value));
+      screen.append(overlay);
+      screen.append(modal);
+      screen.render();
+      inputBox.focus();
+
+      inputBox.on('submit', async (value: string) => {
+        const numValue = parseInt(value, 10);
+
+        if (!isNaN(numValue)) {
+          if (field.validation) {
+            const error = field.validation(numValue);
+            if (error) {
+              infoText.setContent(`{red-fg}Error: ${error}{/red-fg}`);
+              screen.render();
+              inputBox.focus();
+              return;
+            }
+          }
+          field.value = numValue;
+          updateHasChanges();
+        }
+        screen.remove(modal);
+        screen.remove(overlay);
+        handleClose();
+        resolve();
+      });
+
+      inputBox.on('cancel', () => {
+        screen.remove(modal);
+        screen.remove(overlay);
+        handleClose();
+        resolve();
+      });
+    });
   }
 
   // Toggle/select modal
   async function editSelect(field: ConfigField): Promise<void> {
-    unregisterHandlers(); // Remove screen handlers before modal opens
-    const options = field.options || [];
-    const isToggle = field.type === 'toggle';
-
-    const additionalInfo = (selectedValue: string) => {
-      if (field.key === 'host' && selectedValue === '0.0.0.0') {
-        return '  {yellow-fg}⚠ Warning: Exposes router to network{/yellow-fg}';
-      }
-      return '';
-    };
-
-    const result = await modalController.showSelect(
-      field.label,
-      options,
-      field.value as string | boolean,
-      isToggle,
-      () => {
+    unregisterHandlers();
+    return new Promise((resolve) => {
+      const handleClose = () => {
         registerHandlers();
         render();
-      },
-      additionalInfo
-    );
+      };
 
-    if (result !== null) {
-      field.value = result;
-      updateHasChanges();
-      await render();
-    }
+      const options = field.options || [];
+      let selectedOption = field.type === 'toggle'
+        ? (field.value ? 1 : 0)
+        : options.indexOf(String(field.value));
+      if (selectedOption < 0) selectedOption = 0;
+
+      const overlay = createOverlay();
+      const modal = createModal(field.label, options.length + 6);
+
+      function renderOptions(): void {
+        let content = '\n';
+        for (let i = 0; i < options.length; i++) {
+          const isSelected = i === selectedOption;
+          const indicator = isSelected ? '●' : '○';
+          if (isSelected) {
+            content += `  {cyan-fg}${indicator} ${options[i]}{/cyan-fg}\n`;
+          } else {
+            content += `  {gray-fg}${indicator} ${options[i]}{/gray-fg}\n`;
+          }
+        }
+
+        // Add warning for 0.0.0.0
+        if (field.key === 'host' && options[selectedOption] === '0.0.0.0') {
+          content += '\n  {yellow-fg}⚠ Warning: Exposes router to network{/yellow-fg}';
+        }
+
+        content += '\n\n{gray-fg}  [↑/↓] Select  [Enter] Confirm  [ESC] Cancel{/gray-fg}';
+        modal.setContent(content);
+        screen.render();
+      }
+
+      screen.append(overlay);
+      screen.append(modal);
+      renderOptions();
+      modal.focus();
+
+      modal.key(['up', 'k'], () => {
+        selectedOption = Math.max(0, selectedOption - 1);
+        renderOptions();
+      });
+
+      modal.key(['down', 'j'], () => {
+        selectedOption = Math.min(options.length - 1, selectedOption + 1);
+        renderOptions();
+      });
+
+      modal.key(['enter'], () => {
+        if (field.type === 'toggle') {
+          field.value = selectedOption === 1;
+        } else {
+          field.value = options[selectedOption];
+        }
+        updateHasChanges();
+        screen.remove(modal);
+        screen.remove(overlay);
+        handleClose();
+        resolve();
+      });
+
+      modal.key(['escape'], () => {
+        screen.remove(modal);
+        screen.remove(overlay);
+        handleClose();
+        resolve();
+      });
+    });
   }
 
   /**
@@ -765,21 +898,25 @@ export async function createRouterUI(
   // Key handlers
   const keyHandlers = {
     up: () => {
+      if (modalController.isModalOpen()) return;
       if (state.view === 'config') {
         state.selectedIndex = Math.max(0, state.selectedIndex - 1);
         render();
       }
     },
     down: () => {
+      if (modalController.isModalOpen()) return;
       if (state.view === 'config') {
         state.selectedIndex = Math.min(state.fields.length - 1, state.selectedIndex + 1);
         render();
       }
     },
     enter: () => {
+      if (modalController.isModalOpen()) return;
       handleEdit();
     },
     config: () => {
+      if (modalController.isModalOpen()) return;
       if (state.view === 'status') {
         state.view = 'config';
         state.selectedIndex = 0;
@@ -787,6 +924,7 @@ export async function createRouterUI(
       }
     },
     startStopOrSave: () => {
+      if (modalController.isModalOpen()) return;
       if (state.view === 'status' && !state.isRunning) {
         startRouter();
       } else if (state.view === 'status' && state.isRunning) {
@@ -796,28 +934,30 @@ export async function createRouterUI(
       }
     },
     toggleLogType: () => {
+      if (modalController.isModalOpen()) return;
       if (state.view === 'logs') {
         state.logType = state.logType === 'stdout' ? 'stderr' : 'stdout';
         render();
       }
     },
-    restart: () => {
+    restartOrRefresh: () => {
+      if (modalController.isModalOpen()) return;
+      // Combined handler for 'r'/'R' key (different actions in different views)
       if (state.view === 'status' && state.isRunning) {
         restartRouter();
+      } else if (state.view === 'logs') {
+        renderLogs();
       }
     },
     logs: () => {
+      if (modalController.isModalOpen()) return;
       if (state.view === 'status') {
         state.view = 'logs';
         render();
       }
     },
-    refreshLogs: () => {
-      if (state.view === 'logs') {
-        renderLogs();
-      }
-    },
     toggleRefresh: () => {
+      if (modalController.isModalOpen()) return;
       if (state.view === 'logs') {
         toggleAutoRefresh();
       }
@@ -826,6 +966,7 @@ export async function createRouterUI(
       handleEscape();
     },
     quit: () => {
+      if (modalController.isModalOpen()) return;
       screen.destroy();
       process.exit(0);
     },
@@ -844,8 +985,8 @@ export async function createRouterUI(
     screen.unkey('S', keyHandlers.startStopOrSave);
     screen.unkey('t', keyHandlers.toggleLogType);
     screen.unkey('T', keyHandlers.toggleLogType);
-    screen.unkey('r', keyHandlers.restart);
-    screen.unkey('R', keyHandlers.restart);
+    screen.unkey('r', keyHandlers.restartOrRefresh);
+    screen.unkey('R', keyHandlers.restartOrRefresh);
     screen.unkey('l', keyHandlers.logs);
     screen.unkey('L', keyHandlers.logs);
     screen.unkey('f', keyHandlers.toggleRefresh);
@@ -855,30 +996,20 @@ export async function createRouterUI(
     screen.unkey('Q', keyHandlers.quit);
   }
 
-  // Register handlers (view-specific)
+  // Register handlers (all handlers registered unconditionally)
   function registerHandlers(): void {
-    // Always available
+    // Register all handlers - they contain view guards internally
+    screen.key(['up', 'k'], keyHandlers.up);
+    screen.key(['down', 'j'], keyHandlers.down);
+    screen.key(['enter'], keyHandlers.enter);
+    screen.key(['s', 'S'], keyHandlers.startStopOrSave);
+    screen.key(['t', 'T'], keyHandlers.toggleLogType);
+    screen.key(['r', 'R'], keyHandlers.restartOrRefresh);
+    screen.key(['c', 'C'], keyHandlers.config);
+    screen.key(['l', 'L'], keyHandlers.logs);
+    screen.key(['f', 'F'], keyHandlers.toggleRefresh);
     screen.key(['escape'], keyHandlers.escape);
     screen.key(['q', 'Q'], keyHandlers.quit);
-
-    if (state.view === 'status') {
-      // Status view keys
-      screen.key(['s', 'S'], keyHandlers.startStopOrSave);
-      screen.key(['r', 'R'], keyHandlers.restart);
-      screen.key(['c', 'C'], keyHandlers.config);
-      screen.key(['l', 'L'], keyHandlers.logs);
-    } else if (state.view === 'config') {
-      // Config view keys
-      screen.key(['up', 'k'], keyHandlers.up);
-      screen.key(['down', 'j'], keyHandlers.down);
-      screen.key(['enter'], keyHandlers.enter);
-      screen.key(['s', 'S'], keyHandlers.startStopOrSave);
-    } else if (state.view === 'logs') {
-      // Logs view keys
-      screen.key(['t', 'T'], keyHandlers.toggleLogType);
-      screen.key(['r', 'R'], keyHandlers.refreshLogs);
-      screen.key(['f', 'F'], keyHandlers.toggleRefresh);
-    }
   }
 
   // Cleanup function (for exiting router screen)
