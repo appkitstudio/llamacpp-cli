@@ -116,26 +116,25 @@ export class RouterManager {
    * Generate plist XML content for the router
    */
   generatePlist(config: RouterConfig): string {
-    // Find the compiled router-server.js file
-    // In dev mode (tsx), __dirname is src/lib/
-    // In production, __dirname is dist/lib/
-    // Always use the compiled dist version for launchctl
-    let routerServerPath: string;
-    if (__dirname.includes('/src/')) {
-      // Dev mode - point to dist/lib/router-server.js
-      const projectRoot = path.resolve(__dirname, '../..');
-      routerServerPath = path.join(projectRoot, 'dist/lib/router-server.js');
-    } else {
-      // Production mode - already in dist/lib/
-      routerServerPath = path.join(__dirname, 'router-server.js');
+    // Find the wrapper script
+    // Try relative to current module location (works for both dev and prod)
+    let wrapperPath = path.join(__dirname, '..', 'launchers', 'llamacpp-router');
+    if (!require('fs').existsSync(wrapperPath)) {
+      // Try from the CLI binary location (global install)
+      const binPath = process.argv[1];
+      wrapperPath = path.join(path.dirname(binPath), '..', 'launchers', 'llamacpp-router');
+      if (!require('fs').existsSync(wrapperPath)) {
+        throw new Error(`Router wrapper script not found at ${wrapperPath}`);
+      }
     }
 
     // Use the current Node.js executable path (resolves symlinks)
     const nodePath = process.execPath;
 
+    // Build arguments: wrapper receives node path, then config path
     const args = [
+      wrapperPath,
       nodePath,
-      routerServerPath,
       '--config', this.configPath,
     ];
 

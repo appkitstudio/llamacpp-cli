@@ -17,7 +17,7 @@
   "scripts": {
     "dev": "tsx src/cli.ts",
     "build": "tsc && npm run postbuild",
-    "postbuild": "cp -r src/launchers dist/ && chmod +x dist/launchers/llamacpp-server",
+    "postbuild": "cp -r src/launchers dist/ && chmod +x dist/launchers/llamacpp-server dist/launchers/llamacpp-router dist/launchers/llamacpp-admin",
     "start": "node dist/cli.js",
     "clean": "rm -rf dist",
     "test": "vitest run",
