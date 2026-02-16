@@ -8,7 +8,7 @@ import { ServerLogs } from './pages/ServerLogs';
 import { Models } from './pages/Models';
 import { Router } from './pages/Router';
 import { RouterLogs } from './pages/RouterLogs';
-import { Admin } from './pages/Admin';
+import { Manage } from './pages/Manage';
 import { AdminLogs } from './pages/AdminLogs';
 import { api } from './lib/api';
 
@@ -42,7 +42,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <Route path="/models" element={<Models searchQuery={searchQuery} />} />
         <Route path="/router" element={<Router />} />
         <Route path="/router/logs" element={<RouterLogs />} />
-        <Route path="/admin" element={<Admin />} />
+        <Route path="/manage" element={<Manage />} />
         <Route path="/admin/logs" element={<AdminLogs />} />
       </Routes>
     </div>

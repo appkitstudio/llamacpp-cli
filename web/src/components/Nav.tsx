@@ -48,14 +48,14 @@ export function Nav({ onLogout, searchQuery = '', onSearchChange }: NavProps) {
                 Models
               </Link>
               <Link
-                to="/admin"
+                to="/manage"
                 className={`px-3 py-2 text-sm font-medium transition-colors rounded-md ${
-                  location.pathname === '/admin'
+                  location.pathname === '/manage'
                     ? 'text-neutral-900 bg-neutral-100'
                     : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
                 }`}
               >
-                Admin
+                Manage
               </Link>
             </div>
           </div>
