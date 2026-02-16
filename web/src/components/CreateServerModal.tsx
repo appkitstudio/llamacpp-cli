@@ -63,6 +63,19 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
 
   const models = modelsData?.models || [];
 
+  // Helper to get the correct model identifier
+  const getModelIdentifier = (model: typeof models[0]): string => {
+    return model.isSharded && model.baseModelName
+      ? model.baseModelName
+      : model.filename;
+  };
+
+  // Helper to get display name for a model
+  const getModelDisplayName = (model: typeof models[0]): string => {
+    const identifier = getModelIdentifier(model);
+    return identifier.replace('.gguf', '');
+  };
+
   // Reset form when modal opens
   useEffect(() => {
     if (isOpen) {
@@ -85,7 +98,7 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
   // Update defaults when model changes
   useEffect(() => {
     if (formData.model) {
-      const selectedModel = models.find(m => m.filename === formData.model);
+      const selectedModel = models.find(m => getModelIdentifier(m) === formData.model);
       if (selectedModel) {
         const defaults = getSmartDefaults(selectedModel.size);
         setFormData(prev => ({
@@ -144,7 +157,7 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
     return `${size} tokens`;
   };
 
-  const selectedModel = models.find(m => m.filename === formData.model);
+  const selectedModel = models.find(m => getModelIdentifier(m) === formData.model);
 
   if (!isOpen) return null;
 
@@ -181,14 +194,16 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
               <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
                 {models.map((model) => {
                   const hasServer = model.serversUsing > 0;
+                  const modelIdentifier = getModelIdentifier(model);
+                  const displayName = getModelDisplayName(model);
                   return (
                     <button
                       key={model.filename}
                       type="button"
-                      onClick={() => !hasServer && setFormData({ ...formData, model: model.filename })}
+                      onClick={() => !hasServer && setFormData({ ...formData, model: modelIdentifier })}
                       disabled={hasServer}
                       className={`w-full text-left px-3 py-2 transition-colors ${
-                        formData.model === model.filename
+                        formData.model === modelIdentifier
                           ? 'bg-gray-100 cursor-pointer'
                           : hasServer
                           ? 'bg-gray-50 opacity-50 cursor-not-allowed'
@@ -199,7 +214,7 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <HardDrive className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           <span className="text-sm text-gray-900 truncate">
-                            {model.filename.replace('.gguf', '')}
+                            {displayName}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 ml-2">

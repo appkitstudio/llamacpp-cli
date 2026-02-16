@@ -43,11 +43,44 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
 
   const models = modelsData?.models || [];
 
+  // Helper to get the correct model identifier
+  const getModelIdentifier = (model: typeof models[0]): string => {
+    return model.isSharded && model.baseModelName
+      ? model.baseModelName
+      : model.filename;
+  };
+
+  // Helper to get display name for a model
+  const getModelDisplayName = (model: typeof models[0]): string => {
+    const identifier = getModelIdentifier(model);
+    return identifier.replace('.gguf', '');
+  };
+
+  // Helper to find the model that matches a server's modelName
+  // (handles both direct filename match and shard path match)
+  const findServerModel = (serverModelName: string) => {
+    return models.find(m => {
+      // Direct filename match (non-sharded or exact first shard match)
+      if (m.filename === serverModelName) return true;
+      // Base model name match (sharded models)
+      if (m.baseModelName === serverModelName) return true;
+      // Check if serverModelName matches any shard path
+      if (m.isSharded && m.shardPaths) {
+        return m.shardPaths.some(p => p.endsWith(serverModelName));
+      }
+      return false;
+    });
+  };
+
   // Initialize form when server changes
   useEffect(() => {
     if (server) {
+      // Find the model in the list (handles sharded models correctly)
+      const serverModel = findServerModel(server.modelName);
+      const modelIdentifier = serverModel ? getModelIdentifier(serverModel) : server.modelName;
+
       setFormData({
-        model: server.modelName,
+        model: modelIdentifier,
         alias: server.alias || '',
         port: server.port,
         host: server.host,
@@ -60,7 +93,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
       setGpuLayersInput(server.gpuLayers.toString());
       setError(null);
     }
-  }, [server]);
+  }, [server, models]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,9 +144,12 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
     return `${(bytes / 1e3).toFixed(1)} KB`;
   };
 
-  const modelChanged = server && formData.model !== server.modelName;
-
   if (!isOpen || !server) return null;
+
+  const serverModel = findServerModel(server.modelName);
+  const currentModelIdentifier = serverModel ? getModelIdentifier(serverModel) : server.modelName;
+  const modelChanged = formData.model !== currentModelIdentifier;
+  const displayName = serverModel ? getModelDisplayName(serverModel) : server.modelName.replace('.gguf', '');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -122,7 +158,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Configure Server</h2>
-            <p className="text-sm text-gray-500">{server.modelName.replace('.gguf', '')}</p>
+            <p className="text-sm text-gray-500">{displayName}</p>
           </div>
           <button
             onClick={onClose}
@@ -154,11 +190,13 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
                 className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent bg-white"
               >
                 {models.map((model) => {
-                  const isCurrentModel = model.filename === server.modelName;
+                  const modelIdentifier = getModelIdentifier(model);
+                  const serverModel = findServerModel(server.modelName);
+                  const isCurrentModel = serverModel && getModelIdentifier(serverModel) === modelIdentifier;
                   const hasOtherServer = model.serversUsing > 0 && !isCurrentModel;
                   const canSelect = isCurrentModel || !hasOtherServer;
 
-                  let label = model.filename.replace('.gguf', '');
+                  let label = getModelDisplayName(model);
                   if (isCurrentModel) {
                     label += ' (current)';
                   } else if (hasOtherServer) {
@@ -169,7 +207,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
                   return (
                     <option
                       key={model.filename}
-                      value={model.filename}
+                      value={modelIdentifier}
                       disabled={!canSelect}
                     >
                       {label}
