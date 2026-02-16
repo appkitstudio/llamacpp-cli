@@ -6,7 +6,7 @@ interface ConfigOptions {
   host?: string;
   timeout?: number;
   healthInterval?: number;
-  verbose?: boolean;
+  logging?: boolean;
   restart?: boolean;
 }
 
@@ -19,9 +19,9 @@ export async function routerConfigCommand(options: ConfigOptions): Promise<void>
     }
 
     // Check if any options were provided
-    const hasOptions = options.port || options.host || options.timeout || options.healthInterval || options.verbose !== undefined;
+    const hasOptions = options.port || options.host || options.timeout || options.healthInterval || options.logging !== undefined;
     if (!hasOptions) {
-      throw new Error('No configuration options provided. Use --port, --host, --timeout, --health-interval, or --verbose');
+      throw new Error('No configuration options provided. Use --port, --host, --timeout, --health-interval, or --logging');
     }
 
     const isRunning = config.status === 'running';
@@ -56,10 +56,10 @@ export async function routerConfigCommand(options: ConfigOptions): Promise<void>
       updates.healthCheckInterval = options.healthInterval;
     }
 
-    if (options.verbose !== undefined) {
-      const verboseStr = (val: boolean) => val ? 'enabled' : 'disabled';
-      changes.push(`Verbose Logging: ${verboseStr(config.verbose)} → ${verboseStr(options.verbose)}`);
-      updates.verbose = options.verbose;
+    if (options.logging !== undefined) {
+      const loggingStr = (val: boolean) => val ? 'enabled' : 'disabled';
+      changes.push(`Logging: ${loggingStr(config.logging)} → ${loggingStr(options.logging)}`);
+      updates.logging = options.logging;
     }
 
     // Display changes

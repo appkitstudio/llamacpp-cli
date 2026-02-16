@@ -72,7 +72,7 @@ export function AdminLogs() {
       <div className="flex items-center px-4 py-3 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate('/admin')}
+            onClick={() => navigate('/manage')}
             className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-5 h-5" />

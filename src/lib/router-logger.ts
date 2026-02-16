@@ -17,10 +17,10 @@ export interface RouterLogEntry {
 
 export class RouterLogger {
   private logFilePath: string;
-  private verbose: boolean;
+  private verbose: boolean; // Note: "verbose" internally, but represents "logging" config
 
-  constructor(verbose: boolean = false) {
-    this.verbose = verbose;
+  constructor(logging: boolean = false) {
+    this.verbose = logging;
     this.logFilePath = path.join(getLogsDir(), 'router.log');
   }
 
@@ -28,20 +28,23 @@ export class RouterLogger {
    * Log a request with timing and outcome
    */
   async logRequest(entry: RouterLogEntry): Promise<void> {
+    // Only log if verbose/logging is enabled
+    if (!this.verbose) {
+      return;
+    }
+
     // Human-readable format for console
     const humanLog = this.formatHumanReadable(entry);
 
     // Output request activity to stdout (separate from system messages on stderr)
     console.log(humanLog);
 
-    // Verbose mode: append detailed JSON to log file
-    if (this.verbose) {
-      const jsonLog = JSON.stringify(entry) + '\n';
-      try {
-        await fs.appendFile(this.logFilePath, jsonLog, 'utf-8');
-      } catch (error) {
-        console.error('[Router Logger] Failed to write to log file:', error);
-      }
+    // Also append detailed JSON to log file
+    const jsonLog = JSON.stringify(entry) + '\n';
+    try {
+      await fs.appendFile(this.logFilePath, jsonLog, 'utf-8');
+    } catch (error) {
+      console.error('[Router Logger] Failed to write to log file:', error);
     }
   }
 

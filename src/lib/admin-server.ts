@@ -20,6 +20,7 @@ import { modelDownloader } from './model-downloader';
 import { modelSearch } from './model-search';
 import { downloadJobManager } from './download-job-manager';
 import { routerManager } from './router-manager';
+import { adminManager } from './admin-manager';
 import { logManagementService } from './log-management-service';
 import { AutoRotateWorker, AutoDeleteWorker } from './log-workers';
 import type { LogManagementConfig } from '../types/admin-config';
@@ -248,6 +249,8 @@ class AdminServer {
         await this.handleGetRouterLogs(req, res, url);
       } else if (pathname === '/api/router' && method === 'PATCH') {
         await this.handleUpdateRouter(req, res);
+      } else if (pathname === '/api/admin' && method === 'GET') {
+        await this.handleGetAdmin(req, res);
       } else if (pathname === '/api/admin/logs' && method === 'GET') {
         await this.handleGetAdminLogs(req, res);
       } else if (pathname === '/api/admin/logs/clear' && method === 'POST') {
@@ -989,7 +992,7 @@ class AdminServer {
         config: {
           port: config.port,
           host: config.host,
-          verbose: config.verbose,
+          logging: config.logging,
           requestTimeout: config.requestTimeout,
           healthCheckInterval: config.healthCheckInterval,
         },
@@ -1002,6 +1005,44 @@ class AdminServer {
       });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_STATUS_ERROR');
+    }
+  }
+
+  /**
+   * Get admin status
+   */
+  private async handleGetAdmin(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const adminStatus = await adminManager.getStatus();
+
+      if (!adminStatus) {
+        this.sendJson(res, 200, {
+          status: 'not_configured',
+          config: null,
+          isRunning: false,
+        });
+        return;
+      }
+
+      const { config, status } = adminStatus;
+
+      this.sendJson(res, 200, {
+        status: status.isRunning ? 'running' : 'stopped',
+        config: {
+          port: config.port,
+          host: config.host,
+          logging: config.logging,
+          requestTimeout: config.requestTimeout,
+        },
+        pid: status.pid,
+        isRunning: status.isRunning,
+        apiKey: config.apiKey,
+        createdAt: config.createdAt,
+        lastStarted: config.lastStarted,
+        lastStopped: config.lastStopped,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ADMIN_STATUS_ERROR');
     }
   }
 
@@ -1145,7 +1186,7 @@ class AdminServer {
       }
 
       // Validate updates
-      const allowedFields = ['port', 'host', 'verbose', 'requestTimeout', 'healthCheckInterval'];
+      const allowedFields = ['port', 'host', 'logging', 'requestTimeout', 'healthCheckInterval'];
       const invalidFields = Object.keys(updates).filter(key => !allowedFields.includes(key));
 
       if (invalidFields.length > 0) {
@@ -1154,7 +1195,8 @@ class AdminServer {
       }
 
       // Apply updates
-      const needsRestart = updates.port !== undefined || updates.host !== undefined;
+      // Restart needed for: port, host (changes plist), or logging (changes router behavior)
+      const needsRestart = updates.port !== undefined || updates.host !== undefined || updates.logging !== undefined;
       await routerManager.updateConfig(updates);
 
       // Regenerate plist if needed
@@ -1570,7 +1612,7 @@ window.onload = function() {
    * Log request
    */
   private logRequest(method: string, pathname: string): void {
-    if (this.config.verbose) {
+    if (this.config.logging) {
       console.log(`[Admin] ${method} ${pathname}`);
     }
   }
@@ -1579,7 +1621,7 @@ window.onload = function() {
    * Log response
    */
   private logResponse(method: string, pathname: string, statusCode: number, durationMs: number): void {
-    if (this.config.verbose) {
+    if (this.config.logging) {
       console.log(`[Admin] ${method} ${pathname} ${statusCode} ${durationMs}ms`);
     }
   }

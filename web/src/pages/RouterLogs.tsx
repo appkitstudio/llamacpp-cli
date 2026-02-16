@@ -87,7 +87,7 @@ export function RouterLogs() {
       <div className="flex items-center px-4 py-3 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate('/router')}
+            onClick={() => navigate('/manage')}
             className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -99,11 +99,11 @@ export function RouterLogs() {
         </div>
       </div>
 
-      {/* Verbosity Warning */}
-      {routerData?.config && !routerData.config.verbose && (
+      {/* Logging Warning */}
+      {routerData?.config && !routerData.config.logging && (
         <div className="px-4 py-2 bg-yellow-50 border-b border-yellow-200">
           <p className="text-sm text-yellow-800">
-            ℹ️ Verbose logging is disabled. Activity logs will show basic format without detailed timing information.
+            ℹ️ Logging is disabled. Enable logging in router configuration to view activity logs.
           </p>
         </div>
       )}

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   useAdminLogs,
+  useAdmin,
   useClearLogs,
   useRotateLogs,
   useClearArchivedLogs,
@@ -20,6 +21,7 @@ import { RouterConfigModal } from '../components/RouterConfigModal';
 export function Manage() {
   const queryClient = useQueryClient();
   const { data: logsData, isLoading } = useAdminLogs();
+  const { data: adminData } = useAdmin();
   const clearLogs = useClearLogs();
   const rotateLogs = useRotateLogs();
   const clearArchivedLogs = useClearArchivedLogs();
@@ -165,6 +167,7 @@ export function Manage() {
 
       {/* Admin Service Section */}
       <AdminServiceSection
+        adminData={adminData}
         isOpen={showAdminServiceSection}
         onToggle={() => setShowAdminServiceSection(!showAdminServiceSection)}
       />

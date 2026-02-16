@@ -86,11 +86,11 @@ export async function createRouterUI(
         options: ['127.0.0.1', '0.0.0.0'],
       },
       {
-        key: 'verbose',
-        label: 'Verbose Logs',
+        key: 'logging',
+        label: 'Logging',
         type: 'toggle',
-        value: initialConfig.verbose,
-        originalValue: initialConfig.verbose,
+        value: initialConfig.logging,
+        originalValue: initialConfig.logging,
         options: ['Disabled', 'Enabled'],
       },
       {
@@ -221,7 +221,7 @@ export async function createRouterUI(
     content += divider + '\n';
     content += `Port:                    ${state.config.port}\n`;
     content += `Host:                    ${state.config.host}\n`;
-    content += `Verbose Logs:            ${state.config.verbose ? 'Enabled' : 'Disabled'}\n`;
+    content += `Logging:                 ${state.config.logging ? 'Enabled' : 'Disabled'}\n`;
     content += `Health Check Interval:   ${state.config.healthCheckInterval.toLocaleString()}ms\n`;
     content += `Request Timeout:         ${state.config.requestTimeout.toLocaleString()}ms\n`;
     content += '\n';

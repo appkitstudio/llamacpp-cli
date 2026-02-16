@@ -129,7 +129,7 @@ export interface RouterInfo {
   config: {
     port: number;
     host: string;
-    verbose: boolean;
+    logging: boolean;
     requestTimeout: number;
     healthCheckInterval: number;
   } | null;
@@ -144,9 +144,28 @@ export interface RouterInfo {
 export interface UpdateRouterRequest {
   port?: number;
   host?: string;
-  verbose?: boolean;
+  logging?: boolean;
   requestTimeout?: number;
   healthCheckInterval?: number;
+}
+
+// Admin types
+export type AdminStatus = 'not_configured' | 'running' | 'stopped';
+
+export interface AdminInfo {
+  status: AdminStatus;
+  config: {
+    port: number;
+    host: string;
+    logging: boolean;
+    requestTimeout: number;
+  } | null;
+  pid: number | null;
+  isRunning: boolean;
+  apiKey?: string;
+  createdAt?: string;
+  lastStarted?: string;
+  lastStopped?: string;
 }
 
 // Log management types

@@ -688,8 +688,8 @@ llamacpp admin config --host 0.0.0.0 --restart
 # Regenerate API key (invalidates old key)
 llamacpp admin config --regenerate-key --restart
 
-# Enable verbose logging
-llamacpp admin config --verbose true --restart
+# Enable logging
+llamacpp admin config --logging true --restart
 ```
 
 **Note:** Changes require a restart to take effect. Use `--restart` flag to apply immediately.

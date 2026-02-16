@@ -24,6 +24,16 @@ export function RouterServiceSection({
 }: RouterServiceSectionProps) {
   // Router status badge renderer
   const renderRouterStatusBadge = () => {
+    // Show loading state when data hasn't loaded yet
+    if (!routerData) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-neutral-100 text-neutral-700">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          Loading
+        </span>
+      );
+    }
+
     if (routerActionLoading) {
       return (
         <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-neutral-100 text-neutral-700">
@@ -35,8 +45,8 @@ export function RouterServiceSection({
       );
     }
 
-    const isNotConfigured = routerData?.status === 'not_configured';
-    const isRunning = routerData?.isRunning || false;
+    const isNotConfigured = routerData.status === 'not_configured';
+    const isRunning = routerData.isRunning || false;
 
     if (isNotConfigured) {
       return (
@@ -164,8 +174,8 @@ export function RouterServiceSection({
                   <span>{(routerData.config.requestTimeout / 1000).toFixed(0)}s</span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-neutral-600">
-                  <span className="text-neutral-400 w-32">Verbose Logs:</span>
-                  <span>{routerData.config.verbose ? 'Enabled' : 'Disabled'}</span>
+                  <span className="text-neutral-400 w-32">Logging:</span>
+                  <span>{routerData.config.logging ? 'Enabled' : 'Disabled'}</span>
                 </div>
               </div>
             )}

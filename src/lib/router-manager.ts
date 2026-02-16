@@ -56,10 +56,21 @@ export class RouterManager {
       stderrPath: path.join(this.logsDir, 'router.stderr'),
       healthCheckInterval: 5000,
       requestTimeout: 120000,
-      verbose: false,
+      logging: false,
       status: 'stopped',
       createdAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Migrate old config format (verbose → logging)
+   */
+  private migrateConfig(config: any): RouterConfig {
+    if ('verbose' in config && !('logging' in config)) {
+      config.logging = config.verbose;
+      delete config.verbose;
+    }
+    return config as RouterConfig;
   }
 
   /**
@@ -69,7 +80,8 @@ export class RouterManager {
     if (!(await fileExists(this.configPath))) {
       return null;
     }
-    return await readJson<RouterConfig>(this.configPath);
+    const config = await readJson<any>(this.configPath);
+    return this.migrateConfig(config);
   }
 
   /**

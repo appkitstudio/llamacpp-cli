@@ -399,7 +399,7 @@ router
   .option('-h, --host <address>', 'Update bind address')
   .option('--timeout <ms>', 'Update request timeout (milliseconds)', parseInt)
   .option('--health-interval <ms>', 'Update health check interval (milliseconds)', parseInt)
-  .option('-v, --verbose [boolean]', 'Enable/disable verbose logging to file (true/false)', (val) => val === 'true' || val === '1')
+  .option('-l, --logging [boolean]', 'Enable/disable logging to file (true/false)', (val) => val === 'true' || val === '1')
   .option('-r, --restart', 'Automatically restart router if running')
   .action(async (options) => {
     try {
@@ -494,7 +494,7 @@ admin
   .option('-p, --port <number>', 'Update port number', parseInt)
   .option('-h, --host <address>', 'Update bind address')
   .option('--regenerate-key', 'Generate a new API key')
-  .option('-v, --verbose [boolean]', 'Enable/disable verbose logging', (val) => val === 'true' || val === '1')
+  .option('-l, --logging [boolean]', 'Enable/disable logging', (val) => val === 'true' || val === '1')
   .option('-r, --restart', 'Automatically restart admin service if running')
   .action(async (options) => {
     try {

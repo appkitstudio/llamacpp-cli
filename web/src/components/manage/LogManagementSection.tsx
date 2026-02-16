@@ -1,15 +1,11 @@
 import { useState } from 'react';
 import {
   Database,
-  Trash2,
   RotateCw,
-  Archive,
   ChevronDown,
   ChevronUp,
   Settings,
-  Loader2,
   Clock,
-  CheckCircle2,
 } from 'lucide-react';
 import type { AdminLogsResponse, ServerLogInfo, UpdateLogConfigRequest } from '../../types/api';
 
@@ -99,11 +95,24 @@ export function LogManagementSection({
             </p>
           </div>
         </div>
-        {isOpen ? (
-          <ChevronUp className="w-5 h-5 text-neutral-400" />
-        ) : (
-          <ChevronDown className="w-5 h-5 text-neutral-400" />
-        )}
+        <div className="flex items-center gap-3">
+          {logsData?.config.autoRotate.enabled ? (
+            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-green-50 text-green-700 border border-green-200/50">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+              Auto-Rotation On
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-neutral-100 text-neutral-600">
+              <span className="w-1.5 h-1.5 rounded-full bg-neutral-400"></span>
+              Auto-Rotation Off
+            </span>
+          )}
+          {isOpen ? (
+            <ChevronUp className="w-5 h-5 text-neutral-400" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-neutral-400" />
+          )}
+        </div>
       </button>
 
       {isOpen && (
@@ -140,16 +149,14 @@ export function LogManagementSection({
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => onClearAll(false)}
-                className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors flex items-center gap-1.5"
+                className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors"
               >
-                <Trash2 className="w-3.5 h-3.5" />
                 Clear All Current
               </button>
               <button
                 onClick={() => onClearAll(true)}
-                className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors flex items-center gap-1.5"
+                className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors"
               >
-                <Trash2 className="w-3.5 h-3.5" />
                 Clear All + Archived
               </button>
             </div>
@@ -330,19 +337,9 @@ export function LogManagementSection({
                     <button
                       onClick={handleSaveConfig}
                       disabled={updateConfigPending}
-                      className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                      className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
                     >
-                      {updateConfigPending ? (
-                        <>
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                          Saving...
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-4 h-4" />
-                          Save Configuration
-                        </>
-                      )}
+                      {updateConfigPending ? 'Saving...' : 'Save Configuration'}
                     </button>
                     <button
                       onClick={() => setConfigChanges({})}
@@ -433,7 +430,6 @@ export function LogManagementSection({
             {showRouterLogsSection && logsData?.router && (
               <div className="border-t border-neutral-200">
                 <ServiceLogCard
-                  title="Router Logs"
                   type="router"
                   log={logsData.router}
                   onClear={onClearLogs}
@@ -470,7 +466,6 @@ export function LogManagementSection({
             {showAdminLogsSection && logsData?.admin && (
               <div className="border-t border-neutral-200">
                 <ServiceLogCard
-                  title="Admin Logs"
                   type="admin"
                   log={logsData.admin}
                   onClear={onClearLogs}
@@ -507,28 +502,25 @@ function ServerLogRow({
     <div className="px-5 py-4 hover:bg-neutral-50 transition-colors">
       <div className="flex items-start justify-between gap-4 mb-3">
         <h3 className="text-sm font-semibold text-neutral-900">{server.serverId}</h3>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => onRotate('server', server.serverId, ['stdout', 'stderr', 'httpLog'])}
-            className="p-1.5 text-neutral-600 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-            title="Rotate all logs"
+            className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
           >
-            <RotateCw className="w-4 h-4" />
+            Rotate
           </button>
           <button
             onClick={() => onClear('server', server.serverId, ['stdout', 'stderr', 'httpLog'])}
-            className="p-1.5 text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-            title="Clear all logs"
+            className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors"
           >
-            <Trash2 className="w-4 h-4" />
+            Clear
           </button>
           {server.archived.count > 0 && (
             <button
               onClick={() => onClearArchived(server.serverId)}
-              className="p-1.5 text-neutral-600 hover:text-orange-600 hover:bg-orange-50 rounded transition-colors"
-              title="Clear archived logs"
+              className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
             >
-              <Archive className="w-4 h-4" />
+              Clear Archived
             </button>
           )}
         </div>
@@ -556,7 +548,6 @@ function ServerLogRow({
 
 // Service Log Card Component
 function ServiceLogCard({
-  title,
   type,
   log,
   onClear,
@@ -564,7 +555,6 @@ function ServiceLogCard({
   onClearArchived,
   formatSize,
 }: {
-  title: string;
   type: 'router' | 'admin';
   log: any;
   onClear: (type: 'router' | 'admin', serverId: undefined, streams: ('stdout' | 'stderr')[]) => void;
@@ -572,77 +562,54 @@ function ServiceLogCard({
   onClearArchived: (serverId?: string) => void;
   formatSize: (bytes: number) => string;
 }) {
+  const currentTotal = (log?.stdout.size || 0) + (log?.stderr.size || 0);
+  const totalSize = currentTotal + (log?.archived.totalSize || 0);
+
   return (
-    <div className="bg-white border border-neutral-200 rounded-lg p-5">
-      <h3 className="text-base font-semibold text-neutral-900 mb-4">{title}</h3>
-
-      <div className="space-y-3">
-        <LogFileRow
-          name="stdout"
-          size={log?.stdout.size || 0}
-          formatSize={formatSize}
-          onClear={() => onClear(type, undefined, ['stdout'])}
-          onRotate={() => onRotate(type, undefined, ['stdout'])}
-        />
-        <LogFileRow
-          name="stderr"
-          size={log?.stderr.size || 0}
-          formatSize={formatSize}
-          onClear={() => onClear(type, undefined, ['stderr'])}
-          onRotate={() => onRotate(type, undefined, ['stderr'])}
-        />
-
-        {log?.archived.count > 0 && (
-          <div className="pt-3 border-t border-neutral-200">
+    <div className="px-5 py-4 hover:bg-neutral-50 transition-colors">
+      <div className="flex items-start justify-between gap-4 mb-3">
+        <h3 className="text-sm font-semibold text-neutral-900">
+          {type === 'router' ? 'Router Logs' : 'Admin Logs'}
+        </h3>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onRotate(type, undefined, ['stdout', 'stderr'])}
+            className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
+          >
+            Rotate
+          </button>
+          <button
+            onClick={() => onClear(type, undefined, ['stdout', 'stderr'])}
+            className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors"
+          >
+            Clear
+          </button>
+          {log?.archived.count > 0 && (
             <button
               onClick={() => onClearArchived(type)}
-              className="w-full px-3 py-2 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors flex items-center justify-center gap-1.5"
+              className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
             >
-              <Archive className="w-3.5 h-3.5" />
-              Clear {log.archived.count} Archived ({formatSize(log.archived.totalSize)})
+              Clear Archived
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
-    </div>
-  );
-}
 
-// Log File Row Component
-function LogFileRow({
-  name,
-  size,
-  formatSize,
-  onClear,
-  onRotate,
-}: {
-  name: string;
-  size: number;
-  formatSize: (bytes: number) => string;
-  onClear: () => void;
-  onRotate: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-between py-2 px-3 bg-neutral-50 rounded-md">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-neutral-700">{name}</span>
-        <span className="text-xs text-neutral-500">{formatSize(size)}</span>
-      </div>
-      <div className="flex gap-1">
-        <button
-          onClick={onRotate}
-          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded transition-colors"
-          title="Rotate"
-        >
-          <RotateCw className="w-3.5 h-3.5" />
-        </button>
-        <button
-          onClick={onClear}
-          className="p-1.5 text-red-600 hover:bg-red-50 rounded transition-colors"
-          title="Clear"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
+      <div className="grid grid-cols-3 gap-4 text-xs">
+        <div>
+          <span className="text-neutral-500 block mb-1">Current</span>
+          <span className="text-neutral-900 font-medium">{formatSize(currentTotal)}</span>
+        </div>
+        <div>
+          <span className="text-neutral-500 block mb-1">Archived</span>
+          <span className="text-neutral-900 font-medium">
+            {log?.archived.count || 0} ({formatSize(log?.archived.totalSize || 0)})
+          </span>
+        </div>
+        <div>
+          <span className="text-neutral-500 block mb-1">Total</span>
+          <span className="text-neutral-900 font-semibold">{formatSize(totalSize)}</span>
+        </div>
       </div>
     </div>
   );

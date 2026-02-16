@@ -9,6 +9,7 @@ import type {
   DownloadJob,
   RouterInfo,
   UpdateRouterRequest,
+  AdminInfo,
   AdminLogsResponse,
   ClearLogsRequest,
   RotateLogsRequest,
@@ -226,6 +227,11 @@ class ApiClient {
         body: JSON.stringify(data),
       }
     );
+  }
+
+  // Admin
+  async getAdmin() {
+    return this.request<AdminInfo>('/api/admin');
   }
 
   // Admin Log Management

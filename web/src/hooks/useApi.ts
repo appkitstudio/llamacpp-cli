@@ -267,6 +267,16 @@ export function useUpdateRouter() {
   });
 }
 
+// Admin
+export function useAdmin() {
+  return useQuery({
+    queryKey: ['admin'],
+    queryFn: () => api.getAdmin(),
+    refetchInterval: 5000, // Auto-refresh every 5s
+    placeholderData: keepPreviousData,
+  });
+}
+
 // Admin Log Management
 export function useAdminLogs() {
   return useQuery({

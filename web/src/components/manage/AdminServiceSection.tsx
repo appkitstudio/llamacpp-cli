@@ -1,11 +1,13 @@
 import { Settings, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
+import type { AdminInfo } from '../../types/api';
 
 interface AdminServiceSectionProps {
+  adminData: AdminInfo | undefined;
   isOpen: boolean;
   onToggle: () => void;
 }
 
-export function AdminServiceSection({ isOpen, onToggle }: AdminServiceSectionProps) {
+export function AdminServiceSection({ adminData, isOpen, onToggle }: AdminServiceSectionProps) {
   return (
     <div className="bg-white border border-neutral-200 rounded-lg mb-6 overflow-hidden">
       <button
@@ -59,17 +61,27 @@ export function AdminServiceSection({ isOpen, onToggle }: AdminServiceSectionPro
             </div>
 
             {/* Service Information */}
-            <div className="space-y-2">
-              <h4 className="text-xs font-semibold text-neutral-900 mb-2">Service Information</h4>
-              <div className="flex items-center gap-2 text-xs text-neutral-600">
-                <span className="text-neutral-400 w-32">Host:</span>
-                <span>0.0.0.0</span>
+            {adminData?.config && (
+              <div className="space-y-2">
+                <h4 className="text-xs font-semibold text-neutral-900 mb-2">Service Information</h4>
+                <div className="flex items-center gap-2 text-xs text-neutral-600">
+                  <span className="text-neutral-400 w-32">Host:</span>
+                  <span>{adminData.config.host}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-neutral-600">
+                  <span className="text-neutral-400 w-32">Port:</span>
+                  <span>{adminData.config.port}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-neutral-600">
+                  <span className="text-neutral-400 w-32">Logging:</span>
+                  <span>{adminData.config.logging ? 'Enabled' : 'Disabled'}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-neutral-600">
+                  <span className="text-neutral-400 w-32">Request Timeout:</span>
+                  <span>{(adminData.config.requestTimeout / 1000).toFixed(0)}s</span>
+                </div>
               </div>
-              <div className="flex items-center gap-2 text-xs text-neutral-600">
-                <span className="text-neutral-400 w-32">Port:</span>
-                <span>9200</span>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}

@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [3.0.0] (2026-02-16)
+
+### BREAKING CHANGES
+
+* **router/admin**: Renamed `verbose` configuration attribute to `logging`
+
+  The `verbose` configuration field for router and admin services has been renamed to `logging` to better reflect its semantic meaning. For these services, the flag is an on/off toggle for logging functionality (not a detail level control like it is for servers).
+
+  **What changed:**
+  - Router and admin configuration field: `verbose` → `logging`
+  - CLI flags: `--verbose` → `--logging` (for router/admin commands only)
+  - Server `verbose` flag remains unchanged (different behavior - controls log detail level)
+  - Automatic migration: Old configs with `"verbose": true` are automatically converted to `"logging": true` on load
+
+  **Why this is breaking:**
+  - CLI flag renamed (scripts using `--verbose` must update to `--logging`)
+  - TypeScript API changes in router/admin config interfaces
+  - Web UI labels changed from "Verbose Logging" to "Logging"
+
+  **Migration guide:**
+  - No action needed for config files (automatically migrated on first load)
+  - Update CLI commands: `llamacpp router config --logging true` (not `--verbose`)
+  - Update scripts using router/admin `--verbose` flag to use `--logging`
+  - Server commands unchanged: `llamacpp server create model.gguf --verbose` (still works)
+
+  **Benefits:**
+  - Clearer semantic meaning (on/off toggle vs detail level)
+  - Consistent terminology across router and admin services
+  - Better user understanding of what the flag actually does
+
 ## [2.0.0] (2026-02-10)
 
 ### BREAKING CHANGES

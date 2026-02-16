@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Save } from 'lucide-react';
-import { useUpdateRouter } from '../hooks/useApi';
+import { useUpdateRouter, useRestartRouter } from '../hooks/useApi';
 import type { RouterInfo } from '../types/api';
 
 interface RouterConfigModalProps {
@@ -12,62 +12,79 @@ interface RouterConfigModalProps {
 interface FormData {
   port: number;
   host: string;
-  verbose: boolean;
+  logging: boolean;
   requestTimeout: number;
   healthCheckInterval: number;
 }
 
 export function RouterConfigModal({ router, isOpen, onClose }: RouterConfigModalProps) {
   const updateRouter = useUpdateRouter();
+  const restartRouter = useRestartRouter();
 
   const [formData, setFormData] = useState<FormData>({
     port: 9100,
     host: '127.0.0.1',
-    verbose: false,
+    logging: false,
     requestTimeout: 120000,
     healthCheckInterval: 5000,
   });
 
   const [restartAfterSave, setRestartAfterSave] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  // Initialize form when router changes
+  // Reset state and update form when modal opens
   useEffect(() => {
-    if (router?.config) {
+    if (isOpen && router?.config) {
+      // Reset state
+      setError(null);
+      setIsSaving(false);
+
+      // Update form data
       setFormData({
         port: router.config.port,
         host: router.config.host,
-        verbose: router.config.verbose,
+        logging: router.config.logging,
         requestTimeout: router.config.requestTimeout,
         healthCheckInterval: router.config.healthCheckInterval,
       });
-      setError(null);
     }
-  }, [router]);
+  }, [isOpen]); // Only depend on isOpen, not router
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!router) return;
+    if (!router || isSaving) return;
 
     setError(null);
+    setIsSaving(true);
 
     try {
       const result = await updateRouter.mutateAsync({
         port: formData.port,
         host: formData.host,
-        verbose: formData.verbose,
+        logging: formData.logging,
         requestTimeout: formData.requestTimeout,
         healthCheckInterval: formData.healthCheckInterval,
       });
 
-      // If router is running and needs restart, prompt user
-      if (result.needsRestart && router.isRunning && !restartAfterSave) {
-        setError('Changes saved. Restart the router to apply them.');
-        return;
+      // If router is running and needs restart
+      if (result.needsRestart && router.isRunning) {
+        if (restartAfterSave) {
+          // User wants to restart - do it now
+          await restartRouter.mutateAsync();
+          // Close immediately after restart completes
+          onClose();
+        } else {
+          // User doesn't want to restart - warn them
+          setIsSaving(false);
+          setError('Changes saved. Restart the router to apply them.');
+        }
+      } else {
+        // No restart needed - close immediately
+        onClose();
       }
-
-      onClose();
     } catch (err) {
+      setIsSaving(false);
       setError((err as Error).message);
     }
   };
@@ -162,22 +179,22 @@ export function RouterConfigModal({ router, isOpen, onClose }: RouterConfigModal
             </p>
           </div>
 
-          {/* Verbose */}
+          {/* Logging */}
           <div className="flex items-center justify-between">
             <div>
-              <label className="text-sm font-medium text-gray-700">Verbose Logging</label>
-              <p className="text-xs text-gray-500">Log detailed request information</p>
+              <label className="text-sm font-medium text-gray-700">Logging</label>
+              <p className="text-xs text-gray-500">Enable logging to file (requires restart)</p>
             </div>
             <button
               type="button"
-              onClick={() => setFormData({ ...formData, verbose: !formData.verbose })}
+              onClick={() => setFormData({ ...formData, logging: !formData.logging })}
               className={`relative w-11 h-6 rounded-full transition-colors cursor-pointer ${
-                formData.verbose ? 'bg-gray-900' : 'bg-gray-200'
+                formData.logging ? 'bg-gray-900' : 'bg-gray-200'
               }`}
             >
               <span
                 className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                  formData.verbose ? 'translate-x-5' : ''
+                  formData.logging ? 'translate-x-5' : ''
                 }`}
               />
             </button>
@@ -218,10 +235,10 @@ export function RouterConfigModal({ router, isOpen, onClose }: RouterConfigModal
           </button>
           <button
             onClick={handleSubmit}
-            disabled={updateRouter.isPending}
+            disabled={isSaving}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-gray-900 hover:bg-gray-800 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-wait cursor-pointer"
           >
-            {updateRouter.isPending ? (
+            {isSaving ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
                 Saving...

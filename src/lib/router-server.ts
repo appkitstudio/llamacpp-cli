@@ -46,8 +46,8 @@ class RouterServer {
     }
     this.config = await readJson<RouterConfig>(configPath);
 
-    // Initialize logger with verbose setting
-    this.logger = new RouterLogger(this.config.verbose);
+    // Initialize logger with logging setting
+    this.logger = new RouterLogger(this.config.logging);
 
     // Rotate log file if needed
     await this.logger.rotateIfNeeded();

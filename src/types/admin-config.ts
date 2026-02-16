@@ -34,7 +34,7 @@ export interface AdminConfig {
 
   // Admin settings
   requestTimeout: number; // ms for API requests (default: 30000)
-  verbose: boolean; // Enable verbose logging to file (default: false)
+  logging: boolean; // Enable logging to file (default: false)
 
   // Log management settings
   logManagement?: LogManagementConfig;

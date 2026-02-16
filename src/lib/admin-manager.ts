@@ -64,7 +64,7 @@ export class AdminManager {
       stdoutPath: path.join(this.logsDir, 'admin.stdout'),
       stderrPath: path.join(this.logsDir, 'admin.stderr'),
       requestTimeout: 30000,
-      verbose: false,
+      logging: false,
       status: 'stopped',
       createdAt: new Date().toISOString(),
       logManagement: {
@@ -83,13 +83,25 @@ export class AdminManager {
   }
 
   /**
+   * Migrate old config format (verbose → logging)
+   */
+  private migrateConfig(config: any): AdminConfig {
+    if ('verbose' in config && !('logging' in config)) {
+      config.logging = config.verbose;
+      delete config.verbose;
+    }
+    return config as AdminConfig;
+  }
+
+  /**
    * Load admin configuration
    */
   async loadConfig(): Promise<AdminConfig | null> {
     if (!(await fileExists(this.configPath))) {
       return null;
     }
-    return await readJson<AdminConfig>(this.configPath);
+    const config = await readJson<any>(this.configPath);
+    return this.migrateConfig(config);
   }
 
   /**
