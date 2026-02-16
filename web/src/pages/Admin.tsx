@@ -55,9 +55,9 @@ export function Admin() {
   const [showServerLogsSection, setShowServerLogsSection] = useState(false);
   const [showRouterLogsSection, setShowRouterLogsSection] = useState(false);
   const [showAdminLogsSection, setShowAdminLogsSection] = useState(false);
-  const [showAdminServiceSection, setShowAdminServiceSection] = useState(true);
-  const [showRouterSection, setShowRouterSection] = useState(true);
-  const [showLogManagementSection, setShowLogManagementSection] = useState(true);
+  const [showAdminServiceSection, setShowAdminServiceSection] = useState(false);
+  const [showRouterSection, setShowRouterSection] = useState(false);
+  const [showLogManagementSection, setShowLogManagementSection] = useState(false);
   const [showRouterConfigModal, setShowRouterConfigModal] = useState(false);
   const [routerActionLoading, setRouterActionLoading] = useState<'start' | 'stop' | 'restart' | null>(null);
 
