@@ -28,7 +28,7 @@ describe('LogManagementService', () => {
             serverId: 'server-1',
             stdout: { path: '/logs/server-1.stdout', size: 1024 * 1024 },
             stderr: { path: '/logs/server-1.stderr', size: 512 * 1024 },
-            httpLog: { path: '/logs/server-1.http.log', size: 2 * 1024 * 1024 },
+            httpLog: { path: '/logs/server-1.http', size: 2 * 1024 * 1024 },
             currentTotal: 1024 * 1024 + 512 * 1024 + 2 * 1024 * 1024,
             archived: { count: 2, totalSize: 500 * 1024 },
           },

@@ -216,7 +216,7 @@ export async function getServerLogInfo(serverId: string): Promise<ServerLogInfo>
 
   const stdoutPath = path.join(logsDir, `${serverId}.stdout`);
   const stderrPath = path.join(logsDir, `${serverId}.stderr`);
-  const httpLogPath = path.join(logsDir, `${serverId}.http.log`);
+  const httpLogPath = path.join(logsDir, `${serverId}.http`);
 
   const stdoutSize = (await fileExists(stdoutPath)) ? await getFileSize(stdoutPath) : 0;
   const stderrSize = (await fileExists(stderrPath)) ? await getFileSize(stderrPath) : 0;

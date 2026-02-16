@@ -109,7 +109,7 @@ class LogManagementService {
     } else if (stream === 'stderr') {
       return path.join(logsDir, `${prefix}.stderr`);
     } else if (stream === 'httpLog') {
-      return path.join(logsDir, `${prefix}.http.log`);
+      return path.join(logsDir, `${prefix}.http`);
     }
     throw new Error(`Invalid stream type: ${stream}`);
   }

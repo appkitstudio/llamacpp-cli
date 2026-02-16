@@ -318,7 +318,7 @@ describe('getServerLogInfo', () => {
       serverId: 'server-id',
       stdout: { path: '/logs/server-id.stdout', size: 1024 * 1024 },
       stderr: { path: '/logs/server-id.stderr', size: 500 * 1024 },
-      httpLog: { path: '/logs/server-id.http.log', size: 2 * 1024 * 1024 },
+      httpLog: { path: '/logs/server-id.http', size: 2 * 1024 * 1024 },
       currentTotal: 1024 * 1024 + 500 * 1024 + 2 * 1024 * 1024,
       archived: {
         count: 2,

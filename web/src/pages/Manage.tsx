@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { Loader2 } from 'lucide-react';
 import {
   useAdminLogs,
   useAdmin,
@@ -42,6 +43,7 @@ export function Manage() {
     message: string;
     onConfirm: () => void;
   }>({ isOpen: false, title: '', message: '', onConfirm: () => {} });
+  const [confirmModalLoading, setConfirmModalLoading] = useState(false);
   const [showRouterConfigModal, setShowRouterConfigModal] = useState(false);
   const [routerActionLoading, setRouterActionLoading] = useState<'start' | 'stop' | 'restart' | null>(null);
 
@@ -69,11 +71,16 @@ export function Manage() {
 
     setConfirmModal({
       isOpen: true,
-      title: 'Clear Archived Logs',
+      title: 'Delete Archived Logs',
       message: `Are you sure you want to delete all archived logs for ${target}?`,
       onConfirm: async () => {
-        await clearArchivedLogs.mutateAsync({ serverId });
-        setConfirmModal({ ...confirmModal, isOpen: false });
+        setConfirmModalLoading(true);
+        try {
+          await clearArchivedLogs.mutateAsync({ serverId });
+          setConfirmModal({ ...confirmModal, isOpen: false });
+        } finally {
+          setConfirmModalLoading(false);
+        }
       },
     });
   };
@@ -172,15 +179,18 @@ export function Manage() {
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setConfirmModal({ ...confirmModal, isOpen: false })}
-                className="px-4 py-2 text-sm font-medium text-neutral-700 bg-white border border-neutral-300 rounded-md hover:bg-neutral-50"
+                disabled={confirmModalLoading}
+                className="px-4 py-2 text-sm font-medium text-neutral-700 bg-white border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmModal.onConfirm}
-                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700"
+                disabled={confirmModalLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                Confirm
+                {confirmModalLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                {confirmModalLoading ? 'Processing...' : 'Delete'}
               </button>
             </div>
           </div>

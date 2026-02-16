@@ -626,6 +626,10 @@ export async function createMultiServerMonitorUI(
       if (logType === 'stdout') {
         content += `The server may not have processed any requests yet.\n`;
       }
+      // Show notice if verbose logging is disabled for System logs
+      if (logType === 'stderr' && !server.verbose) {
+        content += `{yellow-fg}⚠ Verbose logging is disabled{/yellow-fg}\n`;
+      }
       content += `Log file: ${logPath}\n\n`;
       content += divider + "\n";
       content += "{gray-fg}[T]oggle activity/system [R]efresh [ESC] Back{/gray-fg}";
@@ -635,7 +639,13 @@ export async function createMultiServerMonitorUI(
     // Show log size
     const size = await getFileSize(logPath);
     content += `File: ${logPath}\n`;
-    content += `Size: ${formatFileSize(size)}\n\n`;
+    content += `Size: ${formatFileSize(size)}\n`;
+
+    // Show notice if verbose logging is disabled for System logs
+    if (logType === 'stderr' && !server.verbose) {
+      content += `{yellow-fg}⚠ Verbose logging is disabled{/yellow-fg}\n`;
+    }
+    content += `\n`;
 
     // Show logs
     try {

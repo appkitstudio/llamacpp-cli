@@ -94,6 +94,10 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
   // Check if log file exists
   if (!(await fileExists(logPath))) {
     console.log(chalk.yellow(`⚠️  No ${logType} logs found for ${server.modelName}`));
+    // Show notice if verbose logging is disabled for System logs
+    if (logType === 'system' && !server.verbose) {
+      console.log(chalk.dim(`   verbosity is disabled`));
+    }
     console.log(chalk.dim(`   Log file does not exist: ${logPath}`));
     return;
   }
@@ -144,8 +148,8 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     console.log(chalk.dim(`   Current: ${formatFileSize(currentSize)}`));
   }
 
-  // Show subtle note if verbose logging is not enabled (only for Activity logs)
-  if (logType === 'activity' && !server.verbose) {
+  // Show subtle note if verbose logging is not enabled (only for System logs)
+  if (logType === 'system' && !server.verbose) {
     console.log(chalk.dim(`   verbosity is disabled`));
   }
   console.log();
@@ -216,9 +220,12 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     const lines = options.lines || 50;
 
     if (logType === 'activity') {
-      // Activity logs are already compact - just filter health checks
+      // Activity logs: show last N API requests (not last N lines)
       try {
-        const command = `tail -n ${lines} "${logPath}"`;
+        // Read a large chunk to ensure we get enough API requests
+        // (most of the file is health checks, so we need to read more than requested)
+        const readLimit = Math.max(lines * 100, 10000); // Read 100x more to account for health checks
+        const command = `tail -n ${readLimit} "${logPath}"`;
         const output = await execCommand(command);
         const logLines = output.split('\n').filter((l) => l.trim());
 
@@ -233,12 +240,14 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
         });
 
         if (filteredLines.length === 0) {
-          console.log(chalk.dim('No HTTP request logs (all were health checks).'));
+          console.log(chalk.dim('No HTTP request logs found (all were health checks).'));
           console.log(chalk.dim('Tip: Use --include-health to see health check requests.'));
           return;
         }
 
-        filteredLines.forEach((line) => console.log(line));
+        // Take only the last N filtered results (like TUI/Web UI)
+        const lastN = filteredLines.slice(-lines);
+        lastN.forEach((line) => console.log(line));
       } catch (error) {
         throw new Error(`Failed to read logs: ${(error as Error).message}`);
       }

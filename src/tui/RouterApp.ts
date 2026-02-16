@@ -325,6 +325,10 @@ export async function createRouterUI(
     // Check if log exists
     if (!(await fileExists(logPath))) {
       content += '{yellow-fg}No logs found{/yellow-fg}\n';
+      // Show notice if logging is disabled for Activity logs
+      if (state.logType === 'stdout' && !state.config.logging) {
+        content += `{yellow-fg}⚠ Logging is disabled{/yellow-fg}\n`;
+      }
       content += `Log file: ${logPath}\n\n`;
       content += divider + '\n';
       content += '{gray-fg}[T]oggle activity/system [R]efresh [ESC] Back{/gray-fg}';
@@ -336,7 +340,13 @@ export async function createRouterUI(
     // Show log size
     const size = await getFileSize(logPath);
     content += `File: ${logPath}\n`;
-    content += `Size: ${formatFileSize(size)}\n\n`;
+    content += `Size: ${formatFileSize(size)}\n`;
+
+    // Show notice if logging is disabled for Activity logs
+    if (state.logType === 'stdout' && !state.config.logging) {
+      content += `{yellow-fg}⚠ Logging is disabled{/yellow-fg}\n`;
+    }
+    content += `\n`;
 
     // Show last 30 lines (truncate to fit terminal width)
     try {

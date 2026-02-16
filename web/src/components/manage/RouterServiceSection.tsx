@@ -113,7 +113,7 @@ export function RouterServiceSection({
                   href="/router/logs"
                   className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
                 >
-                  View Logs
+                  Logs
                 </a>
               )}
 

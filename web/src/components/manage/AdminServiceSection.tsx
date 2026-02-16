@@ -47,7 +47,7 @@ export function AdminServiceSection({ adminData, isOpen, onToggle }: AdminServic
                 href="/admin/logs"
                 className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
               >
-                View Logs
+                Logs
               </a>
               <a
                 href="/api-docs/"
