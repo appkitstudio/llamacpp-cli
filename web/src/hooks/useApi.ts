@@ -1,6 +1,15 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import type { CreateServerRequest, UpdateServerRequest, UpdateRouterRequest } from '../types/api';
+import type {
+  CreateServerRequest,
+  UpdateServerRequest,
+  UpdateRouterRequest,
+  ClearLogsRequest,
+  RotateLogsRequest,
+  ClearArchivedLogsRequest,
+  ClearAllLogsRequest,
+  UpdateLogConfigRequest,
+} from '../types/api';
 
 // System
 export function useSystemStatus() {
@@ -254,6 +263,71 @@ export function useUpdateRouter() {
     mutationFn: (data: UpdateRouterRequest) => api.updateRouter(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['router'] });
+    },
+  });
+}
+
+// Admin Log Management
+export function useAdminLogs() {
+  return useQuery({
+    queryKey: ['adminLogs'],
+    queryFn: () => api.getAdminLogs(),
+    refetchInterval: 10000, // Auto-refresh every 10s
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useClearLogs() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: ClearLogsRequest) => api.clearLogs(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminLogs'] });
+    },
+  });
+}
+
+export function useRotateLogs() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: RotateLogsRequest) => api.rotateLogs(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminLogs'] });
+    },
+  });
+}
+
+export function useClearArchivedLogs() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: ClearArchivedLogsRequest) => api.clearArchivedLogs(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminLogs'] });
+    },
+  });
+}
+
+export function useClearAllLogs() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: ClearAllLogsRequest) => api.clearAllLogs(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminLogs'] });
+    },
+  });
+}
+
+export function useUpdateLogConfig() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: UpdateLogConfigRequest) => api.updateLogConfig(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminLogs'] });
     },
   });
 }

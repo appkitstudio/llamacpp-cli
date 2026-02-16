@@ -6,7 +6,7 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { AdminConfig } from '../types/admin-config';
 import { ServerConfig, validateAlias } from '../types/server-config';
-import { readJson, fileExists, getConfigDir, getServersDir } from '../utils/file-utils';
+import { readJson, fileExists, getConfigDir, getServersDir, writeJsonAtomic } from '../utils/file-utils';
 import { stateManager } from './state-manager';
 import { launchctlManager } from './launchctl-manager';
 import { modelScanner } from './model-scanner';
@@ -20,6 +20,10 @@ import { modelDownloader } from './model-downloader';
 import { modelSearch } from './model-search';
 import { downloadJobManager } from './download-job-manager';
 import { routerManager } from './router-manager';
+import { logManagementService } from './log-management-service';
+import { AutoRotateWorker, AutoDeleteWorker } from './log-workers';
+import type { LogManagementConfig } from '../types/admin-config';
+import { openApiSpec } from './openapi-spec';
 
 interface ErrorResponse {
   error: string;
@@ -38,6 +42,8 @@ interface SuccessResponse {
 class AdminServer {
   private config!: AdminConfig;
   private server!: http.Server;
+  private autoRotateWorker?: AutoRotateWorker;
+  private autoDeleteWorker?: AutoDeleteWorker;
 
   async initialize(): Promise<void> {
     // Load admin config
@@ -55,6 +61,7 @@ class AdminServer {
     // Graceful shutdown
     process.on('SIGTERM', async () => {
       console.error('[Admin] Received SIGTERM, shutting down gracefully...');
+      await this.stopWorkers();
       this.server.close(() => {
         console.error('[Admin] Server closed');
         process.exit(0);
@@ -63,6 +70,7 @@ class AdminServer {
 
     process.on('SIGINT', async () => {
       console.error('[Admin] Received SIGINT, shutting down gracefully...');
+      await this.stopWorkers();
       this.server.close(() => {
         console.error('[Admin] Server closed');
         process.exit(0);
@@ -73,11 +81,50 @@ class AdminServer {
   async start(): Promise<void> {
     await this.initialize();
 
+    // Start log management workers if configured
+    await this.startWorkers();
+
     this.server.listen(this.config.port, this.config.host, () => {
       console.error(`[Admin] Listening on http://${this.config.host}:${this.config.port}`);
       console.error(`[Admin] PID: ${process.pid}`);
       console.error(`[Admin] API Key: ${this.config.apiKey}`);
     });
+  }
+
+  /**
+   * Start log management workers based on configuration
+   */
+  private async startWorkers(): Promise<void> {
+    const logConfig = this.config.logManagement;
+
+    if (!logConfig) {
+      // No log management configured, use defaults
+      return;
+    }
+
+    // Start auto-rotate worker
+    if (logConfig.autoRotate.enabled) {
+      this.autoRotateWorker = new AutoRotateWorker(logConfig.autoRotate);
+      await this.autoRotateWorker.start();
+    }
+
+    // Start auto-delete worker
+    if (logConfig.autoDelete.enabled) {
+      this.autoDeleteWorker = new AutoDeleteWorker(logConfig.autoDelete);
+      await this.autoDeleteWorker.start();
+    }
+  }
+
+  /**
+   * Stop log management workers
+   */
+  private async stopWorkers(): Promise<void> {
+    if (this.autoRotateWorker) {
+      await this.autoRotateWorker.stop();
+    }
+    if (this.autoDeleteWorker) {
+      await this.autoDeleteWorker.stop();
+    }
   }
 
   /**
@@ -109,6 +156,18 @@ class AdminServer {
       // Health endpoint (no auth required)
       if (pathname === '/health' && method === 'GET') {
         await this.handleHealth(req, res);
+        return;
+      }
+
+      // Swagger UI - OpenAPI spec (no auth required)
+      if (pathname === '/api-docs.json') {
+        this.sendJson(res, 200, openApiSpec);
+        return;
+      }
+
+      // Swagger UI - HTML interface (no auth required)
+      if (pathname === '/api-docs' || pathname.startsWith('/api-docs/')) {
+        await this.handleSwaggerUI(req, res, pathname);
         return;
       }
 
@@ -189,6 +248,18 @@ class AdminServer {
         await this.handleGetRouterLogs(req, res, url);
       } else if (pathname === '/api/router' && method === 'PATCH') {
         await this.handleUpdateRouter(req, res);
+      } else if (pathname === '/api/admin/logs' && method === 'GET') {
+        await this.handleGetAdminLogs(req, res);
+      } else if (pathname === '/api/admin/logs/clear' && method === 'POST') {
+        await this.handleClearLogs(req, res);
+      } else if (pathname === '/api/admin/logs/rotate' && method === 'POST') {
+        await this.handleRotateLogs(req, res);
+      } else if (pathname === '/api/admin/logs/clear-archived' && method === 'POST') {
+        await this.handleClearArchivedLogs(req, res);
+      } else if (pathname === '/api/admin/logs/clear-all' && method === 'POST') {
+        await this.handleClearAllLogs(req, res);
+      } else if (pathname === '/api/admin/logs/config' && method === 'PATCH') {
+        await this.handleUpdateLogConfig(req, res);
       } else {
         // API endpoint not found
         this.sendError(res, 404, 'Not Found', `Unknown endpoint: ${method} ${pathname}`, 'NOT_FOUND');
@@ -220,11 +291,13 @@ class AdminServer {
   private async handleListServers(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const servers = await stateManager.getAllServers();
 
-    // Update status for each server
+    // Update status for each server (including health check)
     for (const server of servers) {
       const status = await statusChecker.checkServer(server);
       server.status = statusChecker.determineStatus(status, status.portListening);
       server.pid = status.pid || undefined;
+      // Add health check result (only meaningful if server is running)
+      (server as any).healthy = server.status === 'running' ? status.healthy : undefined;
     }
 
     this.sendJson(res, 200, { servers });
@@ -243,6 +316,8 @@ class AdminServer {
     const status = await statusChecker.checkServer(server);
     server.status = statusChecker.determineStatus(status, status.portListening);
     server.pid = status.pid || undefined;
+    // Add health check result (only meaningful if server is running)
+    (server as any).healthy = server.status === 'running' ? status.healthy : undefined;
 
     this.sendJson(res, 200, { server, status });
   }
@@ -584,26 +659,36 @@ class AdminServer {
     }
 
     try {
-      const type = url.searchParams.get('type') || 'http'; // http (default), stdout, stderr, or all
+      const type = url.searchParams.get('type') || 'activity'; // activity (default), system, http, stderr, stdout, or all
       const lines = parseInt(url.searchParams.get('lines') || '100');
+
+      // Support both new terminology and old parameter names (backward compatibility):
+      // - 'activity' (new) or 'http' (old) -> HTTP activity logs only
+      // - 'system' (new) -> stderr + stdout (system diagnostic logs, no http)
+      // - 'all' (old) -> everything (http + stderr + stdout)
+      // - 'stderr' (old) -> stderr only
+      // - 'stdout' (old) -> stdout only
 
       let http = '';
       let stdout = '';
       let stderr = '';
 
-      if ((type === 'http' || type === 'all') && (await fileExists(server.httpLogPath))) {
+      // HTTP logs
+      if ((type === 'activity' || type === 'http' || type === 'all') && (await fileExists(server.httpLogPath))) {
         const content = await fs.readFile(server.httpLogPath, 'utf-8');
         const logLines = content.split('\n');
         http = logLines.slice(-lines).join('\n');
       }
 
-      if ((type === 'stdout' || type === 'all') && (await fileExists(server.stdoutPath))) {
+      // Stdout logs
+      if ((type === 'system' || type === 'stdout' || type === 'all') && (await fileExists(server.stdoutPath))) {
         const content = await fs.readFile(server.stdoutPath, 'utf-8');
         const logLines = content.split('\n');
         stdout = logLines.slice(-lines).join('\n');
       }
 
-      if ((type === 'stderr' || type === 'all') && (await fileExists(server.stderrPath))) {
+      // Stderr logs
+      if ((type === 'system' || type === 'stderr' || type === 'all') && (await fileExists(server.stderrPath))) {
         const content = await fs.readFile(server.stderrPath, 'utf-8');
         const logLines = content.split('\n');
         stderr = logLines.slice(-lines).join('\n');
@@ -981,19 +1066,26 @@ class AdminServer {
         return;
       }
 
-      const type = url.searchParams.get('type') || 'both'; // stdout, stderr, or both
+      const type = url.searchParams.get('type') || 'both'; // activity, system, stdout, stderr, or both
       const lines = parseInt(url.searchParams.get('lines') || '100');
+
+      // Support both new terminology and old parameter names (backward compatibility):
+      // - 'activity' (new) or 'stdout' (old) -> router activity logs
+      // - 'system' (new) or 'stderr' (old) -> system diagnostic logs
+      // - 'both' (old) -> both stdout + stderr
 
       let stdout = '';
       let stderr = '';
 
-      if ((type === 'stdout' || type === 'both') && (await fileExists(config.stdoutPath))) {
+      // Activity logs (stdout)
+      if ((type === 'activity' || type === 'stdout' || type === 'both') && (await fileExists(config.stdoutPath))) {
         const content = await fs.readFile(config.stdoutPath, 'utf-8');
         const logLines = content.split('\n');
         stdout = logLines.slice(-lines).join('\n');
       }
 
-      if ((type === 'stderr' || type === 'both') && (await fileExists(config.stderrPath))) {
+      // System logs (stderr)
+      if ((type === 'system' || type === 'stderr' || type === 'both') && (await fileExists(config.stderrPath))) {
         const content = await fs.readFile(config.stderrPath, 'utf-8');
         const logLines = content.split('\n');
         stderr = logLines.slice(-lines).join('\n');
@@ -1051,6 +1143,185 @@ class AdminServer {
   }
 
   /**
+   * Get admin log information
+   */
+  private async handleGetAdminLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const allLogs = await logManagementService.scanAllLogs();
+
+      // Include log management config
+      const logConfig = this.config.logManagement || {
+        autoRotate: { enabled: true, intervalHours: 24, thresholdMB: 100 },
+        autoDelete: { enabled: true, intervalHours: 24, afterDays: 30 },
+      };
+
+      // Include worker status
+      const workerStatus = {
+        autoRotate: {
+          enabled: logConfig.autoRotate.enabled,
+          running: this.autoRotateWorker?.isRunning() || false,
+          lastRun: this.autoRotateWorker?.getLastRun()?.toISOString(),
+        },
+        autoDelete: {
+          enabled: logConfig.autoDelete.enabled,
+          running: this.autoDeleteWorker?.isRunning() || false,
+          lastRun: this.autoDeleteWorker?.getLastRun()?.toISOString(),
+        },
+      };
+
+      this.sendJson(res, 200, {
+        ...allLogs,
+        config: logConfig,
+        workers: workerStatus,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ADMIN_LOGS_ERROR');
+    }
+  }
+
+  /**
+   * Clear log files
+   */
+  private async handleClearLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.readBody(req);
+      const { type, serverId, streams } = JSON.parse(body);
+
+      // Validate request
+      if (!type || !streams || !Array.isArray(streams)) {
+        this.sendError(res, 400, 'Bad Request', 'Missing or invalid type/streams', 'INVALID_REQUEST');
+        return;
+      }
+
+      if (type === 'server' && !serverId) {
+        this.sendError(res, 400, 'Bad Request', 'Missing serverId for server type', 'INVALID_REQUEST');
+        return;
+      }
+
+      await logManagementService.clearLogs(type, serverId, streams);
+
+      this.sendJson(res, 200, {
+        success: true,
+        message: `Cleared ${streams.length} log file(s)`,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'CLEAR_LOGS_ERROR');
+    }
+  }
+
+  /**
+   * Rotate log files
+   */
+  private async handleRotateLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.readBody(req);
+      const { type, serverId, streams } = JSON.parse(body);
+
+      // Validate request
+      if (!type || !streams || !Array.isArray(streams)) {
+        this.sendError(res, 400, 'Bad Request', 'Missing or invalid type/streams', 'INVALID_REQUEST');
+        return;
+      }
+
+      if (type === 'server' && !serverId) {
+        this.sendError(res, 400, 'Bad Request', 'Missing serverId for server type', 'INVALID_REQUEST');
+        return;
+      }
+
+      const archivedFiles = await logManagementService.rotateLogs(type, serverId, streams);
+
+      this.sendJson(res, 200, {
+        success: true,
+        message: `Rotated ${archivedFiles.length} log file(s)`,
+        archivedFiles,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROTATE_LOGS_ERROR');
+    }
+  }
+
+  /**
+   * Clear archived logs
+   */
+  private async handleClearArchivedLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.readBody(req);
+      const { serverId } = JSON.parse(body);
+
+      const result = await logManagementService.clearArchivedLogs(serverId);
+
+      this.sendJson(res, 200, {
+        success: true,
+        count: result.count,
+        totalSize: result.totalSize,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'CLEAR_ARCHIVED_ERROR');
+    }
+  }
+
+  /**
+   * Clear all logs (current and optionally archived)
+   */
+  private async handleClearAllLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.readBody(req);
+      const { includeArchived } = JSON.parse(body);
+
+      await logManagementService.clearAllLogs(includeArchived || false);
+
+      this.sendJson(res, 200, {
+        success: true,
+        message: includeArchived ? 'Cleared all current and archived logs' : 'Cleared all current logs',
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'CLEAR_ALL_LOGS_ERROR');
+    }
+  }
+
+  /**
+   * Update log management configuration
+   */
+  private async handleUpdateLogConfig(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.readBody(req);
+      const updates: Partial<LogManagementConfig> = JSON.parse(body);
+
+      // Load current admin config
+      const configPath = path.join(getConfigDir(), 'admin.json');
+      const currentConfig = await readJson<AdminConfig>(configPath);
+
+      // Merge updates into existing config
+      const newLogConfig: LogManagementConfig = {
+        autoRotate: {
+          ...currentConfig.logManagement?.autoRotate || { enabled: true, intervalHours: 24, thresholdMB: 100 },
+          ...updates.autoRotate,
+        },
+        autoDelete: {
+          ...currentConfig.logManagement?.autoDelete || { enabled: true, intervalHours: 24, afterDays: 30 },
+          ...updates.autoDelete,
+        },
+      };
+
+      // Update admin config
+      currentConfig.logManagement = newLogConfig;
+      await writeJsonAtomic(configPath, currentConfig);
+
+      // Restart workers with new configuration
+      await this.stopWorkers();
+      this.config = currentConfig; // Update in-memory config
+      await this.startWorkers();
+
+      this.sendJson(res, 200, {
+        success: true,
+        config: newLogConfig,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'UPDATE_LOG_CONFIG_ERROR');
+    }
+  }
+
+  /**
    * Authenticate request via API key
    */
   private authenticate(req: http.IncomingMessage): boolean {
@@ -1101,6 +1372,93 @@ class AdminServer {
   /**
    * Serve static files from web/dist directory
    */
+  /**
+   * Serve Swagger UI for API documentation
+   */
+  private async handleSwaggerUI(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
+    try {
+      // Get swagger-ui-dist directory
+      const swaggerUiPath = require.resolve('swagger-ui-dist');
+      const swaggerDistDir = path.dirname(swaggerUiPath);
+
+      // Handle /api-docs -> redirect to /api-docs/
+      if (pathname === '/api-docs') {
+        res.writeHead(302, { Location: '/api-docs/' });
+        res.end();
+        return;
+      }
+
+      // Handle swagger-initializer.js with custom config
+      if (pathname === '/api-docs/swagger-initializer.js') {
+        const customInitializer = `
+window.onload = function() {
+  window.ui = SwaggerUIBundle({
+    url: '/api-docs.json',
+    dom_id: '#swagger-ui',
+    deepLinking: true,
+    presets: [
+      SwaggerUIBundle.presets.apis,
+      SwaggerUIStandalonePreset
+    ],
+    plugins: [
+      SwaggerUIBundle.plugins.DownloadUrl
+    ],
+    layout: "StandaloneLayout"
+  });
+};
+        `;
+
+        res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+        res.end(customInitializer);
+        return;
+      }
+
+      // Determine which file to serve
+      let filePath: string;
+      if (pathname === '/api-docs/' || pathname === '/api-docs/index.html') {
+        filePath = path.join(swaggerDistDir, 'index.html');
+      } else {
+        // Serve other swagger-ui assets
+        const assetPath = pathname.replace('/api-docs/', '');
+        filePath = path.join(swaggerDistDir, assetPath);
+      }
+
+      // Security: Ensure file is within swagger dist directory
+      const resolvedPath = path.resolve(filePath);
+      if (!resolvedPath.startsWith(swaggerDistDir)) {
+        this.sendError(res, 403, 'Forbidden', 'Access denied', 'FORBIDDEN');
+        return;
+      }
+
+      // Check if file exists
+      if (!(await fileExists(resolvedPath))) {
+        this.sendError(res, 404, 'Not Found', `Swagger UI file not found: ${pathname}`, 'SWAGGER_NOT_FOUND');
+        return;
+      }
+
+      // Determine content type
+      const ext = path.extname(resolvedPath);
+      const contentTypes: Record<string, string> = {
+        '.html': 'text/html; charset=utf-8',
+        '.js': 'application/javascript; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.png': 'image/png',
+        '.svg': 'image/svg+xml',
+        '.map': 'application/json',
+      };
+      const contentType = contentTypes[ext] || 'application/octet-stream';
+
+      // Read and serve file
+      const content = await fs.readFile(resolvedPath);
+      res.writeHead(200, { 'Content-Type': contentType });
+      res.end(content);
+    } catch (error) {
+      console.error('[Admin] Error serving Swagger UI:', error);
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'SWAGGER_ERROR');
+    }
+  }
+
   private async handleStaticFile(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
     try {
       // Resolve web/dist directory relative to project root

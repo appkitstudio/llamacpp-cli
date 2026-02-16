@@ -8,14 +8,9 @@ import {
   useRestartRouter,
 } from '../hooks/useApi';
 import {
-  Play,
-  Square,
-  RotateCw,
   Loader2,
   Activity,
   Shuffle,
-  FileText,
-  Settings,
 } from 'lucide-react';
 import { RouterConfigModal } from '../components/RouterConfigModal';
 
@@ -139,7 +134,63 @@ export function Router() {
               </p>
             </div>
           </div>
-          {renderStatusBadge()}
+          <div className="flex items-center gap-3">
+            {!isNotConfigured && isRunning && (
+              <button
+                onClick={() => navigate('/router/logs')}
+                disabled={actionLoading !== null}
+                className="text-xs font-medium text-neutral-600 hover:text-neutral-900 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                title="View Logs"
+              >
+                Logs
+              </button>
+            )}
+
+            {!isNotConfigured && (
+              <button
+                onClick={() => setShowConfigModal(true)}
+                disabled={actionLoading !== null}
+                className="text-xs font-medium text-neutral-600 hover:text-neutral-900 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                title="Config"
+              >
+                Config
+              </button>
+            )}
+
+            {!isNotConfigured && isRunning && (
+              <>
+                <button
+                  onClick={handleRestart}
+                  disabled={actionLoading !== null}
+                  className="text-xs font-medium text-neutral-600 hover:text-neutral-900 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                  title="Restart"
+                >
+                  Restart
+                </button>
+                <button
+                  onClick={handleStop}
+                  disabled={actionLoading !== null}
+                  className="text-xs font-medium text-neutral-600 hover:text-red-600 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                  title="Stop"
+                >
+                  Stop
+                </button>
+              </>
+            )}
+
+            {(isNotConfigured || !isRunning) && (
+              <button
+                onClick={handleStart}
+                disabled={actionLoading !== null}
+                className="text-xs font-medium text-neutral-600 hover:text-green-600 transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
+                title="Start"
+              >
+                Start
+              </button>
+            )}
+
+            {renderStatusBadge()}
+          </div>
         </div>
 
         {/* Configuration Details */}
@@ -188,75 +239,13 @@ export function Router() {
 
         {/* Not Configured Message */}
         {isNotConfigured && (
-          <div className="mb-4 pt-4 border-t border-neutral-200">
-            <p className="text-sm text-neutral-600 mb-3">
+          <div className="pt-4 border-t border-neutral-200">
+            <p className="text-sm text-neutral-600">
               Click "Start" to configure and launch the router service. The router will
               automatically discover and route requests to running servers.
             </p>
           </div>
         )}
-
-        {/* Actions */}
-        <div className="flex items-center gap-1 opacity-100 transition-opacity pt-4 border-t border-neutral-200">
-          {!isNotConfigured && isRunning && (
-            <button
-              onClick={() => navigate('/router/logs')}
-              disabled={actionLoading !== null}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
-              title="View Logs"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              Logs
-            </button>
-          )}
-
-          {!isNotConfigured && (
-            <button
-              onClick={() => setShowConfigModal(true)}
-              disabled={actionLoading !== null}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
-              title="Config"
-            >
-              <Settings className="w-3.5 h-3.5" />
-              Config
-            </button>
-          )}
-
-          {!isNotConfigured && isRunning && (
-            <>
-              <button
-                onClick={handleRestart}
-                disabled={actionLoading !== null}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
-                title="Restart"
-              >
-                <RotateCw className="w-3.5 h-3.5" />
-                Restart
-              </button>
-              <button
-                onClick={handleStop}
-                disabled={actionLoading !== null}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
-                title="Stop"
-              >
-                <Square className="w-3.5 h-3.5" />
-                Stop
-              </button>
-            </>
-          )}
-
-          {(isNotConfigured || !isRunning) && (
-            <button
-              onClick={handleStart}
-              disabled={actionLoading !== null}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
-              title="Start"
-            >
-              <Play className="w-3.5 h-3.5" />
-              Start
-            </button>
-          )}
-        </div>
       </div>
 
       {/* Config Modal */}

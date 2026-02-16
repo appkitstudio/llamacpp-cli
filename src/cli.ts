@@ -31,6 +31,7 @@ import { adminStatusCommand } from './commands/admin/status';
 import { adminRestartCommand } from './commands/admin/restart';
 import { adminConfigCommand } from './commands/admin/config';
 import { adminLogsCommand } from './commands/admin/logs';
+import { adminLogConfigCommand } from './commands/admin/log-config';
 import { launchClaude } from './commands/launch/claude';
 import { serverWrapperCommand } from './commands/internal/server-wrapper';
 import packageJson from '../package.json';
@@ -296,15 +297,13 @@ server
 // View logs
 server
   .command('logs')
-  .description('View server logs (default: HTTP logs - compact one-line per request)')
+  .description('View server logs (default: Activity logs - HTTP requests)')
   .argument('<identifier>', 'Server identifier: alias, port (9000), server ID (llama-3-2-3b), or partial model name')
   .option('-f, --follow', 'Follow log output in real-time')
   .option('-n, --lines <number>', 'Number of lines to show (default: 50)', parseInt)
-  .option('--stderr', 'View full stderr logs (verbose diagnostics)')
-  .option('--stdout', 'View stdout logs (rarely used)')
-  .option('--http', 'Show full HTTP JSON request/response logs')
-  .option('--errors', 'Show only error messages')
-  .option('--verbose', 'Show all messages including debug internals')
+  .option('--activity', 'Show HTTP activity logs (default)')
+  .option('--system', 'Show system logs (all server output)')
+  .option('--errors', 'Filter system logs for errors only')
   .option('--filter <pattern>', 'Custom grep pattern for filtering')
   .option('--clear', 'Clear (truncate) log file to zero bytes')
   .option('--clear-archived', 'Delete only archived logs (preserves current logs)')
@@ -414,14 +413,14 @@ router
 // Router logs
 router
   .command('logs')
-  .description('View router logs')
+  .description('View router logs (default: Activity logs)')
   .option('-f, --follow', 'Follow logs in real-time (like tail -f)')
   .option('-n, --lines <number>', 'Number of lines to show (default: 50)', parseInt)
-  .option('--stderr', 'Show system logs (stderr) instead of activity logs (stdout)')
-  .option('-v, --verbose', 'Show verbose JSON log file (if enabled)')
+  .option('--activity', 'Show activity logs (router requests)')
+  .option('--system', 'Show system logs (diagnostics)')
   .option('--clear', 'Clear the log file')
   .option('--rotate', 'Rotate the log file with timestamp')
-  .option('--clear-all', 'Clear all router logs (activity, system, verbose)')
+  .option('--clear-all', 'Clear all router logs (activity and system)')
   .action(async (options) => {
     try {
       await routerLogsCommand(options);
@@ -509,15 +508,34 @@ admin
 // Admin logs
 admin
   .command('logs')
-  .description('View admin service logs')
+  .description('View admin service logs (default: both Activity and System)')
   .option('-f, --follow', 'Follow logs in real-time (like tail -f)')
   .option('-n, --lines <number>', 'Number of lines to show (default: 100)', parseInt)
-  .option('--stdout', 'Show activity logs (stdout)')
-  .option('--stderr', 'Show system logs (stderr)')
+  .option('--activity', 'Show activity logs only (HTTP API requests)')
+  .option('--system', 'Show system logs only (diagnostics)')
   .option('--clear', 'Clear the log files')
   .action(async (options) => {
     try {
       await adminLogsCommand(options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Admin log management configuration
+admin
+  .command('log-config')
+  .description('Configure log management automation (rotation and deletion)')
+  .option('--auto-rotate-enabled <boolean>', 'Enable/disable auto-rotation', (val) => val === 'true' || val === '1')
+  .option('--auto-rotate-interval <hours>', 'Rotation check interval in hours', parseInt)
+  .option('--auto-rotate-threshold <MB>', 'File size threshold for rotation in MB', parseInt)
+  .option('--auto-delete-enabled <boolean>', 'Enable/disable auto-deletion', (val) => val === 'true' || val === '1')
+  .option('--auto-delete-interval <hours>', 'Deletion check interval in hours', parseInt)
+  .option('--auto-delete-days <days>', 'Delete logs older than this many days', parseInt)
+  .action(async (options) => {
+    try {
+      await adminLogConfigCommand(options);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);

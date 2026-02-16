@@ -272,11 +272,10 @@ export class ModelScanner {
     const modelsDir = await this.getModelsDirectory();
 
     // Try direct match first
-    const modelPath = path.join(modelsDir, filename);
     const modelInfo = await this.getModelInfo(filename);
 
     if (modelInfo && modelInfo.exists) {
-      return modelPath;
+      return modelInfo.path;
     }
 
     // Try adding .gguf extension
@@ -284,7 +283,7 @@ export class ModelScanner {
       const withExtension = `${filename}.gguf`;
       const modelInfoWithExt = await this.getModelInfo(withExtension);
       if (modelInfoWithExt && modelInfoWithExt.exists) {
-        return path.join(modelsDir, withExtension);
+        return modelInfoWithExt.path;
       }
     }
 

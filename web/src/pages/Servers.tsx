@@ -93,6 +93,15 @@ export function Servers() {
     }
 
     if (server.status === 'running') {
+      // Check if server is unhealthy (running but health check failed)
+      if (server.healthy === false) {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-red-50 text-red-700 border border-red-200/50">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+            Unhealthy
+          </span>
+        );
+      }
       return (
         <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-green-50 text-green-700 border border-green-200/50">
           <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>

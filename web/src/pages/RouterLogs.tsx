@@ -4,16 +4,16 @@ import { ArrowLeft, Loader2, ChevronDown } from 'lucide-react';
 import { useRouterLogs } from '../hooks/useApi';
 import { renderAnsiLine, stripAnsiCodes } from '../utils/ansi-parser';
 
-type LogType = 'stdout' | 'stderr' | 'both';
+type LogType = 'activity' | 'system';
 type LogSort = 'newest' | 'oldest';
 
 export function RouterLogs() {
   const navigate = useNavigate();
 
-  const [logType, setLogType] = useState<LogType>('stdout');
+  const [logType, setLogType] = useState<LogType>('activity');
   const [sortOrder, setSortOrder] = useState<LogSort>('newest');
   const [showSortDropdown, setShowSortDropdown] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(false);
 
   const logContainerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -49,15 +49,12 @@ export function RouterLogs() {
     });
 
     let logs: string;
-    if (logType === 'stdout') {
+    if (logType === 'activity') {
+      // Activity = stdout (router activity logs)
       logs = logsData.stdout || '';
-    } else if (logType === 'stderr') {
-      logs = logsData.stderr || '';
     } else {
-      // Combine both
-      const stdout = logsData.stdout || '';
-      const stderr = logsData.stderr || '';
-      logs = [stderr, stdout].filter(l => l.trim()).join('\n');
+      // System = stderr (system/diagnostic logs)
+      logs = logsData.stderr || '';
     }
 
     const lines = logs.split('\n').filter(line => {
@@ -107,9 +104,9 @@ export function RouterLogs() {
         <div className="flex items-center gap-2">
           <div className="flex items-center bg-white border border-gray-200 rounded-lg overflow-hidden">
             <button
-              onClick={() => setLogType('stdout')}
+              onClick={() => setLogType('activity')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                logType === 'stdout'
+                logType === 'activity'
                   ? 'bg-gray-100 text-gray-900'
                   : 'text-gray-600 hover:bg-gray-50'
               }`}
@@ -117,24 +114,14 @@ export function RouterLogs() {
               Activity
             </button>
             <button
-              onClick={() => setLogType('stderr')}
+              onClick={() => setLogType('system')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                logType === 'stderr'
+                logType === 'system'
                   ? 'bg-gray-100 text-gray-900'
                   : 'text-gray-600 hover:bg-gray-50'
               }`}
             >
               System
-            </button>
-            <button
-              onClick={() => setLogType('both')}
-              className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                logType === 'both'
-                  ? 'bg-gray-100 text-gray-900'
-                  : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              Both
             </button>
           </div>
         </div>

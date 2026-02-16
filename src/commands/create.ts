@@ -47,7 +47,12 @@ export async function createCommand(model: string, options: CreateOptions): Prom
     throw new Error(`Model not found: ${model}\n\nRun: llamacpp ls`);
   }
 
-  const modelName = path.basename(modelPath);
+  // For sharded models, use base model name; otherwise use filename
+  let modelName = path.basename(modelPath);
+  const modelInfo = await modelScanner.getModelInfo(model);
+  if (modelInfo?.isSharded && modelInfo.baseModelName) {
+    modelName = modelInfo.baseModelName;
+  }
 
   // 4. Check if server already exists for this model
   const existingServer = await stateManager.serverExistsForModel(modelPath);
@@ -68,8 +73,7 @@ export async function createCommand(model: string, options: CreateOptions): Prom
     }
   }
 
-  // 6. Get model info and validate (supports sharded models)
-  const modelInfo = await modelScanner.getModelInfo(modelName);
+  // 6. Validate model info (already retrieved above for modelName)
   if (!modelInfo) {
     throw new Error(`Failed to read model file: ${modelPath}`);
   }

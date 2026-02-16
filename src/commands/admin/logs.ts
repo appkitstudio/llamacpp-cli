@@ -5,8 +5,8 @@ import { adminManager } from '../../lib/admin-manager';
 import { fileExists } from '../../utils/file-utils';
 
 interface LogsOptions {
-  stdout?: boolean;
-  stderr?: boolean;
+  activity?: boolean;  // Show Activity logs (HTTP API requests)
+  system?: boolean;    // Show System logs (diagnostic output)
   follow?: boolean;
   clear?: boolean;
   lines?: number;
@@ -24,19 +24,24 @@ export async function adminLogsCommand(options: LogsOptions): Promise<void> {
 
     const { config } = result;
 
-    // Default to stdout if neither specified
-    const showStdout = options.stdout || (!options.stdout && !options.stderr);
-    const showStderr = options.stderr || (!options.stdout && !options.stderr);
+    // Validate mutually exclusive flags
+    if (options.activity && options.system) {
+      throw new Error('Cannot use both --activity and --system flags. Choose one or the other.');
+    }
+
+    // Default to both if neither specified
+    const showStdout = options.activity || (!options.activity && !options.system);
+    const showStderr = options.system || (!options.activity && !options.system);
 
     // Handle clear operation
     if (options.clear) {
       if (showStdout && (await fileExists(config.stdoutPath))) {
         await fs.writeFile(config.stdoutPath, '');
-        console.log(chalk.green('✓ Cleared stdout log'));
+        console.log(chalk.green('✓ Cleared Activity log'));
       }
       if (showStderr && (await fileExists(config.stderrPath))) {
         await fs.writeFile(config.stderrPath, '');
-        console.log(chalk.green('✓ Cleared stderr log'));
+        console.log(chalk.green('✓ Cleared System log'));
       }
       return;
     }

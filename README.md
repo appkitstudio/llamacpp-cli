@@ -22,7 +22,7 @@ CLI tool to manage local llama.cpp servers on macOS. Provides an Ollama-like exp
 - ⚙️ **Smart defaults** - Auto-configure threads, context size, and GPU layers based on model size
 - 🔌 **Auto port assignment** - Automatically find available ports (9000-9999)
 - 📊 **Real-time monitoring TUI** - Multi-server dashboard with drill-down details, live GPU/CPU/memory metrics, token generation speeds, and animated loading states
-- 🪵 **Smart logging** - Compact one-line request format with optional full JSON details
+- 🪵 **Unified logging** - Activity logs (HTTP requests) and System logs (diagnostics) for all services
 - ⚡️ **Optimized metrics** - Batch collection and caching prevent CPU spikes (10x fewer processes)
 
 ## Why llamacpp-cli?
@@ -399,8 +399,8 @@ llamacpp router start       # Start the router service
 llamacpp router stop        # Stop the router service
 llamacpp router status      # Show router status and available models
 llamacpp router restart     # Restart the router
-llamacpp router config      # Update router settings (--port, --host, --timeout, --health-interval, --verbose)
-llamacpp router logs        # View router logs (with --follow, --verbose, --clear options)
+llamacpp router config      # Update router settings (--port, --host, --timeout, --health-interval)
+llamacpp router logs        # View router logs (with --follow, --activity, --system, --clear options)
 ```
 
 ### Usage Example
@@ -468,34 +468,28 @@ llamacpp router config --health-interval 3000 --restart
 # Change bind address (for remote access)
 llamacpp router config --host 0.0.0.0 --restart
 
-# Enable verbose logging (saves detailed JSON logs)
-llamacpp router config --verbose true --restart
-
-# Disable verbose logging
-llamacpp router config --verbose false --restart
 ```
 
 **Note:** Changes require a restart to take effect. Use `--restart` flag to apply immediately.
 
 ### Logging
 
-The router uses separate log streams for different purposes (nginx-style):
+The router provides two log types:
 
-| Log File | Purpose | Content |
-|----------|---------|---------|
-| `router.stdout` | Request activity | Model routing, status codes, timing, prompts |
-| `router.stderr` | System messages | Startup, shutdown, errors, proxy failures |
-| `router.log` | Structured JSON | Detailed entries for programmatic parsing (verbose mode) |
+| Log Type | CLI Flag | Content |
+|----------|----------|---------|
+| **Activity** | (default) | Request routing, status codes, timing, backend selection |
+| **System** | `--system` | Startup, shutdown, errors, diagnostic messages |
 
-**View recent logs:**
+**View logs:**
 ```bash
-# Show activity logs (default - stdout)
+# Activity logs (default) - router request routing
 llamacpp router logs
 
-# Show system logs (errors, startup messages)
-llamacpp router logs --stderr
+# System logs - diagnostics and errors
+llamacpp router logs --system
 
-# Follow activity in real-time
+# Follow logs in real-time
 llamacpp router logs --follow
 
 # Show last 10 lines
@@ -504,50 +498,38 @@ llamacpp router logs --lines 10
 
 **Log formats:**
 
-Activity logs (stdout):
+Activity logs:
 ```
 200 POST /v1/chat/completions → llama-3.2-3b-instruct-q4_k_m.gguf (127.0.0.1:9001) 1234ms | "What is..."
 404 POST /v1/chat/completions → unknown-model 3ms | "test" | Error: No server found
 ```
 
-System logs (stderr):
+System logs:
 ```
 [Router] Listening on http://127.0.0.1:9100
 [Router] PID: 12345
 [Router] Proxy request failed: ECONNREFUSED
 ```
 
-Verbose JSON logs (router.log) - enable with `--verbose true`:
-```bash
-llamacpp router logs --verbose
-```
-
 **Log management:**
 ```bash
-# Clear activity log
+# Clear current log file (activity or system)
 llamacpp router logs --clear
 
-# Clear all router logs (stdout, stderr, verbose)
+# Clear all router logs (both activity and system)
 llamacpp router logs --clear-all
 
 # Rotate log files with timestamp
 llamacpp router logs --rotate
-
-# View system logs instead of activity
-llamacpp router logs --stderr
 ```
 
-**What's logged (activity):**
-- ✅ Model name used
-- ✅ HTTP status code (color-coded)
+**What's logged:**
+- ✅ Model name and routing decisions
+- ✅ HTTP status codes (color-coded)
 - ✅ Request duration (ms)
-- ✅ Backend server (host:port)
+- ✅ Backend server selection (host:port)
 - ✅ First 50 chars of prompt
-- ✅ Error messages (if failed)
-
-**Verbose mode benefits:**
-- Detailed JSON logs for LLM/script parsing
-- Stored in `~/.llamacpp/logs/router.log`
+- ✅ Error messages and diagnostics
 - Automatic rotation when exceeding 100MB
 - Machine-readable format with timestamps
 
@@ -691,8 +673,8 @@ llamacpp admin start       # Start admin service
 llamacpp admin stop        # Stop admin service
 llamacpp admin status      # Show status and API key
 llamacpp admin restart     # Restart service
-llamacpp admin config      # Update settings (--port, --host, --regenerate-key, --verbose)
-llamacpp admin logs        # View admin logs (with --follow, --clear, --rotate options)
+llamacpp admin config      # Update settings (--port, --host, --regenerate-key)
+llamacpp admin logs        # View admin logs (with --follow, --activity, --system, --clear options)
 ```
 
 ### REST API
@@ -702,6 +684,8 @@ The Admin API provides full CRUD operations for servers and models via HTTP.
 **Base URL:** `http://localhost:9200`
 
 **Authentication:** Bearer token (API key auto-generated on first start)
+
+**API Documentation:** Interactive Swagger UI available at `http://localhost:9200/api-docs`
 
 #### Server Endpoints
 
@@ -715,7 +699,7 @@ The Admin API provides full CRUD operations for servers and models via HTTP.
 | POST | `/api/servers/:id/start` | Start stopped server |
 | POST | `/api/servers/:id/stop` | Stop running server |
 | POST | `/api/servers/:id/restart` | Restart server |
-| GET | `/api/servers/:id/logs?type=stdout\|stderr&lines=100` | Get server logs |
+| GET | `/api/servers/:id/logs?type=activity\|system\|all&lines=100` | Get server logs (activity=HTTP, system=diagnostics) |
 
 #### Model Endpoints
 
@@ -726,6 +710,17 @@ The Admin API provides full CRUD operations for servers and models via HTTP.
 | DELETE | `/api/models/:name?cascade=true` | Delete model (cascade removes servers) |
 | GET | `/api/models/search?q=query` | Search HuggingFace |
 | POST | `/api/models/download` | Download model from HF |
+
+#### Router Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/router` | Get router status and config |
+| POST | `/api/router/start` | Start router service |
+| POST | `/api/router/stop` | Stop router service |
+| POST | `/api/router/restart` | Restart router service |
+| PATCH | `/api/router` | Update router config |
+| GET | `/api/router/logs?type=activity\|system&lines=100` | Get router logs (Activity from stdout, System from stderr) |
 
 #### System Endpoints
 
@@ -764,6 +759,28 @@ curl http://localhost:9200/api/servers \
 **Delete model with cascade:**
 ```bash
 curl -X DELETE "http://localhost:9200/api/models/llama-3.2-3b-instruct-q4_k_m.gguf?cascade=true" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+**Get server logs:**
+```bash
+# Activity logs (HTTP requests) - default
+curl "http://localhost:9200/api/servers/llama-3-2-3b/logs?type=activity&lines=50" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+# System logs (diagnostics)
+curl "http://localhost:9200/api/servers/llama-3-2-3b/logs?type=system&lines=100" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+**Get router logs:**
+```bash
+# Activity logs (router requests)
+curl "http://localhost:9200/api/router/logs?type=activity&lines=50" \
+  -H "Authorization: Bearer YOUR_API_KEY"
+
+# System logs (diagnostics)
+curl "http://localhost:9200/api/router/logs?type=system&lines=100" \
   -H "Authorization: Bearer YOUR_API_KEY"
 ```
 
@@ -861,29 +878,31 @@ llamacpp admin config --regenerate-key --restart
 
 ### Logging
 
-The admin service maintains separate log streams:
+The admin service provides two log types:
 
-| Log File | Purpose | Content |
-|----------|---------|---------|
-| `admin.stdout` | Request activity | Endpoint, status, duration |
-| `admin.stderr` | System messages | Startup, shutdown, errors |
+| Log Type | CLI Flag | Content |
+|----------|----------|---------|
+| **Activity** | `--activity` | HTTP API requests (endpoint, status, duration) |
+| **System** | `--system` | Startup, shutdown, errors, diagnostic messages |
+
+**Default:** Shows both Activity and System logs (useful for debugging).
 
 **View logs:**
 ```bash
-# Show activity logs (default - stdout)
+# Both activity and system logs (default)
 llamacpp admin logs
 
-# Show system logs (errors, startup)
-llamacpp admin logs --stderr
+# Activity logs only (HTTP API requests)
+llamacpp admin logs --activity
+
+# System logs only (diagnostics and errors)
+llamacpp admin logs --system
 
 # Follow in real-time
 llamacpp admin logs --follow
 
 # Clear all logs
 llamacpp admin logs --clear
-
-# Rotate logs with timestamp
-llamacpp admin logs --rotate
 ```
 
 ### Example Output
@@ -928,7 +947,8 @@ Web UI:     http://localhost:9200
 Configuration:
   Config:   ~/.llamacpp/admin.json
   Plist:    ~/Library/LaunchAgents/com.llama.admin.plist
-  Logs:     ~/.llamacpp/logs/admin.{stdout,stderr}
+  Logs:     ~/.llamacpp/logs/admin.stdout  # Activity logs
+            ~/.llamacpp/logs/admin.stderr  # System logs
 
 Quick Commands:
   llamacpp admin stop          # Stop service
@@ -1096,8 +1116,8 @@ llamacpp logs --rotate
 ```
 
 **Displays:**
-- Current stderr size per server
-- Current stdout size per server
+- Activity logs (.http) size per server
+- System logs (.stderr, .stdout) size per server
 - Archived logs size and count
 - Total log usage per server
 - Grand total across all servers
@@ -1314,41 +1334,44 @@ llamacpp server rm 9000
 ```
 
 ### `llamacpp server logs <identifier> [options]`
-View server logs with smart filtering.
 
-**Default (verbose enabled):**
+View server logs with flexible filtering.
+
+**Log Types:**
+- **Activity logs** (default): HTTP request/response logs in compact format
+- **System logs** (`--system`): Server diagnostic output (stderr + stdout)
+
+**Basic usage:**
 ```bash
+# Activity logs (default) - HTTP requests
 llamacpp server logs llama-3.2-3b
 # Output: 2025-12-09 18:02:23 POST /v1/chat/completions 127.0.0.1 200 "What is..." 305 22 1036
-```
 
-**Without `--verbose` on server:**
-```bash
-llamacpp server logs llama-3.2-3b
-# Output: Only internal server logs (cache, slots) - no HTTP request logs
-```
-
-**More examples:**
-
-# Full HTTP JSON request/response
-llamacpp server logs llama-3.2-3b --http
+# System logs - diagnostics and errors
+llamacpp server logs llama-3.2-3b --system
 
 # Follow logs in real-time
 llamacpp server logs llama-3.2-3b --follow
 
-# Last 100 requests
+# Last 100 lines
 llamacpp server logs llama-3.2-3b --lines 100
+```
 
-# Show only errors
-llamacpp server logs llama-3.2-3b --errors
+**Advanced filtering:**
+```bash
+# System logs with errors only
+llamacpp server logs llama-3.2-3b --system --errors
 
-# Show all messages (including debug internals)
-llamacpp server logs llama-3.2-3b --verbose
+# Custom grep pattern
+llamacpp server logs llama-3.2-3b --system --filter "error|warning"
 
-# Custom filter pattern
-llamacpp server logs llama-3.2-3b --filter "error|warning"
+# Include health check requests (filtered by default)
+llamacpp server logs llama-3.2-3b --include-health
+```
 
-# Clear log file (truncate to zero bytes)
+**Log management:**
+```bash
+# Clear current log file (truncate to zero bytes)
 llamacpp server logs llama-3.2-3b --clear
 
 # Delete only archived logs (preserves current)
@@ -1364,15 +1387,15 @@ llamacpp server logs llama-3.2-3b --rotate
 **Options:**
 - `-f, --follow` - Follow log output in real-time
 - `-n, --lines <number>` - Number of lines to show (default: 50)
-- `--http` - Show full HTTP JSON request/response logs
-- `--errors` - Show only error messages
-- `--verbose` - Show all messages including debug internals
+- `--activity` - Show HTTP activity logs (default)
+- `--system` - Show system logs (all server output)
+- `--errors` - Filter system logs for errors only
 - `--filter <pattern>` - Custom grep pattern for filtering
-- `--stdout` - Show stdout instead of stderr (rarely needed)
+- `--include-health` - Include health check requests (/health, /slots, /props)
 - `--clear` - Clear (truncate) log file to zero bytes
 - `--clear-archived` - Delete only archived logs (preserves current logs)
 - `--clear-all` - Clear current logs AND delete all archived logs (frees most space)
-- `--rotate` - Rotate log file with timestamp (e.g., `server.2026-01-22-19-30-00.stderr`)
+- `--rotate` - Rotate log file with timestamp (e.g., `server.2026-01-22-19-30-00.http`)
 
 **Automatic Log Rotation:**
 Logs are automatically rotated when they exceed 100MB during:
@@ -1381,9 +1404,7 @@ Logs are automatically rotated when they exceed 100MB during:
 
 Rotated logs are saved with timestamps in the same directory: `~/.llamacpp/logs/`
 
-**Output Formats:**
-
-Default compact format:
+**Activity Log Format:**
 ```
 TIMESTAMP METHOD ENDPOINT IP STATUS "MESSAGE..." TOKENS_IN TOKENS_OUT TIME_MS
 ```
@@ -1392,10 +1413,7 @@ The compact format shows one line per HTTP request and includes:
 - User's message (first 50 characters)
 - Token counts (prompt tokens in, completion tokens out)
 - Total response time in milliseconds
-
-**Note:** Verbose logging is now enabled by default. HTTP request logs are available by default.
-
-Use `--http` to see full request/response JSON, or `--verbose` option to see all internal server logs.
+- Health checks filtered by default (use `--include-health` to show)
 
 ## Configuration
 
@@ -1408,11 +1426,14 @@ llamacpp-cli stores its configuration in `~/.llamacpp/`:
 ├── admin.json            # Admin service configuration (includes API key)
 ├── servers/              # Server configurations
 │   └── <server-id>.json
-├── logs/                 # Server logs
-│   ├── <server-id>.stdout
-│   ├── <server-id>.stderr
-│   ├── router.{stdout,stderr,log}
-│   └── admin.{stdout,stderr}
+├── logs/                 # All service logs
+│   ├── <server-id>.http      # Activity: HTTP request logs
+│   ├── <server-id>.stderr    # System: diagnostics
+│   ├── <server-id>.stdout    # System: additional output
+│   ├── router.stdout         # Router activity logs
+│   ├── router.stderr         # Router system logs
+│   ├── admin.stdout          # Admin activity logs
+│   └── admin.stderr          # Admin system logs
 └── history/              # Historical metrics (TUI)
     └── <server-id>.json
 ```

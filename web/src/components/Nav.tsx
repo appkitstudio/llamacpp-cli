@@ -22,7 +22,7 @@ export function Nav({ onLogout, searchQuery = '', onSearchChange }: NavProps) {
         <div className="flex items-center justify-between h-16">
           {/* Logo and Nav Links */}
           <div className="flex items-center space-x-10">
-            <Link to="/" className="flex items-center">
+            <Link to="/" className="hidden md:flex items-center">
               <span className="text-xl font-bold text-neutral-900 tracking-tight">LLAMA CPP</span>
             </Link>
 
@@ -56,6 +56,16 @@ export function Nav({ onLogout, searchQuery = '', onSearchChange }: NavProps) {
                 }`}
               >
                 Router
+              </Link>
+              <Link
+                to="/admin"
+                className={`px-3 py-2 text-sm font-medium transition-colors rounded-md ${
+                  location.pathname === '/admin'
+                    ? 'text-neutral-900 bg-neutral-100'
+                    : 'text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50'
+                }`}
+              >
+                Admin
               </Link>
             </div>
           </div>

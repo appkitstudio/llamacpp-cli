@@ -61,7 +61,9 @@
     "blessed": "^0.1.81",
     "chalk": "^4.1.2",
     "cli-table3": "^0.6.5",
-    "commander": "^13.0.0"
+    "commander": "^13.0.0",
+    "swagger-ui-dist": "^5.31.1",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
     "@types/asciichart": "^1.5.8",

@@ -9,6 +9,12 @@ import type {
   DownloadJob,
   RouterInfo,
   UpdateRouterRequest,
+  AdminLogsResponse,
+  ClearLogsRequest,
+  RotateLogsRequest,
+  ClearArchivedLogsRequest,
+  ClearAllLogsRequest,
+  UpdateLogConfigRequest,
 } from '../types/api';
 
 const API_BASE = '';  // Proxy handles routing
@@ -118,7 +124,7 @@ class ApiClient {
     });
   }
 
-  async getServerLogs(id: string, type: 'stdout' | 'stderr' | 'http' | 'all' = 'all', lines = 100) {
+  async getServerLogs(id: string, type: 'activity' | 'system' | 'all' = 'all', lines = 100) {
     return this.request<{ http: string; stdout: string; stderr: string }>(
       `/api/servers/${id}/logs?type=${type}&lines=${lines}`
     );
@@ -206,7 +212,7 @@ class ApiClient {
     );
   }
 
-  async getRouterLogs(type: 'stdout' | 'stderr' | 'both' = 'both', lines = 100) {
+  async getRouterLogs(type: 'activity' | 'system' | 'both' = 'both', lines = 100) {
     return this.request<{ stdout: string; stderr: string }>(
       `/api/router/logs?type=${type}&lines=${lines}`
     );
@@ -215,6 +221,61 @@ class ApiClient {
   async updateRouter(data: UpdateRouterRequest) {
     return this.request<{ success: boolean; needsRestart: boolean; config: any }>(
       '/api/router',
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  // Admin Log Management
+  async getAdminLogs() {
+    return this.request<AdminLogsResponse>('/api/admin/logs');
+  }
+
+  async clearLogs(data: ClearLogsRequest) {
+    return this.request<{ success: boolean; message: string }>(
+      '/api/admin/logs/clear',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  async rotateLogs(data: RotateLogsRequest) {
+    return this.request<{ success: boolean; message: string; archivedFiles: string[] }>(
+      '/api/admin/logs/rotate',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  async clearArchivedLogs(data: ClearArchivedLogsRequest) {
+    return this.request<{ success: boolean; count: number; totalSize: number }>(
+      '/api/admin/logs/clear-archived',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  async clearAllLogs(data: ClearAllLogsRequest) {
+    return this.request<{ success: boolean; message: string }>(
+      '/api/admin/logs/clear-all',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  async updateLogConfig(data: UpdateLogConfigRequest) {
+    return this.request<{ success: boolean; config: any }>(
+      '/api/admin/logs/config',
       {
         method: 'PATCH',
         body: JSON.stringify(data),

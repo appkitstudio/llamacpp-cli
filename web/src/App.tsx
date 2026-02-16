@@ -8,6 +8,7 @@ import { ServerLogs } from './pages/ServerLogs';
 import { Models } from './pages/Models';
 import { Router } from './pages/Router';
 import { RouterLogs } from './pages/RouterLogs';
+import { Admin } from './pages/Admin';
 import { api } from './lib/api';
 
 const queryClient = new QueryClient({
@@ -40,6 +41,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <Route path="/models" element={<Models searchQuery={searchQuery} />} />
         <Route path="/router" element={<Router />} />
         <Route path="/router/logs" element={<RouterLogs />} />
+        <Route path="/admin" element={<Admin />} />
       </Routes>
     </div>
   );

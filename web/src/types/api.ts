@@ -15,6 +15,7 @@ export interface Server {
   verbose: boolean;
   customFlags?: string[];
   status: ServerStatus;
+  healthy?: boolean;  // Health check from /health endpoint
   pid?: number;
   createdAt: string;
   lastStarted?: string;
@@ -146,4 +147,96 @@ export interface UpdateRouterRequest {
   verbose?: boolean;
   requestTimeout?: number;
   healthCheckInterval?: number;
+}
+
+// Log management types
+export interface LogFileInfo {
+  path: string;
+  size: number;
+}
+
+export interface ServerLogInfo {
+  serverId: string;
+  stdout: LogFileInfo;
+  stderr: LogFileInfo;
+  httpLog: LogFileInfo;
+  currentTotal: number;
+  archived: {
+    count: number;
+    totalSize: number;
+  };
+}
+
+export interface ServiceLogInfo {
+  stdout: LogFileInfo;
+  stderr: LogFileInfo;
+  currentTotal: number;
+  archived: {
+    count: number;
+    totalSize: number;
+  };
+}
+
+export interface LogManagementConfig {
+  autoRotate: {
+    enabled: boolean;
+    intervalHours: number;
+    thresholdMB: number;
+  };
+  autoDelete: {
+    enabled: boolean;
+    intervalHours: number;
+    afterDays: number;
+  };
+}
+
+export interface WorkerStatus {
+  autoRotate: {
+    enabled: boolean;
+    running: boolean;
+    lastRun?: string;
+  };
+  autoDelete: {
+    enabled: boolean;
+    running: boolean;
+    lastRun?: string;
+  };
+}
+
+export interface AdminLogsResponse {
+  servers: ServerLogInfo[];
+  router: ServiceLogInfo;
+  admin: ServiceLogInfo;
+  summary: {
+    totalCurrent: number;
+    totalArchived: number;
+    grandTotal: number;
+  };
+  config: LogManagementConfig;
+  workers: WorkerStatus;
+}
+
+export interface ClearLogsRequest {
+  type: 'server' | 'router' | 'admin';
+  serverId?: string;
+  streams: ('stdout' | 'stderr' | 'httpLog')[];
+}
+
+export interface RotateLogsRequest {
+  type: 'server' | 'router' | 'admin';
+  serverId?: string;
+  streams: ('stdout' | 'stderr' | 'httpLog')[];
+}
+
+export interface ClearArchivedLogsRequest {
+  serverId?: string;
+}
+
+export interface ClearAllLogsRequest {
+  includeArchived: boolean;
+}
+
+export interface UpdateLogConfigRequest {
+  autoRotate?: Partial<LogManagementConfig['autoRotate']>;
+  autoDelete?: Partial<LogManagementConfig['autoDelete']>;
 }

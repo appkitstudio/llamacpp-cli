@@ -107,7 +107,7 @@ export function renderAnsiLine(line: string, key: string | number): ReactNode {
   return (
     <>
       {segments.map((segment, i) => (
-        <span key={`${key}-${i}`} className={segment.color || 'text-gray-300'}>
+        <span key={`${key}-${i}`} className={segment.color || 'text-gray-100'}>
           {segment.text}
         </span>
       ))}

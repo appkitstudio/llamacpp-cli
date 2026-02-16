@@ -5,7 +5,7 @@ import { useServerLogs, useServer } from '../hooks/useApi';
 import { renderAnsiLine, stripAnsiCodes } from '../utils/ansi-parser';
 
 type LogSort = 'newest' | 'oldest';
-type ViewMode = 'activity' | 'verbose';
+type ViewMode = 'activity' | 'system';
 
 interface ParsedLogLine {
   raw: string;
@@ -268,10 +268,14 @@ export function ServerLogs() {
   const [sortOrder, setSortOrder] = useState<LogSort>('newest');
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
     const saved = localStorage.getItem('serverLogs.viewMode');
-    return (saved === 'activity' || saved === 'verbose') ? saved : 'activity';
+    // Migrate old 'verbose' value to 'system'
+    if (saved === 'verbose') {
+      return 'system';
+    }
+    return (saved === 'activity' || saved === 'system') ? saved : 'activity';
   });
   const [showSortDropdown, setShowSortDropdown] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(false);
   const [showHealthChecks, setShowHealthChecks] = useState(false);
 
   // Persist viewMode to localStorage
@@ -341,7 +345,7 @@ export function ServerLogs() {
       // Show only HTTP logs (simple format with timestamps)
       filtered = parsed.filter(log => log.timestamp && log.formatted);
     } else {
-      // Show only verbose logs (stderr/stdout without formatted output from HTTP)
+      // Show only system logs (stderr/stdout without formatted output from HTTP)
       filtered = parsed.filter(log => !log.timestamp || !log.formatted || log.type !== 'request');
     }
 
@@ -431,14 +435,14 @@ export function ServerLogs() {
               Activity
             </button>
             <button
-              onClick={() => setViewMode('verbose')}
+              onClick={() => setViewMode('system')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                viewMode === 'verbose'
+                viewMode === 'system'
                   ? 'bg-gray-100 text-gray-900'
                   : 'text-gray-600 hover:bg-gray-50'
               }`}
             >
-              Verbose
+              System
             </button>
           </div>
         </div>
@@ -510,15 +514,15 @@ export function ServerLogs() {
         ) : filteredLogs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
             <Trash2 className="w-8 h-8 mb-2 opacity-50" />
-            <p>No {viewMode === 'activity' ? 'activity ' : viewMode === 'verbose' ? 'verbose ' : ''}logs found</p>
+            <p>No {viewMode === 'activity' ? 'activity ' : viewMode === 'system' ? 'system ' : ''}logs found</p>
             {viewMode === 'activity' && hasRawLogs && formattedCount === 0 ? (
               <p className="text-sm mt-1">
                 No HTTP requests yet.{' '}
                 <button
-                  onClick={() => setViewMode('verbose')}
+                  onClick={() => setViewMode('system')}
                   className="text-blue-400 hover:text-blue-300 underline cursor-pointer"
                 >
-                  View verbose logs
+                  View system logs
                 </button>
               </p>
             ) : null}

@@ -85,6 +85,7 @@ export async function routerStatusCommand(): Promise<void> {
     console.log();
     console.log(`Health Check Interval: ${config.healthCheckInterval}ms`);
     console.log(`Request Timeout:       ${config.requestTimeout}ms`);
+    console.log(`Verbose Logging:       ${config.verbose ? 'Enabled' : 'Disabled'}`);
     console.log();
 
     // System paths

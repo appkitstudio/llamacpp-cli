@@ -67,6 +67,18 @@ export class AdminManager {
       verbose: false,
       status: 'stopped',
       createdAt: new Date().toISOString(),
+      logManagement: {
+        autoRotate: {
+          enabled: true,
+          intervalHours: 24,
+          thresholdMB: 100,
+        },
+        autoDelete: {
+          enabled: true,
+          intervalHours: 24,
+          afterDays: 30,
+        },
+      },
     };
   }
 
@@ -185,6 +197,9 @@ ${argsXml}
 
     <key>ThrottleInterval</key>
     <integer>10</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
   </dict>
 </plist>
 `;

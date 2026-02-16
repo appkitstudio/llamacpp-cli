@@ -19,10 +19,8 @@ interface LogsOptions {
   follow?: boolean;
   lines?: number;
   errors?: boolean;
-  verbose?: boolean;
-  http?: boolean;
-  stderr?: boolean;  // View full stderr logs
-  stdout?: boolean;  // View stdout logs
+  activity?: boolean;  // Show HTTP activity logs (explicit)
+  system?: boolean;    // Show system logs (stderr + stdout)
   filter?: string;
   clear?: boolean;
   rotate?: boolean;
@@ -38,20 +36,23 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     throw new Error(`Server not found: ${identifier}\n\nUse: llamacpp ps`);
   }
 
-  // Determine log file (default to HTTP logs, or stderr/stdout if specified)
+  // Validate mutually exclusive flags
+  if (options.activity && options.system) {
+    throw new Error('Cannot use both --activity and --system flags. Choose one or the other.');
+  }
+
+  // Determine log file (default to Activity logs = HTTP)
   let logPath: string;
   let logType: string;
 
-  if (options.stderr) {
+  if (options.system) {
+    // System logs = stderr (and stdout combined in filtering)
     logPath = server.stderrPath;
-    logType = 'stderr';
-  } else if (options.stdout) {
-    logPath = server.stdoutPath;
-    logType = 'stdout';
+    logType = 'system';
   } else {
-    // Default to HTTP log file
+    // Default (or explicit --activity): Activity logs = HTTP
     logPath = server.httpLogPath;
-    logType = 'http';
+    logType = 'activity';
   }
 
   // Handle --clear-archived option (deletes only archived logs)
@@ -115,7 +116,7 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
   // Handle --clear option
   if (options.clear) {
     if (!(await fileExists(logPath))) {
-      console.log(chalk.yellow(`⚠️  No ${logType} found for ${server.modelName}`));
+      console.log(chalk.yellow(`⚠️  No ${logType} logs found for ${server.modelName}`));
       console.log(chalk.dim(`   Log file does not exist: ${logPath}`));
       return;
     }
@@ -132,7 +133,7 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
   // Handle --rotate option
   if (options.rotate) {
     if (!(await fileExists(logPath))) {
-      console.log(chalk.yellow(`⚠️  No ${logType} found for ${server.modelName}`));
+      console.log(chalk.yellow(`⚠️  No ${logType} logs found for ${server.modelName}`));
       console.log(chalk.dim(`   Log file does not exist: ${logPath}`));
       return;
     }
@@ -152,7 +153,7 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
 
   // Check if log file exists
   if (!(await fileExists(logPath))) {
-    console.log(chalk.yellow(`⚠️  No ${logType} found for ${server.modelName}`));
+    console.log(chalk.yellow(`⚠️  No ${logType} logs found for ${server.modelName}`));
     console.log(chalk.dim(`   Log file does not exist: ${logPath}`));
     return;
   }
@@ -165,31 +166,29 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
   // Whether to include health check requests (filtered by default)
   const includeHealth = options.includeHealth ?? false;
 
-  // HTTP logs are already in compact format - show them raw
-  if (logType === 'http') {
-    filterDesc = ' (HTTP requests)';
+  // Activity logs (HTTP) are already in compact format - show them raw
+  if (logType === 'activity') {
+    filterDesc = ' - HTTP requests';
     useCompactMode = false;
-    // HTTP logs pre-parsed: timestamp method endpoint ip status "message" tokensIn tokensOut timeMs
-  } else if (options.verbose) {
-    // Show everything (no filter)
-    filterDesc = ' (all messages)';
-  } else if (options.errors) {
-    // Show only errors
-    filterPattern = 'error|Error|ERROR|failed|Failed|FAILED';
-    filterDesc = ' (errors only)';
-  } else if (options.http) {
-    // Full HTTP JSON logs
-    filterPattern = 'log_server_r';
-    filterDesc = ' (HTTP JSON)';
+    // Activity logs pre-parsed: timestamp method endpoint ip status "message" tokensIn tokensOut timeMs
+  } else if (logType === 'system') {
+    // System logs
+    if (options.errors) {
+      // Show only errors
+      filterPattern = 'error|Error|ERROR|failed|Failed|FAILED';
+      filterDesc = ' - errors only';
+    } else if (options.filter) {
+      // Custom filter
+      filterPattern = options.filter;
+      filterDesc = ` - filter: ${options.filter}`;
+    } else {
+      // Default: show all system logs
+      filterDesc = ' - all server output';
+    }
   } else if (options.filter) {
-    // Custom filter
+    // Custom filter (fallback)
     filterPattern = options.filter;
     filterDesc = ` (filter: ${options.filter})`;
-  } else {
-    // Default for stderr/stdout: Compact one-liner format
-    filterPattern = 'log_server_r';
-    filterDesc = ' (compact)';
-    useCompactMode = true;
   }
 
   console.log(chalk.blue(`📋 Logs for ${server.modelName} (${logType}${filterDesc})`));
@@ -205,16 +204,16 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     console.log(chalk.dim(`   Current: ${formatFileSize(currentSize)}`));
   }
 
-  // Show subtle note if verbose logging is not enabled
-  if (!server.verbose && !options.verbose && !options.errors && !options.http && !options.filter) {
+  // Show subtle note if verbose logging is not enabled (only for Activity logs)
+  if (logType === 'activity' && !server.verbose) {
     console.log(chalk.dim(`   verbosity is disabled`));
   }
   console.log();
 
   if (options.follow) {
     // Follow logs in real-time with optional filtering
-    if (logType === 'http') {
-      // HTTP logs are already compact - just filter health checks
+    if (logType === 'activity') {
+      // Activity logs are already compact - just filter health checks
       const tailProcess = spawn('tail', ['-f', logPath]);
       const rl = readline.createInterface({
         input: tailProcess.stdout,
@@ -227,44 +226,6 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
           return;
         }
         console.log(line);
-      });
-
-      // Handle Ctrl+C gracefully
-      process.on('SIGINT', () => {
-        tailProcess.kill();
-        rl.close();
-        console.log();
-        process.exit(0);
-      });
-
-      tailProcess.on('exit', () => {
-        process.exit(0);
-      });
-    } else if (useCompactMode) {
-      // Compact mode with follow: parse lines in real-time
-      const tailProcess = spawn('tail', ['-f', logPath]);
-      const rl = readline.createInterface({
-        input: tailProcess.stdout,
-        crlfDelay: Infinity,
-      });
-
-      rl.on('line', (line) => {
-        // stderr/stdout need filtering
-        const shouldProcess = line.includes('log_server_r');
-
-        if (shouldProcess) {
-          // Skip health check requests unless --include-health is set
-          if (!includeHealth && logParser.isHealthCheckRequest(line)) {
-            return;
-          }
-          logParser.processLine(line, (compactLine) => {
-            // Double-check the parsed line for health checks (in case buffered)
-            if (!includeHealth && logParser.isHealthCheckRequest(compactLine)) {
-              return;
-            }
-            console.log(compactLine);
-          });
-        }
       });
 
       // Handle Ctrl+C gracefully
@@ -314,8 +275,8 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     // Show last N lines with optional filtering
     const lines = options.lines || 50;
 
-    if (logType === 'http') {
-      // HTTP logs are already compact - just filter health checks
+    if (logType === 'activity') {
+      // Activity logs are already compact - just filter health checks
       try {
         const command = `tail -n ${lines} "${logPath}"`;
         const output = await execCommand(command);
@@ -341,58 +302,41 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
       } catch (error) {
         throw new Error(`Failed to read logs: ${(error as Error).message}`);
       }
-    } else if (useCompactMode) {
-      // Compact mode: read file and parse
+    } else if (logType === 'system') {
+      // System logs: show stderr (and combine with stdout if it exists)
       try {
-        // Use large multiplier to account for verbose debug output between requests
-        // Add || true to prevent grep from failing when no matches found
-        const command = `tail -n ${lines * 100} "${logPath}" | grep -E "log_server_r" || true`;
+        let command: string;
+
+        // Read both stderr and stdout for system logs
+        const stderrCommand = `tail -n ${lines} "${server.stderrPath}"`;
+        const stdoutCommand = await fileExists(server.stdoutPath)
+          ? `tail -n ${lines} "${server.stdoutPath}"`
+          : '';
+
+        if (filterPattern) {
+          // Apply filter to both streams
+          command = stdoutCommand
+            ? `(${stderrCommand}; ${stdoutCommand}) | grep -E "${filterPattern}" || true`
+            : `${stderrCommand} | grep -E "${filterPattern}" || true`;
+        } else {
+          // No filter, show both streams
+          command = stdoutCommand ? `(${stderrCommand}; ${stdoutCommand})` : stderrCommand;
+        }
 
         const output = await execCommand(command);
-        const logLines = output.split('\n').filter((l) => l.trim());
 
-        if (logLines.length === 0) {
-          console.log(chalk.dim('No HTTP request logs in compact format.'));
-          console.log(chalk.dim('The server may be starting up, or only simple GET requests have been made.'));
-          console.log(chalk.dim('\nTip: Use --http to see raw HTTP logs, or --verbose for all server logs.'));
+        if (filterPattern && output.trim() === '') {
+          console.log(chalk.dim(`No system logs matching pattern: ${filterPattern}`));
+          console.log(chalk.dim('\nTip: Remove --errors or adjust your filter pattern to see more logs.'));
           return;
         }
 
-        const compactLines: string[] = [];
-        for (const line of logLines) {
-          // Skip health check requests unless --include-health is set
-          if (!includeHealth && logParser.isHealthCheckRequest(line)) {
-            continue;
-          }
-          logParser.processLine(line, (compactLine) => {
-            // Double-check the parsed line for health checks (in case buffered)
-            if (!includeHealth && logParser.isHealthCheckRequest(compactLine)) {
-              return;
-            }
-            compactLines.push(compactLine);
-          });
-        }
-
-        // Flush any remaining buffered logs (handles simple format)
-        logParser.flush((compactLine) => {
-          // Filter health checks from flushed lines too
-          if (!includeHealth && logParser.isHealthCheckRequest(compactLine)) {
-            return;
-          }
-          compactLines.push(compactLine);
-        });
-
-        // Check if we got any parsed output
-        if (compactLines.length === 0) {
-          console.log(chalk.dim('HTTP request logs found, but could not parse in compact format.'));
-          console.log(chalk.dim('This usually happens with simple GET requests (health checks, slots, etc.).'));
-          console.log(chalk.dim('\nTip: Use --http to see raw HTTP logs instead.'));
+        if (output.trim() === '') {
+          console.log(chalk.dim('No system logs found.'));
           return;
         }
 
-        // Show only the last N compact lines
-        const limitedLines = compactLines.slice(-lines);
-        limitedLines.forEach((line) => console.log(line));
+        console.log(output);
       } catch (error) {
         throw new Error(`Failed to read logs: ${(error as Error).message}`);
       }
