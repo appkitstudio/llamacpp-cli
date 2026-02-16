@@ -253,14 +253,10 @@ class AdminServer {
         await this.handleGetAdmin(req, res);
       } else if (pathname === '/api/admin/logs' && method === 'GET') {
         await this.handleGetAdminLogs(req, res);
-      } else if (pathname === '/api/admin/logs/clear' && method === 'POST') {
-        await this.handleClearLogs(req, res);
       } else if (pathname === '/api/admin/logs/rotate' && method === 'POST') {
         await this.handleRotateLogs(req, res);
       } else if (pathname === '/api/admin/logs/clear-archived' && method === 'POST') {
         await this.handleClearArchivedLogs(req, res);
-      } else if (pathname === '/api/admin/logs/clear-all' && method === 'POST') {
-        await this.handleClearAllLogs(req, res);
       } else if (pathname === '/api/admin/logs/config' && method === 'PATCH') {
         await this.handleUpdateLogConfig(req, res);
       } else if (pathname === '/api/admin/service-logs' && method === 'GET') {
@@ -1254,35 +1250,6 @@ class AdminServer {
     }
   }
 
-  /**
-   * Clear log files
-   */
-  private async handleClearLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    try {
-      const body = await this.readBody(req);
-      const { type, serverId, streams } = JSON.parse(body);
-
-      // Validate request
-      if (!type || !streams || !Array.isArray(streams)) {
-        this.sendError(res, 400, 'Bad Request', 'Missing or invalid type/streams', 'INVALID_REQUEST');
-        return;
-      }
-
-      if (type === 'server' && !serverId) {
-        this.sendError(res, 400, 'Bad Request', 'Missing serverId for server type', 'INVALID_REQUEST');
-        return;
-      }
-
-      await logManagementService.clearLogs(type, serverId, streams);
-
-      this.sendJson(res, 200, {
-        success: true,
-        message: `Cleared ${streams.length} log file(s)`,
-      });
-    } catch (error) {
-      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'CLEAR_LOGS_ERROR');
-    }
-  }
 
   /**
    * Rotate log files
@@ -1335,24 +1302,6 @@ class AdminServer {
     }
   }
 
-  /**
-   * Clear all logs (current and optionally archived)
-   */
-  private async handleClearAllLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    try {
-      const body = await this.readBody(req);
-      const { includeArchived } = JSON.parse(body);
-
-      await logManagementService.clearAllLogs(includeArchived || false);
-
-      this.sendJson(res, 200, {
-        success: true,
-        message: includeArchived ? 'Cleared all current and archived logs' : 'Cleared all current logs',
-      });
-    } catch (error) {
-      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'CLEAR_ALL_LOGS_ERROR');
-    }
-  }
 
   /**
    * Update log management configuration

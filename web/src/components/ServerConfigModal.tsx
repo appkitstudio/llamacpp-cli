@@ -7,6 +7,7 @@ interface ServerConfigModalProps {
   server: Server | null;
   isOpen: boolean;
   onClose: () => void;
+  onUpdateStart?: () => void;
 }
 
 interface FormData {
@@ -21,7 +22,7 @@ interface FormData {
   customFlags: string;
 }
 
-export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModalProps) {
+export function ServerConfigModal({ server, isOpen, onClose, onUpdateStart }: ServerConfigModalProps) {
   const updateServer = useUpdateServer();
   const { data: modelsData, isLoading: modelsLoading } = useModels();
 
@@ -109,6 +110,9 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
 
       // Check if model changed
       const modelUpdate = formData.model !== server.modelName ? formData.model : undefined;
+
+      // Notify parent that update is starting
+      onUpdateStart?.();
 
       await updateServer.mutateAsync({
         id: server.id,

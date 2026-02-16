@@ -5,7 +5,6 @@ import {
   getFileSize,
   formatFileSize,
   rotateLogFile,
-  clearLogFile,
   autoRotateIfNeeded,
   getArchivedLogInfo,
   deleteArchivedLogs,
@@ -120,30 +119,6 @@ describe('rotateLogFile', () => {
   });
 });
 
-describe('clearLogFile', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  test('truncates log file to 0 bytes', async () => {
-    const { fileExists } = await import('./file-utils');
-    vi.mocked(fileExists).mockResolvedValue(true);
-    vi.mocked(fs.truncate).mockResolvedValue(undefined);
-
-    await clearLogFile('/logs/server.log');
-
-    expect(fs.truncate).toHaveBeenCalledWith('/logs/server.log', 0);
-  });
-
-  test('throws error if file does not exist', async () => {
-    const { fileExists } = await import('./file-utils');
-    vi.mocked(fileExists).mockResolvedValue(false);
-
-    await expect(clearLogFile('/logs/missing.log')).rejects.toThrow(
-      'Log file does not exist'
-    );
-  });
-});
 
 describe('autoRotateIfNeeded', () => {
   beforeEach(() => {

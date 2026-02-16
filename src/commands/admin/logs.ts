@@ -8,7 +8,6 @@ interface LogsOptions {
   activity?: boolean;  // Show Activity logs (HTTP API requests)
   system?: boolean;    // Show System logs (diagnostic output)
   follow?: boolean;
-  clear?: boolean;
   lines?: number;
 }
 
@@ -32,19 +31,6 @@ export async function adminLogsCommand(options: LogsOptions): Promise<void> {
     // Default to both if neither specified
     const showStdout = options.activity || (!options.activity && !options.system);
     const showStderr = options.system || (!options.activity && !options.system);
-
-    // Handle clear operation
-    if (options.clear) {
-      if (showStdout && (await fileExists(config.stdoutPath))) {
-        await fs.writeFile(config.stdoutPath, '');
-        console.log(chalk.green('✓ Cleared Activity log'));
-      }
-      if (showStderr && (await fileExists(config.stderrPath))) {
-        await fs.writeFile(config.stderrPath, '');
-        console.log(chalk.green('✓ Cleared System log'));
-      }
-      return;
-    }
 
     // Determine which logs to show
     const logPaths: string[] = [];

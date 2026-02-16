@@ -62,17 +62,6 @@ export async function rotateLogFile(logPath: string): Promise<string> {
   return archivedPath;
 }
 
-/**
- * Clear (truncate) a log file to zero bytes
- */
-export async function clearLogFile(logPath: string): Promise<void> {
-  if (!(await fileExists(logPath))) {
-    throw new Error(`Log file does not exist: ${logPath}`);
-  }
-
-  // Truncate file to 0 bytes
-  await fs.truncate(logPath, 0);
-}
 
 /**
  * Auto-rotate log files if they exceed threshold

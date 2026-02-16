@@ -10,7 +10,6 @@ import {
   getFileSize,
   formatFileSize,
   rotateLogFile,
-  clearLogFile,
   getArchivedLogInfo,
   deleteArchivedLogs,
 } from '../utils/log-utils';
@@ -22,10 +21,8 @@ interface LogsOptions {
   activity?: boolean;  // Show HTTP activity logs (explicit)
   system?: boolean;    // Show system logs (stderr + stdout)
   filter?: string;
-  clear?: boolean;
   rotate?: boolean;
   clearArchived?: boolean;
-  clearAll?: boolean;
   includeHealth?: boolean;
 }
 
@@ -72,63 +69,6 @@ export async function logsCommand(identifier: string, options: LogsOptions): Pro
     return;
   }
 
-  // Handle --clear-all option (clears both current and archived logs)
-  if (options.clearAll) {
-    let totalFreed = 0;
-    let currentSize = 0;
-    let archivedSize = 0;
-
-    // Clear current HTTP log
-    if (await fileExists(server.httpLogPath)) {
-      currentSize += await getFileSize(server.httpLogPath);
-      await clearLogFile(server.httpLogPath);
-    }
-
-    // Clear current stderr
-    if (await fileExists(server.stderrPath)) {
-      currentSize += await getFileSize(server.stderrPath);
-      await clearLogFile(server.stderrPath);
-    }
-
-    // Clear current stdout
-    if (await fileExists(server.stdoutPath)) {
-      currentSize += await getFileSize(server.stdoutPath);
-      await clearLogFile(server.stdoutPath);
-    }
-
-    // Delete all archived logs
-    const archivedInfo = await deleteArchivedLogs(server.id);
-    archivedSize = archivedInfo.totalSize;
-
-    totalFreed = currentSize + archivedSize;
-
-    console.log(chalk.green(`✅ Cleared all logs for ${server.modelName}`));
-    if (currentSize > 0) {
-      console.log(chalk.dim(`   Current logs: ${formatFileSize(currentSize)}`));
-    }
-    if (archivedSize > 0) {
-      console.log(chalk.dim(`   Archived logs: ${formatFileSize(archivedSize)} (${archivedInfo.count} file${archivedInfo.count > 1 ? 's' : ''})`));
-    }
-    console.log(chalk.dim(`   Total freed: ${formatFileSize(totalFreed)}`));
-    return;
-  }
-
-  // Handle --clear option
-  if (options.clear) {
-    if (!(await fileExists(logPath))) {
-      console.log(chalk.yellow(`⚠️  No ${logType} logs found for ${server.modelName}`));
-      console.log(chalk.dim(`   Log file does not exist: ${logPath}`));
-      return;
-    }
-
-    const sizeBefore = await getFileSize(logPath);
-    await clearLogFile(logPath);
-
-    console.log(chalk.green(`✅ Cleared ${logType} for ${server.modelName}`));
-    console.log(chalk.dim(`   Freed: ${formatFileSize(sizeBefore)}`));
-    console.log(chalk.dim(`   ${logPath}`));
-    return;
-  }
 
   // Handle --rotate option
   if (options.rotate) {

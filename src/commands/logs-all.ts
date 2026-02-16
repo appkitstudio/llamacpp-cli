@@ -6,15 +6,12 @@ import {
   getFileSize,
   formatFileSize,
   getArchivedLogInfo,
-  clearLogFile,
   rotateLogFile,
   deleteArchivedLogs,
 } from '../utils/log-utils';
 
 interface LogsAllOptions {
-  clear?: boolean;
   clearArchived?: boolean;
-  clearAll?: boolean;
   rotate?: boolean;
 }
 
@@ -29,7 +26,7 @@ export async function logsAllCommand(options: LogsAllOptions): Promise<void> {
   }
 
   // Handle batch operations
-  if (options.clear || options.clearArchived || options.clearAll || options.rotate) {
+  if (options.clearArchived || options.rotate) {
     await handleBatchOperation(servers, options);
     return;
   }
@@ -91,9 +88,7 @@ async function showLogsTable(servers: any[]): Promise<void> {
   console.log(chalk.dim(`  Grand total: ${formatFileSize(totalCurrent + totalArchived)}`));
 
   console.log(chalk.dim('\nBatch operations:'));
-  console.log(chalk.dim('  llamacpp logs --clear           Clear all current logs'));
   console.log(chalk.dim('  llamacpp logs --clear-archived  Delete only archived logs'));
-  console.log(chalk.dim('  llamacpp logs --clear-all       Clear current + delete archives'));
   console.log(chalk.dim('  llamacpp logs --rotate          Rotate all logs with timestamps'));
 }
 
@@ -130,75 +125,6 @@ async function handleBatchOperation(
       console.log(chalk.dim(`   Total freed: ${formatFileSize(totalFreed)}`));
       console.log(chalk.dim(`   Current logs preserved`));
     }
-  } else if (options.clearAll) {
-    console.log(chalk.blue('🗑️  Clearing all logs (current + archived) for all servers...'));
-    console.log();
-
-    let totalFreed = 0;
-    let serversProcessed = 0;
-
-    for (const server of servers) {
-      let serverTotal = 0;
-
-      // Clear current stderr
-      if (await fileExists(server.stderrPath)) {
-        serverTotal += await getFileSize(server.stderrPath);
-        await clearLogFile(server.stderrPath);
-      }
-
-      // Clear current stdout
-      if (await fileExists(server.stdoutPath)) {
-        serverTotal += await getFileSize(server.stdoutPath);
-        await clearLogFile(server.stdoutPath);
-      }
-
-      // Delete archived logs
-      const archivedInfo = await deleteArchivedLogs(server.id);
-      serverTotal += archivedInfo.totalSize;
-
-      if (serverTotal > 0) {
-        console.log(chalk.dim(`  ${server.id}: ${formatFileSize(serverTotal)}`));
-        totalFreed += serverTotal;
-        serversProcessed++;
-      }
-    }
-
-    console.log();
-    console.log(chalk.green(`✅ Cleared all logs for ${serversProcessed} server${serversProcessed !== 1 ? 's' : ''}`));
-    console.log(chalk.dim(`   Total freed: ${formatFileSize(totalFreed)}`));
-  } else if (options.clear) {
-    console.log(chalk.blue('🗑️  Clearing current logs for all servers...'));
-    console.log();
-
-    let totalFreed = 0;
-    let serversProcessed = 0;
-
-    for (const server of servers) {
-      let serverTotal = 0;
-
-      // Clear current stderr
-      if (await fileExists(server.stderrPath)) {
-        serverTotal += await getFileSize(server.stderrPath);
-        await clearLogFile(server.stderrPath);
-      }
-
-      // Clear current stdout
-      if (await fileExists(server.stdoutPath)) {
-        serverTotal += await getFileSize(server.stdoutPath);
-        await clearLogFile(server.stdoutPath);
-      }
-
-      if (serverTotal > 0) {
-        console.log(chalk.dim(`  ${server.id}: ${formatFileSize(serverTotal)}`));
-        totalFreed += serverTotal;
-        serversProcessed++;
-      }
-    }
-
-    console.log();
-    console.log(chalk.green(`✅ Cleared current logs for ${serversProcessed} server${serversProcessed !== 1 ? 's' : ''}`));
-    console.log(chalk.dim(`   Total freed: ${formatFileSize(totalFreed)}`));
-    console.log(chalk.dim(`   Archived logs preserved`));
   } else if (options.rotate) {
     console.log(chalk.blue('🔄 Rotating logs for all servers...'));
     console.log();

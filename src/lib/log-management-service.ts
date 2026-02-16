@@ -2,7 +2,6 @@ import * as path from 'path';
 import { getLogsDir } from '../utils/file-utils';
 import {
   getAllLogInfo,
-  clearLogFile,
   rotateLogFile,
   deleteArchivedLogs,
   autoRotateIfNeeded as utilsAutoRotateIfNeeded,
@@ -25,28 +24,6 @@ class LogManagementService {
     return await getAllLogInfo();
   }
 
-  /**
-   * Clear (truncate) log files to zero bytes
-   */
-  async clearLogs(
-    type: LogType,
-    serverId: string | undefined,
-    streams: StreamType[]
-  ): Promise<void> {
-    const logsDir = getLogsDir();
-    const prefix = this.getLogPrefix(type, serverId);
-
-    for (const stream of streams) {
-      const logPath = this.getLogPath(logsDir, prefix, stream);
-
-      try {
-        await clearLogFile(logPath);
-      } catch (error) {
-        // Re-throw to let caller handle
-        throw error;
-      }
-    }
-  }
 
   /**
    * Rotate log files with timestamp
@@ -87,88 +64,6 @@ class LogManagementService {
     return await deleteArchivedLogs(serviceId);
   }
 
-  /**
-   * Clear all logs across all services
-   * @param includeArchived Also delete archived logs
-   */
-  async clearAllLogs(includeArchived: boolean): Promise<void> {
-    const allLogs = await getAllLogInfo();
-
-    // Clear server logs
-    for (const server of allLogs.servers) {
-      try {
-        await clearLogFile(server.stdout.path);
-      } catch {
-        // Continue on error
-      }
-
-      try {
-        await clearLogFile(server.stderr.path);
-      } catch {
-        // Continue on error
-      }
-
-      // Only clear httpLog if it exists (size > 0)
-      if (server.httpLog.size > 0) {
-        try {
-          await clearLogFile(server.httpLog.path);
-        } catch {
-          // Continue on error
-        }
-      }
-
-      // Clear archived logs if requested
-      if (includeArchived && server.archived.count > 0) {
-        try {
-          await deleteArchivedLogs(server.serverId);
-        } catch {
-          // Continue on error
-        }
-      }
-    }
-
-    // Clear router logs
-    try {
-      await clearLogFile(allLogs.router.stdout.path);
-    } catch {
-      // Continue on error
-    }
-
-    try {
-      await clearLogFile(allLogs.router.stderr.path);
-    } catch {
-      // Continue on error
-    }
-
-    if (includeArchived && allLogs.router.archived.count > 0) {
-      try {
-        await deleteArchivedLogs('router');
-      } catch {
-        // Continue on error
-      }
-    }
-
-    // Clear admin logs
-    try {
-      await clearLogFile(allLogs.admin.stdout.path);
-    } catch {
-      // Continue on error
-    }
-
-    try {
-      await clearLogFile(allLogs.admin.stderr.path);
-    } catch {
-      // Continue on error
-    }
-
-    if (includeArchived && allLogs.admin.archived.count > 0) {
-      try {
-        await deleteArchivedLogs('admin');
-      } catch {
-        // Continue on error
-      }
-    }
-  }
 
   /**
    * Auto-rotate log files if they exceed threshold

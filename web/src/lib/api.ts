@@ -11,10 +11,8 @@ import type {
   UpdateRouterRequest,
   AdminInfo,
   AdminLogsResponse,
-  ClearLogsRequest,
   RotateLogsRequest,
   ClearArchivedLogsRequest,
-  ClearAllLogsRequest,
   UpdateLogConfigRequest,
 } from '../types/api';
 
@@ -245,16 +243,6 @@ class ApiClient {
     );
   }
 
-  async clearLogs(data: ClearLogsRequest) {
-    return this.request<{ success: boolean; message: string }>(
-      '/api/admin/logs/clear',
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }
-    );
-  }
-
   async rotateLogs(data: RotateLogsRequest) {
     return this.request<{ success: boolean; message: string; archivedFiles: string[] }>(
       '/api/admin/logs/rotate',
@@ -268,16 +256,6 @@ class ApiClient {
   async clearArchivedLogs(data: ClearArchivedLogsRequest) {
     return this.request<{ success: boolean; count: number; totalSize: number }>(
       '/api/admin/logs/clear-archived',
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }
-    );
-  }
-
-  async clearAllLogs(data: ClearAllLogsRequest) {
-    return this.request<{ success: boolean; message: string }>(
-      '/api/admin/logs/clear-all',
       {
         method: 'POST',
         body: JSON.stringify(data),

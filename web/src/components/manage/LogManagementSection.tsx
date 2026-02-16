@@ -13,18 +13,12 @@ interface LogManagementSectionProps {
   isOpen: boolean;
   onToggle: () => void;
   logsData: AdminLogsResponse | undefined;
-  onClearLogs: (
-    type: 'server' | 'router' | 'admin',
-    serverId: string | undefined,
-    streams: ('stdout' | 'stderr' | 'httpLog')[]
-  ) => void;
   onRotateLogs: (
     type: 'server' | 'router' | 'admin',
     serverId: string | undefined,
     streams: ('stdout' | 'stderr' | 'httpLog')[]
   ) => void;
   onClearArchived: (serverId?: string) => void;
-  onClearAll: (includeArchived: boolean) => void;
   onUpdateConfig: (config: UpdateLogConfigRequest) => Promise<void>;
   formatSize: (bytes: number) => string;
   updateConfigPending: boolean;
@@ -34,10 +28,8 @@ export function LogManagementSection({
   isOpen,
   onToggle,
   logsData,
-  onClearLogs,
   onRotateLogs,
   onClearArchived,
-  onClearAll,
   onUpdateConfig,
   formatSize,
   updateConfigPending,
@@ -146,20 +138,6 @@ export function LogManagementSection({
               </div>
             </div>
 
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => onClearAll(false)}
-                className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors"
-              >
-                Clear All Current
-              </button>
-              <button
-                onClick={() => onClearAll(true)}
-                className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors"
-              >
-                Clear All + Archived
-              </button>
-            </div>
           </div>
 
           {/* Automation Configuration Subsection */}
@@ -389,7 +367,6 @@ export function LogManagementSection({
                       <ServerLogRow
                         key={server.serverId}
                         server={server}
-                        onClear={onClearLogs}
                         onRotate={onRotateLogs}
                         onClearArchived={onClearArchived}
                         formatSize={formatSize}
@@ -432,7 +409,6 @@ export function LogManagementSection({
                 <ServiceLogCard
                   type="router"
                   log={logsData.router}
-                  onClear={onClearLogs}
                   onRotate={onRotateLogs}
                   onClearArchived={onClearArchived}
                   formatSize={formatSize}
@@ -468,7 +444,6 @@ export function LogManagementSection({
                 <ServiceLogCard
                   type="admin"
                   log={logsData.admin}
-                  onClear={onClearLogs}
                   onRotate={onRotateLogs}
                   onClearArchived={onClearArchived}
                   formatSize={formatSize}
@@ -485,60 +460,56 @@ export function LogManagementSection({
 // Server Log Row Component (compact, single line)
 function ServerLogRow({
   server,
-  onClear,
   onRotate,
   onClearArchived,
   formatSize,
 }: {
   server: ServerLogInfo;
-  onClear: (type: 'server', serverId: string | undefined, streams: ('stdout' | 'stderr' | 'httpLog')[]) => void;
   onRotate: (type: 'server', serverId: string | undefined, streams: ('stdout' | 'stderr' | 'httpLog')[]) => void;
   onClearArchived: (serverId?: string) => void;
   formatSize: (bytes: number) => string;
 }) {
-  const totalSize = server.currentTotal + server.archived.totalSize;
+  // Calculate current total from individual log files as a fallback
+  // This ensures we show accurate sizes even if backend calculation differs
+  const calculatedTotal = (server.stdout?.size || 0) + (server.stderr?.size || 0) + (server.httpLog?.size || 0);
+  const currentTotal = calculatedTotal > 0 ? calculatedTotal : server.currentTotal;
+  const totalSize = currentTotal + server.archived.totalSize;
 
   return (
     <div className="px-5 py-4 hover:bg-neutral-50 transition-colors">
-      <div className="flex items-start justify-between gap-4 mb-3">
-        <h3 className="text-sm font-semibold text-neutral-900">{server.serverId}</h3>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onRotate('server', server.serverId, ['stdout', 'stderr', 'httpLog'])}
-            className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
-          >
-            Rotate
-          </button>
-          <button
-            onClick={() => onClear('server', server.serverId, ['stdout', 'stderr', 'httpLog'])}
-            className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors"
-          >
-            Clear
-          </button>
-          {server.archived.count > 0 && (
+      <h3 className="text-sm font-semibold text-neutral-900 mb-3">{server.serverId}</h3>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+        <div>
+          <span className="text-neutral-500 block mb-2">Current</span>
+          <div className="flex items-center gap-2">
+            <span className="text-neutral-900 font-medium">{formatSize(currentTotal)}</span>
+            <button
+              onClick={() => onRotate('server', server.serverId, ['stdout', 'stderr', 'httpLog'])}
+              disabled={currentTotal === 0}
+              className="px-2 py-1 text-xs font-medium text-neutral-700 bg-neutral-100 rounded hover:bg-neutral-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Archive
+            </button>
+          </div>
+        </div>
+        <div>
+          <span className="text-neutral-500 block mb-2">Archived</span>
+          <div className="flex items-center gap-2">
+            <span className="text-neutral-900 font-medium">
+              {server.archived.count} ({formatSize(server.archived.totalSize)})
+            </span>
             <button
               onClick={() => onClearArchived(server.serverId)}
-              className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
+              disabled={server.archived.count === 0}
+              className="px-2 py-1 text-xs font-medium text-neutral-700 bg-neutral-100 rounded hover:bg-neutral-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Clear Archived
+              Delete
             </button>
-          )}
+          </div>
         </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4 text-xs">
-        <div>
-          <span className="text-neutral-500 block mb-1">Current</span>
-          <span className="text-neutral-900 font-medium">{formatSize(server.currentTotal)}</span>
-        </div>
-        <div>
-          <span className="text-neutral-500 block mb-1">Archived</span>
-          <span className="text-neutral-900 font-medium">
-            {server.archived.count} ({formatSize(server.archived.totalSize)})
-          </span>
-        </div>
-        <div>
-          <span className="text-neutral-500 block mb-1">Total</span>
+        <div className="hidden md:block">
+          <span className="text-neutral-500 block mb-2">Total</span>
           <span className="text-neutral-900 font-semibold">{formatSize(totalSize)}</span>
         </div>
       </div>
@@ -550,14 +521,12 @@ function ServerLogRow({
 function ServiceLogCard({
   type,
   log,
-  onClear,
   onRotate,
   onClearArchived,
   formatSize,
 }: {
   type: 'router' | 'admin';
   log: any;
-  onClear: (type: 'router' | 'admin', serverId: undefined, streams: ('stdout' | 'stderr')[]) => void;
   onRotate: (type: 'router' | 'admin', serverId: undefined, streams: ('stdout' | 'stderr')[]) => void;
   onClearArchived: (serverId?: string) => void;
   formatSize: (bytes: number) => string;
@@ -567,47 +536,41 @@ function ServiceLogCard({
 
   return (
     <div className="px-5 py-4 hover:bg-neutral-50 transition-colors">
-      <div className="flex items-start justify-between gap-4 mb-3">
-        <h3 className="text-sm font-semibold text-neutral-900">
-          {type === 'router' ? 'Router Logs' : 'Admin Logs'}
-        </h3>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onRotate(type, undefined, ['stdout', 'stderr'])}
-            className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
-          >
-            Rotate
-          </button>
-          <button
-            onClick={() => onClear(type, undefined, ['stdout', 'stderr'])}
-            className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors"
-          >
-            Clear
-          </button>
-          {log?.archived.count > 0 && (
+      <h3 className="text-sm font-semibold text-neutral-900 mb-3">
+        {type === 'router' ? 'Router Logs' : 'Admin Logs'}
+      </h3>
+
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+        <div>
+          <span className="text-neutral-500 block mb-2">Current</span>
+          <div className="flex items-center gap-2">
+            <span className="text-neutral-900 font-medium">{formatSize(currentTotal)}</span>
+            <button
+              onClick={() => onRotate(type, undefined, ['stdout', 'stderr'])}
+              disabled={currentTotal === 0}
+              className="px-2 py-1 text-xs font-medium text-neutral-700 bg-neutral-100 rounded hover:bg-neutral-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Archive
+            </button>
+          </div>
+        </div>
+        <div>
+          <span className="text-neutral-500 block mb-2">Archived</span>
+          <div className="flex items-center gap-2">
+            <span className="text-neutral-900 font-medium">
+              {log?.archived.count || 0} ({formatSize(log?.archived.totalSize || 0)})
+            </span>
             <button
               onClick={() => onClearArchived(type)}
-              className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
+              disabled={(log?.archived.count || 0) === 0}
+              className="px-2 py-1 text-xs font-medium text-neutral-700 bg-neutral-100 rounded hover:bg-neutral-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Clear Archived
+              Delete
             </button>
-          )}
+          </div>
         </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4 text-xs">
-        <div>
-          <span className="text-neutral-500 block mb-1">Current</span>
-          <span className="text-neutral-900 font-medium">{formatSize(currentTotal)}</span>
-        </div>
-        <div>
-          <span className="text-neutral-500 block mb-1">Archived</span>
-          <span className="text-neutral-900 font-medium">
-            {log?.archived.count || 0} ({formatSize(log?.archived.totalSize || 0)})
-          </span>
-        </div>
-        <div>
-          <span className="text-neutral-500 block mb-1">Total</span>
+        <div className="hidden md:block">
+          <span className="text-neutral-500 block mb-2">Total</span>
           <span className="text-neutral-900 font-semibold">{formatSize(totalSize)}</span>
         </div>
       </div>

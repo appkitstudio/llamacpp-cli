@@ -235,12 +235,6 @@ export interface AdminLogsResponse {
   workers: WorkerStatus;
 }
 
-export interface ClearLogsRequest {
-  type: 'server' | 'router' | 'admin';
-  serverId?: string;
-  streams: ('stdout' | 'stderr' | 'httpLog')[];
-}
-
 export interface RotateLogsRequest {
   type: 'server' | 'router' | 'admin';
   serverId?: string;
@@ -249,10 +243,6 @@ export interface RotateLogsRequest {
 
 export interface ClearArchivedLogsRequest {
   serverId?: string;
-}
-
-export interface ClearAllLogsRequest {
-  includeArchived: boolean;
 }
 
 export interface UpdateLogConfigRequest {

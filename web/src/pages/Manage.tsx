@@ -3,10 +3,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import {
   useAdminLogs,
   useAdmin,
-  useClearLogs,
   useRotateLogs,
   useClearArchivedLogs,
-  useClearAllLogs,
   useUpdateLogConfig,
   useRouter,
   useStartRouter,
@@ -22,10 +20,8 @@ export function Manage() {
   const queryClient = useQueryClient();
   const { data: logsData, isLoading } = useAdminLogs();
   const { data: adminData } = useAdmin();
-  const clearLogs = useClearLogs();
   const rotateLogs = useRotateLogs();
   const clearArchivedLogs = useClearArchivedLogs();
-  const clearAllLogs = useClearAllLogs();
   const updateLogConfig = useUpdateLogConfig();
 
   // Router hooks
@@ -59,24 +55,6 @@ export function Manage() {
   };
 
   // Callback handlers
-  const handleClearLogs = (
-    type: 'server' | 'router' | 'admin',
-    serverId: string | undefined,
-    streams: ('stdout' | 'stderr' | 'httpLog')[]
-  ) => {
-    const streamNames = streams.join(', ');
-    const target = type === 'server' ? `server ${serverId}` : type;
-
-    setConfirmModal({
-      isOpen: true,
-      title: 'Clear Logs',
-      message: `Are you sure you want to clear ${streamNames} for ${target}? This will truncate the log files to 0 bytes.`,
-      onConfirm: async () => {
-        await clearLogs.mutateAsync({ type, serverId, streams });
-        setConfirmModal({ ...confirmModal, isOpen: false });
-      },
-    });
-  };
 
   const handleRotateLogs = async (
     type: 'server' | 'router' | 'admin',
@@ -100,17 +78,6 @@ export function Manage() {
     });
   };
 
-  const handleClearAll = (includeArchived: boolean) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Clear All Logs',
-      message: `Are you sure you want to clear ALL logs${includeArchived ? ' (including archived)' : ''}? This action cannot be undone.`,
-      onConfirm: async () => {
-        await clearAllLogs.mutateAsync({ includeArchived });
-        setConfirmModal({ ...confirmModal, isOpen: false });
-      },
-    });
-  };
 
   const handleSaveConfig = async (config: any) => {
     await updateLogConfig.mutateAsync(config);
@@ -189,10 +156,8 @@ export function Manage() {
         isOpen={showLogManagementSection}
         onToggle={() => setShowLogManagementSection(!showLogManagementSection)}
         logsData={logsData}
-        onClearLogs={handleClearLogs}
         onRotateLogs={handleRotateLogs}
         onClearArchived={handleClearArchived}
-        onClearAll={handleClearAll}
         onUpdateConfig={handleSaveConfig}
         formatSize={formatSize}
         updateConfigPending={updateLogConfig.isPending}

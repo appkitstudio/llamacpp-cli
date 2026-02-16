@@ -4,10 +4,8 @@ import type {
   CreateServerRequest,
   UpdateServerRequest,
   UpdateRouterRequest,
-  ClearLogsRequest,
   RotateLogsRequest,
   ClearArchivedLogsRequest,
-  ClearAllLogsRequest,
   UpdateLogConfigRequest,
 } from '../types/api';
 
@@ -296,16 +294,6 @@ export function useAdminServiceLogs(lines = 500) {
   });
 }
 
-export function useClearLogs() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (data: ClearLogsRequest) => api.clearLogs(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['adminLogs'] });
-    },
-  });
-}
 
 export function useRotateLogs() {
   const queryClient = useQueryClient();
@@ -329,16 +317,6 @@ export function useClearArchivedLogs() {
   });
 }
 
-export function useClearAllLogs() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (data: ClearAllLogsRequest) => api.clearAllLogs(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['adminLogs'] });
-    },
-  });
-}
 
 export function useUpdateLogConfig() {
   const queryClient = useQueryClient();

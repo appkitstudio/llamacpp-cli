@@ -6,7 +6,6 @@ import {
   getFileSize,
   formatFileSize,
   rotateLogFile,
-  clearLogFile,
 } from '../../utils/log-utils';
 
 interface RouterLogsOptions {
@@ -14,9 +13,7 @@ interface RouterLogsOptions {
   lines?: number;
   activity?: boolean; // Show Activity logs (stdout) - default
   system?: boolean;   // Show System logs (stderr)
-  clear?: boolean;
   rotate?: boolean;
-  clearAll?: boolean;
 }
 
 export async function routerLogsCommand(options: RouterLogsOptions): Promise<void> {
@@ -35,43 +32,6 @@ export async function routerLogsCommand(options: RouterLogsOptions): Promise<voi
   const logPath = options.system ? config.stderrPath : config.stdoutPath;
   const logType = options.system ? 'system' : 'activity';
 
-  // Handle --clear-all option (clears both stderr and stdout)
-  if (options.clearAll) {
-    let totalFreed = 0;
-
-    // Clear stderr
-    if (await fileExists(config.stderrPath)) {
-      totalFreed += await getFileSize(config.stderrPath);
-      await clearLogFile(config.stderrPath);
-    }
-
-    // Clear stdout
-    if (await fileExists(config.stdoutPath)) {
-      totalFreed += await getFileSize(config.stdoutPath);
-      await clearLogFile(config.stdoutPath);
-    }
-
-    console.log(chalk.green('✅ Cleared all router logs'));
-    console.log(chalk.dim(`   Total freed: ${formatFileSize(totalFreed)}`));
-    return;
-  }
-
-  // Handle --clear option
-  if (options.clear) {
-    if (!(await fileExists(logPath))) {
-      console.log(chalk.yellow(`⚠️  No ${logType} logs found for router`));
-      console.log(chalk.dim(`   Log file does not exist: ${logPath}`));
-      return;
-    }
-
-    const sizeBefore = await getFileSize(logPath);
-    await clearLogFile(logPath);
-
-    console.log(chalk.green(`✅ Cleared router ${logType} logs`));
-    console.log(chalk.dim(`   Freed: ${formatFileSize(sizeBefore)}`));
-    console.log(chalk.dim(`   ${logPath}`));
-    return;
-  }
 
   // Handle --rotate option
   if (options.rotate) {

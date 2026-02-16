@@ -18,6 +18,7 @@ export function Servers() {
   const stopServer = useStopServer();
 
   const [actionLoading, setActionLoading] = useState<{ id: string; action: 'start' | 'stop' } | null>(null);
+  const [configUpdating, setConfigUpdating] = useState<string | null>(null);
   const [configServer, setConfigServer] = useState<Server | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [filter, setFilter] = useState<ServerFilter>('all');
@@ -44,7 +45,16 @@ export function Servers() {
         setActionLoading(null);
       }
     }
-  }, [servers, actionLoading]);
+
+    // Clear config updating state once data is refreshed
+    if (configUpdating && servers.length > 0) {
+      // Wait a bit to ensure backend has processed the update
+      const timer = setTimeout(() => {
+        setConfigUpdating(null);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [servers, actionLoading, configUpdating]);
 
   const handleStart = async (id: string) => {
     setActionLoading({ id, action: 'start' });
@@ -72,6 +82,15 @@ export function Servers() {
 
   const renderStatusBadge = (server: Server) => {
     const serverId = server.id;
+
+    if (configUpdating === serverId) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-neutral-100 text-neutral-700">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          Updating
+        </span>
+      );
+    }
 
     if (actionLoading?.id === serverId) {
       if (actionLoading.action === 'stop') {
@@ -272,7 +291,7 @@ export function Servers() {
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => navigate(`/servers/${server.id}/logs`)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                   title="Logs"
                 >
@@ -280,7 +299,7 @@ export function Servers() {
                 </button>
                 <button
                   onClick={() => setConfigServer(server)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                   title="Config"
                 >
@@ -288,7 +307,7 @@ export function Servers() {
                 </button>
                 <button
                   onClick={() => handleStop(server.id)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
                   title="Stop"
                 >
@@ -334,7 +353,7 @@ export function Servers() {
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => navigate(`/servers/${server.id}/logs`)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                   title="Logs"
                 >
@@ -342,7 +361,7 @@ export function Servers() {
                 </button>
                 <button
                   onClick={() => setConfigServer(server)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                   title="Config"
                 >
@@ -350,7 +369,7 @@ export function Servers() {
                 </button>
                 <button
                   onClick={() => handleStart(server.id)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
                   title="Start"
                 >
@@ -399,7 +418,7 @@ export function Servers() {
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => navigate(`/servers/${server.id}/logs`)}
-                    disabled={actionLoading?.id === server.id}
+                    disabled={actionLoading?.id === server.id || configUpdating === server.id}
                     className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                     title="Logs"
                   >
@@ -407,7 +426,7 @@ export function Servers() {
                   </button>
                   <button
                     onClick={() => setConfigServer(server)}
-                    disabled={actionLoading?.id === server.id}
+                    disabled={actionLoading?.id === server.id || configUpdating === server.id}
                     className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                     title="Config"
                   >
@@ -416,7 +435,7 @@ export function Servers() {
                   {server.status === 'running' ? (
                     <button
                       onClick={() => handleStop(server.id)}
-                      disabled={actionLoading?.id === server.id}
+                      disabled={actionLoading?.id === server.id || configUpdating === server.id}
                       className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
                       title="Stop"
                     >
@@ -425,7 +444,7 @@ export function Servers() {
                   ) : (
                     <button
                       onClick={() => handleStart(server.id)}
-                      disabled={actionLoading?.id === server.id}
+                      disabled={actionLoading?.id === server.id || configUpdating === server.id}
                       className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
                       title="Start"
                     >
@@ -471,6 +490,11 @@ export function Servers() {
         server={configServer}
         isOpen={configServer !== null}
         onClose={() => setConfigServer(null)}
+        onUpdateStart={() => {
+          if (configServer) {
+            setConfigUpdating(configServer.id);
+          }
+        }}
       />
 
       {/* Create Modal */}
