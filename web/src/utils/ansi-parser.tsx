@@ -98,9 +98,9 @@ export function renderAnsiLine(line: string, key: string | number): ReactNode {
     return null;
   }
 
-  // If only one segment with no color, return plain text
+  // If only one segment with no color, wrap in span with default color
   if (segments.length === 1 && !segments[0].color) {
-    return segments[0].text;
+    return <span className="text-gray-100">{segments[0].text}</span>;
   }
 
   // Return colored segments

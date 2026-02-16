@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   useAdminLogs,
   useClearLogs,
@@ -6,6 +7,10 @@ import {
   useClearArchivedLogs,
   useClearAllLogs,
   useUpdateLogConfig,
+  useRouter,
+  useStartRouter,
+  useStopRouter,
+  useRestartRouter,
 } from '../hooks/useApi';
 import {
   Database,
@@ -18,18 +23,27 @@ import {
   Loader2,
   Clock,
   CheckCircle2,
-  BookOpen,
   ExternalLink,
+  Shuffle,
+  Activity,
 } from 'lucide-react';
 import type { ServerLogInfo } from '../types/api';
+import { RouterConfigModal } from '../components/RouterConfigModal';
 
 export function Admin() {
+  const queryClient = useQueryClient();
   const { data: logsData, isLoading } = useAdminLogs();
   const clearLogs = useClearLogs();
   const rotateLogs = useRotateLogs();
   const clearArchivedLogs = useClearArchivedLogs();
   const clearAllLogs = useClearAllLogs();
   const updateLogConfig = useUpdateLogConfig();
+
+  // Router hooks
+  const { data: routerData } = useRouter();
+  const startRouter = useStartRouter();
+  const stopRouter = useStopRouter();
+  const restartRouter = useRestartRouter();
 
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -41,6 +55,11 @@ export function Admin() {
   const [showServerLogsSection, setShowServerLogsSection] = useState(false);
   const [showRouterLogsSection, setShowRouterLogsSection] = useState(false);
   const [showAdminLogsSection, setShowAdminLogsSection] = useState(false);
+  const [showAdminServiceSection, setShowAdminServiceSection] = useState(true);
+  const [showRouterSection, setShowRouterSection] = useState(true);
+  const [showLogManagementSection, setShowLogManagementSection] = useState(true);
+  const [showRouterConfigModal, setShowRouterConfigModal] = useState(false);
+  const [routerActionLoading, setRouterActionLoading] = useState<'start' | 'stop' | 'restart' | null>(null);
 
   // Configuration state
   const [configChanges, setConfigChanges] = useState<{
@@ -123,6 +142,79 @@ export function Admin() {
     setShowConfigSection(false);
   };
 
+  // Router handlers
+  const handleStartRouter = async () => {
+    setRouterActionLoading('start');
+    try {
+      await startRouter.mutateAsync();
+      await queryClient.refetchQueries({ queryKey: ['router'] });
+    } finally {
+      setRouterActionLoading(null);
+    }
+  };
+
+  const handleStopRouter = async () => {
+    setRouterActionLoading('stop');
+    try {
+      await stopRouter.mutateAsync();
+      await queryClient.refetchQueries({ queryKey: ['router'] });
+    } finally {
+      setRouterActionLoading(null);
+    }
+  };
+
+  const handleRestartRouter = async () => {
+    setRouterActionLoading('restart');
+    try {
+      await restartRouter.mutateAsync();
+      await queryClient.refetchQueries({ queryKey: ['router'] });
+    } finally {
+      setRouterActionLoading(null);
+    }
+  };
+
+  // Router status badge renderer
+  const renderRouterStatusBadge = () => {
+    if (routerActionLoading) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-neutral-100 text-neutral-700">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          {routerActionLoading === 'start' && 'Starting'}
+          {routerActionLoading === 'stop' && 'Stopping'}
+          {routerActionLoading === 'restart' && 'Restarting'}
+        </span>
+      );
+    }
+
+    const isNotConfigured = routerData?.status === 'not_configured';
+    const isRunning = routerData?.isRunning || false;
+
+    if (isNotConfigured) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-neutral-100 text-neutral-600">
+          <span className="w-1.5 h-1.5 rounded-full bg-neutral-400"></span>
+          Not Configured
+        </span>
+      );
+    }
+
+    if (isRunning) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-green-50 text-green-700 border border-green-200/50">
+          <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+          Running
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-neutral-100 text-neutral-600">
+        <span className="w-1.5 h-1.5 rounded-full bg-neutral-400"></span>
+        Stopped
+      </span>
+    );
+  };
+
   if (isLoading && !logsData) {
     return (
       <div className="max-w-7xl mx-auto px-6 py-12">
@@ -153,123 +245,316 @@ export function Admin() {
         </div>
       </div>
 
-      {/* API Documentation Section */}
-      <div className="bg-white border border-neutral-200 rounded-lg mb-6 overflow-hidden">
-        <div className="px-5 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-              <BookOpen className="w-5 h-5 text-blue-600" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-neutral-900">API Documentation</h3>
-              <p className="text-sm text-neutral-500">
-                Interactive API reference with request/response examples
-              </p>
-            </div>
-          </div>
-          <a
-            href="/api-docs/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors flex items-center gap-2"
-          >
-            Open Swagger UI
-            <ExternalLink className="w-4 h-4" />
-          </a>
-        </div>
-      </div>
-
-      {/* Log Management Section Header */}
-      <div className="mb-4">
-        <h2 className="text-lg font-semibold text-neutral-900">Log Management</h2>
-        <p className="text-sm text-neutral-500 mt-1">
-          Monitor disk usage and manage log files
-        </p>
-      </div>
-
-      {/* Summary Card */}
-      <div className="bg-white border border-neutral-200 rounded-lg p-5 mb-6 hover:border-neutral-300 hover:shadow-sm transition-all">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center">
-              <Database className="w-5 h-5 text-purple-600" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-neutral-900 mb-1">Total Disk Usage</h3>
-              <p className="text-sm text-neutral-500">
-                {formatSize(logsData?.summary.grandTotal || 0)}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-          <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-200">
-            <p className="text-xs text-blue-700 mb-1 font-medium">Total Log Size</p>
-            <p className="text-lg font-semibold text-blue-900">
-              {formatSize(logsData?.summary.grandTotal || 0)}
-            </p>
-          </div>
-          <div className="text-center p-3 bg-neutral-50 rounded-lg">
-            <p className="text-xs text-neutral-500 mb-1">Current Logs</p>
-            <p className="text-lg font-semibold text-neutral-900">
-              {formatSize(logsData?.summary.totalCurrent || 0)}
-            </p>
-          </div>
-          <div className="text-center p-3 bg-neutral-50 rounded-lg">
-            <p className="text-xs text-neutral-500 mb-1">Archived Logs</p>
-            <p className="text-lg font-semibold text-neutral-900">
-              {formatSize(logsData?.summary.totalArchived || 0)}
-            </p>
-          </div>
-          <div className="text-center p-3 bg-neutral-50 rounded-lg">
-            <p className="text-xs text-neutral-500 mb-1">Servers</p>
-            <p className="text-lg font-semibold text-neutral-900">
-              {logsData?.servers.length || 0}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex gap-2 justify-end">
-          <button
-            onClick={() => handleClearAll(false)}
-            className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors flex items-center gap-1.5"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Clear All Current
-          </button>
-          <button
-            onClick={() => handleClearAll(true)}
-            className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors flex items-center gap-1.5"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Clear All + Archived
-          </button>
-        </div>
-      </div>
-
-      {/* Configuration Section */}
+      {/* Admin Service Section */}
       <div className="bg-white border border-neutral-200 rounded-lg mb-6 overflow-hidden">
         <button
-          onClick={() => setShowConfigSection(!showConfigSection)}
+          onClick={() => setShowAdminServiceSection(!showAdminServiceSection)}
           className="w-full px-5 py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
         >
           <div className="flex items-center gap-3">
-            <Settings className="w-5 h-5 text-neutral-600" />
+            <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center">
+              <Settings className="w-5 h-5 text-purple-600" />
+            </div>
             <div className="text-left">
-              <h3 className="text-base font-semibold text-neutral-900">Automation Configuration</h3>
-              <p className="text-sm text-neutral-500">Configure auto-rotation and auto-deletion</p>
+              <h3 className="text-base font-semibold text-neutral-900">Admin Service</h3>
+              <p className="text-sm text-neutral-500">
+                Management API and web interface on port 9200
+              </p>
             </div>
           </div>
-          {showConfigSection ? (
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-green-50 text-green-700 border border-green-200/50">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+              Running
+            </span>
+            {showAdminServiceSection ? (
+              <ChevronUp className="w-5 h-5 text-neutral-400" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-neutral-400" />
+            )}
+          </div>
+        </button>
+
+        {showAdminServiceSection && (
+          <div className="border-t border-neutral-200 px-5 py-4">
+            <div className="space-y-4">
+              {/* Quick Access Links */}
+              <div className="flex items-center gap-2 pb-4 border-b border-neutral-200">
+                <a
+                  href="/admin/logs"
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
+                >
+                  View Logs
+                </a>
+                <a
+                  href="/api-docs/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors flex items-center gap-1.5"
+                >
+                  API Docs
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+
+              {/* Service Information */}
+              <div className="space-y-2">
+                <h4 className="text-xs font-semibold text-neutral-900 mb-2">Service Information</h4>
+                <div className="flex items-center gap-2 text-xs text-neutral-600">
+                  <span className="text-neutral-400 w-32">Host:</span>
+                  <span>0.0.0.0</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-neutral-600">
+                  <span className="text-neutral-400 w-32">Port:</span>
+                  <span>9200</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Router Section */}
+      <div className="bg-white border border-neutral-200 rounded-lg mb-6 overflow-hidden">
+        <button
+          onClick={() => setShowRouterSection(!showRouterSection)}
+          className="w-full px-5 py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
+              <Shuffle className="w-5 h-5 text-blue-600" />
+            </div>
+            <div className="text-left">
+              <h3 className="text-base font-semibold text-neutral-900">Router Service</h3>
+              <p className="text-sm text-neutral-500">
+                {routerData?.status === 'not_configured'
+                  ? 'Not yet configured'
+                  : `Unified model routing on port ${routerData?.config?.port || 'N/A'}`}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {renderRouterStatusBadge()}
+            {showRouterSection ? (
+              <ChevronUp className="w-5 h-5 text-neutral-400" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-neutral-400" />
+            )}
+          </div>
+        </button>
+
+        {showRouterSection && (
+          <div className="border-t border-neutral-200 px-5 py-4">
+            <div className="space-y-4">
+              {/* Control Buttons */}
+              <div className="flex items-center gap-2 pb-4 border-b border-neutral-200">
+                {routerData?.status !== 'not_configured' && routerData?.isRunning && (
+                  <a
+                    href="/router/logs"
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors"
+                  >
+                    View Logs
+                  </a>
+                )}
+
+                {routerData?.status !== 'not_configured' && (
+                  <button
+                    onClick={() => setShowRouterConfigModal(true)}
+                    disabled={routerActionLoading !== null}
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                  >
+                    Configure
+                  </button>
+                )}
+
+                {routerData?.status !== 'not_configured' && routerData?.isRunning && (
+                  <>
+                    <button
+                      onClick={handleRestartRouter}
+                      disabled={routerActionLoading !== null}
+                      className="px-3 py-1.5 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md hover:bg-neutral-200 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    >
+                      Restart
+                    </button>
+                    <button
+                      onClick={handleStopRouter}
+                      disabled={routerActionLoading !== null}
+                      className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    >
+                      Stop
+                    </button>
+                  </>
+                )}
+
+                {(routerData?.status === 'not_configured' || !routerData?.isRunning) && (
+                  <button
+                    onClick={handleStartRouter}
+                    disabled={routerActionLoading !== null}
+                    className="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 rounded-md hover:bg-green-100 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                  >
+                    Start
+                  </button>
+                )}
+              </div>
+
+              {/* Configuration Details */}
+              {routerData?.status !== 'not_configured' && routerData?.config && (
+                <div className="space-y-2">
+                  <h4 className="text-xs font-semibold text-neutral-900 mb-2">Configuration</h4>
+                  <div className="flex items-center gap-2 text-xs text-neutral-600">
+                    <span className="text-neutral-400 w-32">Host:</span>
+                    <span>{routerData.config.host}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-neutral-600">
+                    <span className="text-neutral-400 w-32">Port:</span>
+                    <span>{routerData.config.port}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-neutral-600">
+                    <span className="text-neutral-400 w-32">Request Timeout:</span>
+                    <span>{(routerData.config.requestTimeout / 1000).toFixed(0)}s</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-neutral-600">
+                    <span className="text-neutral-400 w-32">Verbose Logs:</span>
+                    <span>{routerData.config.verbose ? 'Enabled' : 'Disabled'}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Available Models */}
+              {routerData?.status !== 'not_configured' && routerData && (
+                <div className="pt-4 border-t border-neutral-200">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Activity className="w-3.5 h-3.5 text-neutral-400" />
+                    <h4 className="text-xs font-semibold text-neutral-900">Available Models</h4>
+                  </div>
+                  {routerData.availableModels.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {routerData.availableModels.map((model) => (
+                        <span
+                          key={model}
+                          className="inline-flex items-center px-2 py-1 text-xs font-medium text-neutral-700 bg-neutral-100 rounded-md"
+                        >
+                          {model.replace('.gguf', '')}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-neutral-500">
+                      No models available. Start some servers to enable routing.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Not Configured Message */}
+              {routerData?.status === 'not_configured' && (
+                <div className="pt-2">
+                  <p className="text-sm text-neutral-600">
+                    Click "Start" to configure and launch the router service. The router will
+                    automatically discover and route requests to running servers.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Log Management Section */}
+      <div className="bg-white border border-neutral-200 rounded-lg mb-6 overflow-hidden">
+        <button
+          onClick={() => setShowLogManagementSection(!showLogManagementSection)}
+          className="w-full px-5 py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center">
+              <Database className="w-5 h-5 text-orange-600" />
+            </div>
+            <div className="text-left">
+              <h3 className="text-base font-semibold text-neutral-900">Log Management</h3>
+              <p className="text-sm text-neutral-500">
+                {formatSize(logsData?.summary.grandTotal || 0)} across {logsData?.servers.length || 0} servers
+              </p>
+            </div>
+          </div>
+          {showLogManagementSection ? (
             <ChevronUp className="w-5 h-5 text-neutral-400" />
           ) : (
             <ChevronDown className="w-5 h-5 text-neutral-400" />
           )}
         </button>
 
-        {showConfigSection && (
-          <div className="px-5 pb-5 border-t border-neutral-200">
+        {showLogManagementSection && (
+          <div className="border-t border-neutral-200">
+            {/* Summary Section */}
+            <div className="px-5 py-4 border-b border-neutral-200">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-xs text-blue-700 mb-1 font-medium">Total Size</p>
+                  <p className="text-lg font-semibold text-blue-900">
+                    {formatSize(logsData?.summary.grandTotal || 0)}
+                  </p>
+                </div>
+                <div className="text-center p-3 bg-neutral-50 rounded-lg">
+                  <p className="text-xs text-neutral-500 mb-1">Current</p>
+                  <p className="text-lg font-semibold text-neutral-900">
+                    {formatSize(logsData?.summary.totalCurrent || 0)}
+                  </p>
+                </div>
+                <div className="text-center p-3 bg-neutral-50 rounded-lg">
+                  <p className="text-xs text-neutral-500 mb-1">Archived</p>
+                  <p className="text-lg font-semibold text-neutral-900">
+                    {formatSize(logsData?.summary.totalArchived || 0)}
+                  </p>
+                </div>
+                <div className="text-center p-3 bg-neutral-50 rounded-lg">
+                  <p className="text-xs text-neutral-500 mb-1">Servers</p>
+                  <p className="text-lg font-semibold text-neutral-900">
+                    {logsData?.servers.length || 0}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => handleClearAll(false)}
+                  className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear All Current
+                </button>
+                <button
+                  onClick={() => handleClearAll(true)}
+                  className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 rounded-md hover:bg-red-100 transition-colors flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear All + Archived
+                </button>
+              </div>
+            </div>
+
+            {/* Automation Configuration Subsection */}
+            <div className="border-b border-neutral-200">
+              <button
+                onClick={() => setShowConfigSection(!showConfigSection)}
+                className="w-full px-5 py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <Settings className="w-5 h-5 text-neutral-600" />
+                  <div className="text-left">
+                    <h3 className="text-base font-semibold text-neutral-900">Automation Configuration</h3>
+                    <p className="text-sm text-neutral-500">Auto-rotation and auto-deletion settings</p>
+                  </div>
+                </div>
+                {showConfigSection ? (
+                  <ChevronUp className="w-5 h-5 text-neutral-400" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-neutral-400" />
+                )}
+              </button>
+
+              {showConfigSection && (
+                <div className="px-5 pb-5 border-t border-neutral-200">
             <div className="grid grid-cols-2 gap-6 mt-4">
               {/* Auto-Rotation */}
               <div className="space-y-4">
@@ -447,131 +732,131 @@ export function Admin() {
             )}
           </div>
         )}
-      </div>
-
-      {/* Server Logs Section */}
-      <div className="bg-white border border-neutral-200 rounded-lg mb-6 overflow-hidden">
-        <button
-          onClick={() => setShowServerLogsSection(!showServerLogsSection)}
-          className="w-full px-5 py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <Database className="w-5 h-5 text-neutral-600" />
-            <div className="text-left">
-              <h3 className="text-base font-semibold text-neutral-900">Server Logs</h3>
-              <p className="text-sm text-neutral-500">
-                {logsData?.servers.length || 0} servers • {formatSize(
-                  logsData?.servers.reduce((total, s) => total + s.currentTotal + s.archived.totalSize, 0) || 0
-                )}
-              </p>
             </div>
-          </div>
-          {showServerLogsSection ? (
-            <ChevronUp className="w-5 h-5 text-neutral-400" />
-          ) : (
-            <ChevronDown className="w-5 h-5 text-neutral-400" />
-          )}
-        </button>
 
-        {showServerLogsSection && (
-          <div className="border-t border-neutral-200">
-            {logsData?.servers && logsData.servers.length > 0 ? (
-              <div className="divide-y divide-neutral-200">
-                {logsData.servers.map((server: ServerLogInfo) => (
-                  <ServerLogRow
-                    key={server.serverId}
-                    server={server}
+            {/* Server Logs Subsection */}
+            <div className="border-b border-neutral-200">
+              <button
+                onClick={() => setShowServerLogsSection(!showServerLogsSection)}
+                className="w-full px-5 py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <Database className="w-5 h-5 text-neutral-600" />
+                  <div className="text-left">
+                    <h3 className="text-base font-semibold text-neutral-900">Server Logs</h3>
+                    <p className="text-sm text-neutral-500">
+                      {logsData?.servers.length || 0} servers • {formatSize(
+                        logsData?.servers.reduce((total, s) => total + s.currentTotal + s.archived.totalSize, 0) || 0
+                      )}
+                    </p>
+                  </div>
+                </div>
+                {showServerLogsSection ? (
+                  <ChevronUp className="w-5 h-5 text-neutral-400" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-neutral-400" />
+                )}
+              </button>
+
+              {showServerLogsSection && (
+                <div className="border-t border-neutral-200">
+                  {logsData?.servers && logsData.servers.length > 0 ? (
+                    <div className="divide-y divide-neutral-200">
+                      {logsData.servers.map((server: ServerLogInfo) => (
+                        <ServerLogRow
+                          key={server.serverId}
+                          server={server}
+                          onClear={handleClearLogs}
+                          onRotate={handleRotateLogs}
+                          onClearArchived={handleClearArchived}
+                          formatSize={formatSize}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="px-5 py-8 text-center">
+                      <p className="text-sm text-neutral-500">No servers configured</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Router Logs Subsection */}
+            <div className="border-b border-neutral-200">
+              <button
+                onClick={() => setShowRouterLogsSection(!showRouterLogsSection)}
+                className="w-full px-5 py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <RotateCw className="w-5 h-5 text-neutral-600" />
+                  <div className="text-left">
+                    <h3 className="text-base font-semibold text-neutral-900">Router Logs</h3>
+                    <p className="text-sm text-neutral-500">
+                      {formatSize((logsData?.router.currentTotal || 0) + (logsData?.router.archived.totalSize || 0))}
+                    </p>
+                  </div>
+                </div>
+                {showRouterLogsSection ? (
+                  <ChevronUp className="w-5 h-5 text-neutral-400" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-neutral-400" />
+                )}
+              </button>
+
+              {showRouterLogsSection && logsData?.router && (
+                <div className="border-t border-neutral-200">
+                  <ServiceLogCard
+                    title="Router Logs"
+                    type="router"
+                    log={logsData.router}
                     onClear={handleClearLogs}
                     onRotate={handleRotateLogs}
                     onClearArchived={handleClearArchived}
                     formatSize={formatSize}
                   />
-                ))}
-              </div>
-            ) : (
-              <div className="px-5 py-8 text-center">
-                <p className="text-sm text-neutral-500">No servers configured</p>
-              </div>
-            )}
+                </div>
+              )}
+            </div>
+
+            {/* Admin Logs Subsection */}
+            <div className="border-b border-neutral-200">
+              <button
+                onClick={() => setShowAdminLogsSection(!showAdminLogsSection)}
+                className="w-full px-5 py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <Settings className="w-5 h-5 text-neutral-600" />
+                  <div className="text-left">
+                    <h3 className="text-base font-semibold text-neutral-900">Admin Logs</h3>
+                    <p className="text-sm text-neutral-500">
+                      {formatSize((logsData?.admin.currentTotal || 0) + (logsData?.admin.archived.totalSize || 0))}
+                    </p>
+                  </div>
+                </div>
+                {showAdminLogsSection ? (
+                  <ChevronUp className="w-5 h-5 text-neutral-400" />
+                ) : (
+                  <ChevronDown className="w-5 h-5 text-neutral-400" />
+                )}
+              </button>
+
+              {showAdminLogsSection && logsData?.admin && (
+                <div className="border-t border-neutral-200">
+                  <ServiceLogCard
+                    title="Admin Logs"
+                    type="admin"
+                    log={logsData.admin}
+                    onClear={handleClearLogs}
+                    onRotate={handleRotateLogs}
+                    onClearArchived={handleClearArchived}
+                    formatSize={formatSize}
+                  />
+                </div>
+              )}
+            </div>
           </div>
         )}
-      </div>
-
-      {/* Router & Admin Logs (Side by Side) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-        {/* Router Logs Section */}
-        <div className="bg-white border border-neutral-200 rounded-lg overflow-hidden">
-          <button
-            onClick={() => setShowRouterLogsSection(!showRouterLogsSection)}
-            className="w-full px-5 py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <RotateCw className="w-5 h-5 text-neutral-600" />
-              <div className="text-left">
-                <h3 className="text-base font-semibold text-neutral-900">Router Logs</h3>
-                <p className="text-sm text-neutral-500">
-                  {formatSize((logsData?.router.currentTotal || 0) + (logsData?.router.archived.totalSize || 0))}
-                </p>
-              </div>
-            </div>
-            {showRouterLogsSection ? (
-              <ChevronUp className="w-5 h-5 text-neutral-400" />
-            ) : (
-              <ChevronDown className="w-5 h-5 text-neutral-400" />
-            )}
-          </button>
-
-          {showRouterLogsSection && logsData?.router && (
-            <div className="border-t border-neutral-200 px-5 py-4">
-              <ServiceLogCard
-                title="Router Logs"
-                type="router"
-                log={logsData.router}
-                onClear={handleClearLogs}
-                onRotate={handleRotateLogs}
-                onClearArchived={handleClearArchived}
-                formatSize={formatSize}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Admin Logs Section */}
-        <div className="bg-white border border-neutral-200 rounded-lg overflow-hidden">
-          <button
-            onClick={() => setShowAdminLogsSection(!showAdminLogsSection)}
-            className="w-full px-5 py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <Settings className="w-5 h-5 text-neutral-600" />
-              <div className="text-left">
-                <h3 className="text-base font-semibold text-neutral-900">Admin Logs</h3>
-                <p className="text-sm text-neutral-500">
-                  {formatSize((logsData?.admin.currentTotal || 0) + (logsData?.admin.archived.totalSize || 0))}
-                </p>
-              </div>
-            </div>
-            {showAdminLogsSection ? (
-              <ChevronUp className="w-5 h-5 text-neutral-400" />
-            ) : (
-              <ChevronDown className="w-5 h-5 text-neutral-400" />
-            )}
-          </button>
-
-          {showAdminLogsSection && logsData?.admin && (
-            <div className="border-t border-neutral-200 px-5 py-4">
-              <ServiceLogCard
-                title="Admin Logs"
-                type="admin"
-                log={logsData.admin}
-                onClear={handleClearLogs}
-                onRotate={handleRotateLogs}
-                onClearArchived={handleClearArchived}
-                formatSize={formatSize}
-              />
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Confirmation Modal */}
@@ -597,6 +882,13 @@ export function Admin() {
           </div>
         </div>
       )}
+
+      {/* Router Config Modal */}
+      <RouterConfigModal
+        router={routerData || null}
+        isOpen={showRouterConfigModal}
+        onClose={() => setShowRouterConfigModal(false)}
+      />
     </div>
   );
 }

@@ -71,6 +71,7 @@ export async function createMultiServerMonitorUI(
   let detailSubView: DetailSubView = "status"; // Track sub-view within detail view
   let logsLastUpdated: Date | null = null;
   let logsRefreshInterval: NodeJS.Timeout | null = null;
+  let logType: 'stdout' | 'stderr' = 'stdout'; // Track which log type to display (activity/system)
 
   // Keyboard manager for centralized keyboard event handling
   const keyboardManager = new KeyboardManager(screen);
@@ -598,7 +599,7 @@ export async function createMultiServerMonitorUI(
     return content;
   }
 
-  // Render logs view for selected server (HTTP logs only)
+  // Render logs view for selected server
   async function renderServerLogs(): Promise<string> {
     const server = servers[selectedServerIndex];
     const termWidth = (screen.width as number) || 80;
@@ -609,22 +610,25 @@ export async function createMultiServerMonitorUI(
     const headerText = server.alias
       ? `${server.id} (${server.alias})`
       : server.id;
-    content += `{bold}{blue-fg}═══ ${headerText} - HTTP Logs{/blue-fg}{/bold}\n`;
+    const logTypeLabel = logType === 'stdout' ? 'Activity' : 'System';
+    content += `{bold}{blue-fg}═══ ${headerText} - ${logTypeLabel} Logs{/blue-fg}{/bold}\n`;
 
     // Show refresh status
     const refreshStatus = logsRefreshInterval ? "ON" : "OFF";
     const refreshColor = logsRefreshInterval ? "green" : "gray";
     content += `{gray-fg}Auto-refresh: {${refreshColor}-fg}${refreshStatus}{/${refreshColor}-fg}{/gray-fg}\n\n`;
 
-    const logPath = server.httpLogPath; // Read from dedicated HTTP log file
+    const logPath = logType === 'stdout' ? server.httpLogPath : server.stderrPath;
 
     // Check if log exists
     if (!(await fileExists(logPath))) {
-      content += "{yellow-fg}No HTTP logs found{/yellow-fg}\n";
-      content += `The server may not have processed any requests yet.\n`;
+      content += `{yellow-fg}No ${logTypeLabel.toLowerCase()} logs found{/yellow-fg}\n`;
+      if (logType === 'stdout') {
+        content += `The server may not have processed any requests yet.\n`;
+      }
       content += `Log file: ${logPath}\n\n`;
       content += divider + "\n";
-      content += "{gray-fg}[R]efresh [ESC] Back{/gray-fg}";
+      content += "{gray-fg}[T]oggle activity/system [R]efresh [ESC] Back{/gray-fg}";
       return content;
     }
 
@@ -633,39 +637,77 @@ export async function createMultiServerMonitorUI(
     content += `File: ${logPath}\n`;
     content += `Size: ${formatFileSize(size)}\n\n`;
 
-    // Show HTTP requests (already in compact format from real-time parsing)
+    // Show logs
     try {
       const { execSync } = require("child_process");
-      // Read entire HTTP log file (pre-parsed compact format)
-      const output = execSync(`cat "${logPath}"`, { encoding: "utf-8" });
-      const lines = output.split("\n").filter((l: string) => l.trim());
 
       content += divider + "\n";
 
-      if (lines.length === 0) {
-        content += "{yellow-fg}No HTTP requests logged yet{/yellow-fg}\n";
-        content +=
-          "{gray-fg}Send requests to the server to see them here{/gray-fg}\n";
-      } else {
-        // Filter out health check requests
-        const parser = new LogParser();
-        const filteredLines = lines.filter(
-          (line: string) => !parser.isHealthCheckRequest(line),
-        );
+      if (logType === 'stdout') {
+        // Activity logs: Read entire HTTP log file (pre-parsed compact format)
+        const output = execSync(`cat "${logPath}"`, { encoding: "utf-8" });
+        const lines = output.split("\n").filter((l: string) => l.trim());
 
-        if (filteredLines.length === 0) {
-          content += "{gray-fg}No requests logged yet{/gray-fg}\n";
+        if (lines.length === 0) {
+          content += "{yellow-fg}No HTTP requests logged yet{/yellow-fg}\n";
+          content +=
+            "{gray-fg}Send requests to the server to see them here{/gray-fg}\n";
         } else {
-          // Show last 30 lines, truncate to fit terminal width
-          const limitedLines = filteredLines.slice(-30);
-          const maxWidth = termWidth - 4;
+          // Filter out health check requests
+          const parser = new LogParser();
+          const filteredLines = lines.filter(
+            (line: string) => !parser.isHealthCheckRequest(line),
+          );
 
-          for (const line of limitedLines) {
-            if (line.length > maxWidth) {
-              content += line.substring(0, maxWidth - 3) + "...\n";
-            } else {
-              content += line + "\n";
+          if (filteredLines.length === 0) {
+            content += "{gray-fg}No requests logged yet{/gray-fg}\n";
+          } else {
+            // Show last 30 lines, truncate to fit terminal width
+            const limitedLines = filteredLines.slice(-30);
+            const maxWidth = termWidth - 4;
+
+            for (const line of limitedLines) {
+              if (line.length > maxWidth) {
+                content += line.substring(0, maxWidth - 3) + "...\n";
+              } else {
+                content += line + "\n";
+              }
             }
+          }
+        }
+      } else {
+        // System logs: Show last 30 lines of stderr
+        const output = execSync(`tail -n 30 "${logPath}"`, { encoding: "utf-8" });
+        const lines = output.split("\n");
+        const maxWidth = termWidth - 4;
+
+        for (const line of lines) {
+          if (!line) continue;
+
+          // Remove ANSI color codes to calculate visible length
+          const visibleLine = line.replace(/\x1b\[[0-9;]*m/g, '');
+
+          if (visibleLine.length > maxWidth) {
+            // Truncate and add ellipsis
+            let visibleLen = 0;
+            let truncated = '';
+            for (let i = 0; i < line.length && visibleLen < maxWidth - 3; i++) {
+              truncated += line[i];
+              // Only count visible characters
+              if (line[i] !== '\x1b' && !line.slice(i).match(/^\x1b\[[0-9;]*m/)) {
+                visibleLen++;
+              } else if (line.slice(i).match(/^\x1b\[[0-9;]*m/)) {
+                // Skip the rest of the ANSI code
+                const match = line.slice(i).match(/^\x1b\[[0-9;]*m/);
+                if (match) {
+                  truncated += match[0].slice(1);
+                  i += match[0].length - 1;
+                }
+              }
+            }
+            content += truncated + '...\n';
+          } else {
+            content += line + '\n';
           }
         }
       }
@@ -678,7 +720,7 @@ export async function createMultiServerMonitorUI(
     const toggleRefreshText = logsRefreshInterval
       ? "[F] Pause auto-refresh"
       : "[F] Resume auto-refresh";
-    content += `{gray-fg}[R]efresh ${toggleRefreshText} [ESC] Back{/gray-fg}`;
+    content += `{gray-fg}[T]oggle activity/system [R]efresh ${toggleRefreshText} [ESC] Back{/gray-fg}`;
 
     // Update last updated time
     logsLastUpdated = new Date();
@@ -1781,6 +1823,8 @@ export async function createMultiServerMonitorUI(
         handlers['L'] = keyHandlers.logs;
       } else if (detailSubView === 'logs') {
         // Logs view keys
+        handlers['t'] = keyHandlers.toggleLogType;
+        handlers['T'] = keyHandlers.toggleLogType;
         handlers['r'] = keyHandlers.refreshLogs;
         handlers['R'] = keyHandlers.refreshLogs;
         handlers['f'] = keyHandlers.toggleLogsRefresh;
@@ -1845,6 +1889,7 @@ export async function createMultiServerMonitorUI(
       if (viewMode !== "detail" || inHistoricalView) return;
       if (detailSubView === "status") {
         detailSubView = "logs";
+        logType = 'stdout'; // Reset to activity logs when entering logs view
         updateKeyboardContext(); // Update handlers for new sub-view
         render();
       }
@@ -1861,6 +1906,12 @@ export async function createMultiServerMonitorUI(
         } else {
           startLogsAutoRefresh();
         }
+        render();
+      }
+    },
+    toggleLogType: () => {
+      if (viewMode === "detail" && detailSubView === "logs") {
+        logType = logType === 'stdout' ? 'stderr' : 'stdout';
         render();
       }
     },

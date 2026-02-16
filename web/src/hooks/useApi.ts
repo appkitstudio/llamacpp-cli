@@ -277,6 +277,15 @@ export function useAdminLogs() {
   });
 }
 
+export function useAdminServiceLogs(lines = 500) {
+  return useQuery({
+    queryKey: ['adminServiceLogs', lines],
+    queryFn: () => api.getAdminServiceLogs('both', lines),
+    refetchInterval: 2000, // Auto-refresh every 2s
+    placeholderData: keepPreviousData, // Keep previous data during refetch to prevent flash
+  });
+}
+
 export function useClearLogs() {
   const queryClient = useQueryClient();
 

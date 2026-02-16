@@ -233,6 +233,12 @@ class ApiClient {
     return this.request<AdminLogsResponse>('/api/admin/logs');
   }
 
+  async getAdminServiceLogs(type: 'activity' | 'system' | 'both' = 'both', lines = 100) {
+    return this.request<{ stdout: string; stderr: string }>(
+      `/api/admin/service-logs?type=${type}&lines=${lines}`
+    );
+  }
+
   async clearLogs(data: ClearLogsRequest) {
     return this.request<{ success: boolean; message: string }>(
       '/api/admin/logs/clear',

@@ -260,6 +260,8 @@ class AdminServer {
         await this.handleClearAllLogs(req, res);
       } else if (pathname === '/api/admin/logs/config' && method === 'PATCH') {
         await this.handleUpdateLogConfig(req, res);
+      } else if (pathname === '/api/admin/service-logs' && method === 'GET') {
+        await this.handleGetAdminServiceLogs(req, res, url);
       } else {
         // API endpoint not found
         this.sendError(res, 404, 'Not Found', `Unknown endpoint: ${method} ${pathname}`, 'NOT_FOUND');
@@ -1094,6 +1096,37 @@ class AdminServer {
       this.sendJson(res, 200, { stdout, stderr });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_LOGS_ERROR');
+    }
+  }
+
+  /**
+   * Get admin service logs content
+   */
+  private async handleGetAdminServiceLogs(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
+    try {
+      const type = url.searchParams.get('type') || 'both'; // activity, system, or both
+      const lines = parseInt(url.searchParams.get('lines') || '100');
+
+      let stdout = '';
+      let stderr = '';
+
+      // Activity logs (stdout)
+      if ((type === 'activity' || type === 'both') && (await fileExists(this.config.stdoutPath))) {
+        const content = await fs.readFile(this.config.stdoutPath, 'utf-8');
+        const logLines = content.split('\n');
+        stdout = logLines.slice(-lines).join('\n');
+      }
+
+      // System logs (stderr)
+      if ((type === 'system' || type === 'both') && (await fileExists(this.config.stderrPath))) {
+        const content = await fs.readFile(this.config.stderrPath, 'utf-8');
+        const logLines = content.split('\n');
+        stderr = logLines.slice(-lines).join('\n');
+      }
+
+      this.sendJson(res, 200, { stdout, stderr });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ADMIN_SERVICE_LOGS_ERROR');
     }
   }
 

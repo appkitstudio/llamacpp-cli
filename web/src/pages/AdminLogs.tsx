@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, ChevronDown } from 'lucide-react';
-import { useRouterLogs, useRouter } from '../hooks/useApi';
+import { useAdminServiceLogs } from '../hooks/useApi';
 import { renderAnsiLine, stripAnsiCodes } from '../utils/ansi-parser';
 
 type LogType = 'activity' | 'system';
 type LogSort = 'newest' | 'oldest';
 
-export function RouterLogs() {
+export function AdminLogs() {
   const navigate = useNavigate();
 
   const [logType, setLogType] = useState<LogType>('activity');
@@ -18,8 +18,7 @@ export function RouterLogs() {
   const logContainerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const { data: routerData } = useRouter();
-  const { data: logsData, isLoading: logsLoading } = useRouterLogs(50000);
+  const { data: logsData, isLoading: logsLoading } = useAdminServiceLogs(50000);
 
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
@@ -42,16 +41,9 @@ export function RouterLogs() {
   const getFilteredLogs = (): string[] => {
     if (!logsData) return [];
 
-    // Debug: log the data lengths
-    console.log('[RouterLogs] Data lengths:', {
-      stdout: logsData.stdout?.length || 0,
-      stderr: logsData.stderr?.length || 0,
-      logType,
-    });
-
     let logs: string;
     if (logType === 'activity') {
-      // Activity = stdout (router activity logs)
+      // Activity = stdout (admin activity logs)
       logs = logsData.stdout || '';
     } else {
       // System = stderr (system/diagnostic logs)
@@ -62,13 +54,6 @@ export function RouterLogs() {
       // Remove lines that are empty or only contain ANSI codes
       const stripped = stripAnsiCodes(line).trim();
       return stripped.length > 0;
-    });
-
-    console.log('[RouterLogs] After filtering:', {
-      logType,
-      totalLines: logs.split('\n').length,
-      filteredLines: lines.length,
-      firstLine: lines[0]?.substring(0, 100),
     });
 
     // Apply sort
@@ -87,26 +72,17 @@ export function RouterLogs() {
       <div className="flex items-center px-4 py-3 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate('/router')}
+            onClick={() => navigate('/admin')}
             className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-lg font-semibold text-gray-900">Router Logs</h1>
-            <p className="text-sm text-gray-500">Unified model routing service</p>
+            <h1 className="text-lg font-semibold text-gray-900">Admin Logs</h1>
+            <p className="text-sm text-gray-500">Admin API service logs</p>
           </div>
         </div>
       </div>
-
-      {/* Verbosity Warning */}
-      {routerData?.config && !routerData.config.verbose && (
-        <div className="px-4 py-2 bg-yellow-50 border-b border-yellow-200">
-          <p className="text-sm text-yellow-800">
-            ℹ️ Verbose logging is disabled. Activity logs will show basic format without detailed timing information.
-          </p>
-        </div>
-      )}
 
       {/* Filter Bar */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
@@ -186,7 +162,7 @@ export function RouterLogs() {
         ) : filteredLogs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
             <p>No logs found</p>
-            <p className="text-sm mt-1">Router may not be running or has no activity yet</p>
+            <p className="text-sm mt-1">Admin service may not be running or has no activity yet</p>
           </div>
         ) : (
           <div className="space-y-0.5">

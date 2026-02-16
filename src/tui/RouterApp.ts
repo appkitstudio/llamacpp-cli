@@ -327,7 +327,7 @@ export async function createRouterUI(
       content += '{yellow-fg}No logs found{/yellow-fg}\n';
       content += `Log file: ${logPath}\n\n`;
       content += divider + '\n';
-      content += '{gray-fg}[T]oggle stdout/stderr [R]efresh [ESC] Back{/gray-fg}';
+      content += '{gray-fg}[T]oggle activity/system [R]efresh [ESC] Back{/gray-fg}';
       contentBox.setContent(content);
       screen.render();
       return;
@@ -386,7 +386,7 @@ export async function createRouterUI(
     }
 
     const toggleRefreshText = state.logsRefreshInterval ? '[F] Pause auto-refresh' : '[F] Resume auto-refresh';
-    content += `{gray-fg}[T]oggle stdout/stderr [R]efresh ${toggleRefreshText} [ESC] Back{/gray-fg}`;
+    content += `{gray-fg}[T]oggle activity/system [R]efresh ${toggleRefreshText} [ESC] Back{/gray-fg}`;
 
     // Update last updated time
     state.logsLastUpdated = new Date();

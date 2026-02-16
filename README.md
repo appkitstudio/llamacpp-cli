@@ -173,17 +173,21 @@ llamacpp
 
 ![Server Monitoring TUI](https://raw.githubusercontent.com/appkitstudio/llamacpp-cli/main/docs/images/monitor-detail.png)
 
-### Overview
+### Main Features
 
-The TUI provides a comprehensive interface for:
-- **Monitoring** - Real-time metrics for all servers (GPU, CPU, memory, token generation)
-- **Server Management** - Create, start, stop, remove, and configure servers
-- **Model Management** - Browse, search, download, and delete models
-- **Historical Metrics** - View time-series charts of past performance
+**Dashboard** - Monitor all servers at a glance with real-time metrics (GPU, CPU, memory, token speed)
 
-### Multi-Server Dashboard
+**Server Management** - Create, start, stop, configure, and remove servers with inline editors
 
-The main view shows all your servers at a glance:
+**Model Management** (press `M`) - Browse local models, search/download from HuggingFace, delete with cascade
+
+**Router Management** (press `R`) - Control router service, view configuration, access activity/system logs
+
+**Historical Charts** (press `H`) - View time-series graphs with Recent (1-3min) or Hour (60min) views
+
+**Logs** (press `L`) - Toggle between Activity (HTTP) and System (diagnostics) logs with auto-refresh
+
+### Dashboard View
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -193,173 +197,14 @@ The main view shows all your servers at a glance:
 │ Servers (3 running, 0 stopped)                          │
 │   │ Server ID      │ Port │ Status │ Slots │ tok/s    │
 │───┼────────────────┼──────┼────────┼───────┼──────────┤
-│ ► │ llama-3-2-3b   │ 9000 │ ● RUN  │ 2/4   │ 245      │  (highlighted)
+│ ► │ llama-3-2-3b   │ 9000 │ ● RUN  │ 2/4   │ 245      │
 │   │ qwen2-7b       │ 9001 │ ● RUN  │ 1/4   │ 198      │
 │   │ llama-3-1-8b   │ 9002 │ ○ IDLE │ 0/4   │ -        │
 └─────────────────────────────────────────────────────────┘
-↑/↓ Navigate | Enter for details | [N]ew [M]odels [H]istory [Q]uit
+↑/↓ Navigate | Enter for details | [N]ew [M]odels [R]outer [H]istory [Q]uit
 ```
 
-**Features:**
-- System resource overview (GPU, CPU, memory)
-- List of all servers (running and stopped)
-- Real-time status updates every 2 seconds
-- Color-coded status indicators
-- Navigate with arrow keys or vim keys (k/j)
-
-### Single-Server Detail View
-
-Press `Enter` on any server to see detailed information:
-
-**Running servers show:**
-- Server information (status, uptime, model name, endpoint)
-- Request metrics (active/idle slots, prompt speed, generation speed)
-- Active slots detail (per-slot token generation rates)
-- System resources (GPU/CPU/ANE utilization, memory usage)
-
-**Stopped servers show:**
-- Server configuration (threads, context, GPU layers)
-- Last activity timestamps
-- Quick action commands (start, config, logs)
-
-### Models Management
-
-Press `M` from the main view to access Models Management.
-
-**Features:**
-- Browse all installed models with size and modified date
-- View which servers are using each model
-- Delete models with cascade option (removes associated servers)
-- Search HuggingFace for new models
-- Download models with real-time progress tracking
-
-**Models View:**
-- View all GGUF files in scrollable table
-- Color-coded server usage (green = safe to delete, yellow = in use)
-- Delete selected model with `Enter` or `D` key
-- Confirmation dialog with cascade warning
-
-**Search View** (press `S` from Models view):
-- Search HuggingFace models by text input
-- Browse results with downloads, likes, and file counts
-- Expand model to show available GGUF files
-- Download with real-time progress, speed, and ETA
-- Cancel download with `ESC` (cleans up partial files)
-
-### Server Operations
-
-**Create Server** (press `N` from main view):
-1. Select model from list (shows existing servers per model)
-2. Edit configuration (threads, context size, GPU layers, port)
-3. Review smart defaults based on model size
-4. Create and automatically start server
-5. Return to main view with new server visible
-
-**Start/Stop Server** (press `S` from detail view):
-- Toggle server state with progress modal
-- Stays in detail view after operation
-- Shows updated status immediately
-
-**Remove Server** (press `R` from detail view):
-- Confirmation dialog with option to delete model file
-- Warns if other servers use the same model
-- Cascade deletion removes all associated data
-- Returns to main view after deletion
-
-**Configure Server** (press `C` from detail view):
-- Edit all server parameters inline
-- Modal dialogs for different field types
-- Model migration support (handles server ID changes)
-- Automatic restart prompts for running servers
-- Port conflict detection and validation
-
-### Historical Monitoring
-
-Press `H` from any view to see historical time-series charts.
-
-**Single-Server Historical View:**
-- Token generation speed over time
-- GPU usage (%) with avg/max/min stats
-- CPU usage (%) with avg/max/min
-- Memory usage (%) with avg/max/min
-- Auto-refresh every 3 seconds
-
-**Multi-Server Historical View:**
-- Aggregated metrics across all servers
-- Total token generation speed (sum)
-- System GPU usage (average)
-- Total CPU usage (sum of per-process)
-- Total memory usage (sum in GB)
-
-**View Modes** (toggle with `H` key):
-
-- **Recent View (default):**
-  - Shows last 40-80 samples (~1-3 minutes)
-  - Raw data with no downsampling - perfect accuracy
-  - Best for: "What's happening right now?"
-
-- **Hour View:**
-  - Shows all ~1,800 samples from last hour
-  - Absolute time-aligned downsampling (30:1 ratio)
-  - Bucket max for GPU/CPU/token speed (preserves peaks)
-  - Bucket mean for memory (shows average)
-  - Chart stays perfectly stable as data streams in
-  - Best for: "What happened over the last hour?"
-
-**Data Collection:**
-- Automatic during monitoring (piggyback on polling loop)
-- Stored in `~/.llamacpp/history/<server-id>.json` per server
-- Retention: Last 24 hours (circular buffer, auto-prune)
-- File size: ~21 MB per server for 24h @ 2s interval
-
-### Keyboard Shortcuts
-
-**List View (Multi-Server):**
-- `↑/↓` or `k/j` - Navigate server list
-- `Enter` - View details for selected server
-- `N` - Create new server
-- `M` - Switch to Models Management
-- `H` - View historical metrics (all servers)
-- `Q` / `Ctrl-C` - Quit TUI
-
-**Detail View (Single-Server):**
-- `S` - Start/Stop server (toggles based on status)
-- `C` - Open configuration screen
-- `R` - Remove server (with confirmation)
-- `H` - View historical metrics (this server)
-- `L` - View server logs
-- `ESC` - Back to list view
-- `Q` / `Ctrl-C` - Quit TUI
-
-**Models View:**
-- `↑/↓` or `k/j` - Navigate model list
-- `Enter` or `D` - Delete selected model
-- `S` - Open search view
-- `R` - Refresh model list
-- `ESC` - Back to main view
-- `Q` - Quit immediately
-
-**Search View:**
-- `/` or `I` - Focus search input
-- `Enter` (in input) - Execute search
-- `↑/↓` or `k/j` - Navigate results or files
-- `Enter` (on result) - Show GGUF files for model
-- `Enter` (on file) - Download/install model
-- `R` - Refresh results (re-execute search)
-- `ESC` - Back to models view (or results list if viewing files)
-- `Q` - Quit immediately
-
-**Historical View:**
-- `H` - Toggle between Recent/Hour view
-- `ESC` - Return to live monitoring
-- `Q` - Quit immediately
-
-**Configuration Screen:**
-- `↑/↓` or `k/j` - Navigate fields
-- `Enter` - Open modal for selected field
-- `S` - Save changes (prompts for restart if running)
-- `ESC` - Cancel (prompts if unsaved changes)
-- `Q` - Quit immediately
+Navigate with arrow keys or vim keys (k/j). Press `Enter` on any server to see detailed metrics, active slots, and resource usage. All keyboard shortcuts are shown in the footer of each view.
 
 ### Optional: GPU/CPU Metrics
 

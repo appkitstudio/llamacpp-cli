@@ -419,6 +419,15 @@ export function ServerLogs() {
         </div>
       </div>
 
+      {/* Verbosity Warning */}
+      {!server.verbose && (
+        <div className="px-4 py-2 bg-yellow-50 border-b border-yellow-200">
+          <p className="text-sm text-yellow-800">
+            ℹ️ Verbose logging is disabled. Activity logs will show basic HTTP format without detailed request/response data.
+          </p>
+        </div>
+      )}
+
       {/* Filter Bar */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
         {/* View Mode Toggle */}
@@ -545,13 +554,9 @@ export function ServerLogs() {
       </div>
 
       {/* Footer with stats */}
-      <div className="flex items-center justify-between px-4 py-2 border-t border-gray-200 bg-gray-50 text-sm text-gray-500">
+      <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 text-sm text-gray-500">
         <span>
           {filteredLogs.length} {filteredLogs.length === 1 ? 'line' : 'lines'}
-        </span>
-        <span className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${autoScroll ? 'bg-green-500' : 'bg-gray-300'}`} />
-          {autoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}
         </span>
       </div>
     </div>
