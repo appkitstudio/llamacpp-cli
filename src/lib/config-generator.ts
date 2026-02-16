@@ -82,7 +82,7 @@ export class ConfigGenerator {
     const id = sanitizeModelName(modelName);
 
     // Generate paths
-    const label = `com.llama.${id}`;
+    const label = `studio.appkit.llamacpp-cli.${id}`;
     const plistPath = path.join(getLaunchAgentsDir(), `${label}.plist`);
     const logsDir = getLogsDir();
     const stdoutPath = path.join(logsDir, `${id}.stdout`);

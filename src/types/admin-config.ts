@@ -28,7 +28,7 @@ export interface AdminConfig {
 
   // launchctl metadata
   plistPath: string;
-  label: 'com.llama.admin';
+  label: 'studio.appkit.llamacpp-cli.admin';
   stdoutPath: string;
   stderrPath: string;
 

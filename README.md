@@ -791,7 +791,7 @@ Web UI:     http://localhost:9200
 
 Configuration:
   Config:   ~/.llamacpp/admin.json
-  Plist:    ~/Library/LaunchAgents/com.llama.admin.plist
+  Plist:    ~/Library/LaunchAgents/studio.appkit.llamacpp-cli.admin.plist
   Logs:     ~/.llamacpp/logs/admin.stdout  # Activity logs
             ~/.llamacpp/logs/admin.stderr  # System logs
 
@@ -1311,7 +1311,7 @@ llamacpp-cli uses macOS launchctl to manage llama-server processes:
 3. Starts the server with `launchctl start`
 4. Monitors status via `launchctl list` and `lsof`
 
-Services are named `com.llama.<model-id>`.
+Services are named `studio.appkit.llamacpp-cli.<model-id>`.
 
 **Auto-Restart Behavior:**
 - When you **start** a server, it's registered with launchd and will auto-restart on crash
@@ -1319,8 +1319,8 @@ Services are named `com.llama.<model-id>`.
 - Crashed servers will automatically restart (when loaded)
 
 **Router and Admin Services:**
-- The **Router** (`com.llama.router`) provides a unified OpenAI-compatible endpoint for all models
-- The **Admin** (`com.llama.admin`) provides REST API + web UI for remote management
+- The **Router** (`studio.appkit.llamacpp-cli.router`) provides a unified OpenAI-compatible endpoint for all models
+- The **Admin** (`studio.appkit.llamacpp-cli.admin`) provides REST API + web UI for remote management
 - Both run as launchctl services similar to individual model servers
 
 ## Known Limitations
@@ -1379,6 +1379,36 @@ llamacpp admin status  # Shows API key
 Or regenerate a new one:
 ```bash
 llamacpp admin config --regenerate-key --restart
+```
+
+### `llamacpp migrate-labels`
+Migrate service labels from old format (`com.llama.*`) to new format (`studio.appkit.llamacpp-cli.*`).
+
+> **Note:** This command is automatically triggered on first run after upgrading from versions prior to v2.1.0.
+
+```bash
+# Show what would be migrated without making changes
+llamacpp migrate-labels --dry-run
+
+# Perform migration (with confirmation prompt)
+llamacpp migrate-labels
+
+# Skip confirmation prompt
+llamacpp migrate-labels --force
+```
+
+**What it does:**
+1. Creates a backup of all current configurations
+2. Stops running services
+3. Updates service labels and plist files
+4. Restarts services that were running
+5. Creates a marker file to prevent re-migration
+
+**Troubleshooting:**
+If migration fails, configurations are automatically rolled back. You can also manually rollback:
+
+```bash
+llamacpp rollback-labels
 ```
 
 ## Development
@@ -1496,7 +1526,7 @@ Contributions are welcome! If you'd like to contribute:
 **CLI Development:**
 - Use `npm run dev -- <command>` to test commands without building
 - Check logs with `llamacpp server logs <server> --errors` when debugging
-- Test launchctl integration with `launchctl list | grep com.llama`
+- Test launchctl integration with `launchctl list | grep studio.appkit.llamacpp-cli`
 - All server configs are in `~/.llamacpp/servers/`
 - Test interactive chat with `npm run dev -- server run <model>`
 

@@ -14,7 +14,7 @@ export interface RouterConfig {
 
   // launchctl metadata
   plistPath: string;
-  label: 'com.llama.router';
+  label: 'studio.appkit.llamacpp-cli.router';
   stdoutPath: string;
   stderrPath: string;
 

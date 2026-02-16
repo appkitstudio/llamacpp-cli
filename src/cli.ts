@@ -34,14 +34,53 @@ import { adminLogsCommand } from './commands/admin/logs';
 import { adminLogConfigCommand } from './commands/admin/log-config';
 import { launchClaude } from './commands/launch/claude';
 import { serverWrapperCommand } from './commands/internal/server-wrapper';
+import { migrateLabelsCommand, rollbackLabelsCommand } from './commands/migrate-labels';
+import { labelMigration } from './lib/label-migration';
 import packageJson from '../package.json';
 
 const program = new Command();
+
+/**
+ * Pre-command hook: Check if label migration is needed
+ * Runs before any command except migration commands themselves
+ */
+async function checkMigrationNeeded(): Promise<void> {
+  const commandName = process.argv[2];
+
+  // Skip migration check for migration commands themselves
+  if (commandName === 'migrate-labels' || commandName === 'rollback-labels') {
+    return;
+  }
+
+  // Skip for help and version flags
+  if (commandName === '--help' || commandName === '-h' || commandName === '--version' || commandName === '-v') {
+    return;
+  }
+
+  try {
+    const needsMigration = await labelMigration.needsMigration();
+    if (needsMigration) {
+      const oldLabels = await labelMigration.detectOldLabels();
+      console.log(chalk.cyan('\n🔄 Service Label Migration Required\n'));
+      console.log(chalk.yellow(`Found ${oldLabels.length} service(s) using old label format (com.llama.*).\n`));
+      console.log(chalk.gray('The new label format (studio.appkit.llamacpp-cli.*) improves clarity'));
+      console.log(chalk.gray('and reduces security false positives.\n'));
+      console.log(chalk.cyan('Run the following command to migrate:\n'));
+      console.log(chalk.white('  llamacpp migrate-labels\n'));
+      process.exit(0);
+    }
+  } catch (error) {
+    // Silently ignore migration check errors - don't block user commands
+  }
+}
 
 program
   .name('llamacpp')
   .description('CLI tool to manage local llama.cpp servers on macOS')
   .version(packageJson.version, '-v, --version', 'Output the version number')
+  .hook('preAction', async () => {
+    await checkMigrationNeeded();
+  })
   .action(async () => {
     // Default action: launch TUI when no command provided
     try {
@@ -563,6 +602,33 @@ launch
       const claudeArgs: string[] = args || [];
 
       await launchClaude({ ...options, claudeArgs });
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Migration commands
+program
+  .command('migrate-labels')
+  .description('Migrate service labels from com.llama.* to studio.appkit.llamacpp-cli.*')
+  .option('--dry-run', 'Show what would be migrated without making changes')
+  .option('--force', 'Skip confirmation prompt')
+  .action(async (options) => {
+    try {
+      await migrateLabelsCommand(options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('rollback-labels')
+  .description('Rollback label migration to previous state (uses backup)')
+  .action(async () => {
+    try {
+      await rollbackLabelsCommand();
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);

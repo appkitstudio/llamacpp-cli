@@ -27,7 +27,7 @@ export interface ServerConfig {
 
   // launchctl metadata
   plistPath: string;       // Full path to plist file
-  label: string;           // launchctl service label (com.llama.<id>)
+  label: string;           // launchctl service label (studio.appkit.llamacpp-cli.<id>)
 
   // Logging
   stdoutPath: string;      // Path to stdout log
