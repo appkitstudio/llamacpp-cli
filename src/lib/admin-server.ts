@@ -172,6 +172,12 @@ class AdminServer {
         return;
       }
 
+      // Proxy chat requests to router (production mode)
+      if (pathname.startsWith('/v1/')) {
+        await this.handleRouterProxy(req, res, pathname);
+        return;
+      }
+
       // Static files (no auth required)
       if (!pathname.startsWith('/api/')) {
         await this.handleStaticFile(req, res, pathname);
@@ -287,6 +293,62 @@ class AdminServer {
   }
 
   /**
+   * Proxy router requests (production mode)
+   */
+  private async handleRouterProxy(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
+    try {
+      // Check if router is running
+      const routerStatus = await routerManager.getStatus();
+      if (!routerStatus || !routerStatus.status.isRunning) {
+        this.sendError(res, 503, 'Service Unavailable', 'Router is not running. Start router to use chat.', 'ROUTER_NOT_RUNNING');
+        return;
+      }
+
+      const { config } = routerStatus;
+      const routerHost = config.host || '127.0.0.1';
+      const routerPort = config.port || 9100;
+
+      // Parse URL to get query string
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      const fullPath = pathname + url.search;
+
+      // Create proxy request
+      const options = {
+        hostname: routerHost,
+        port: routerPort,
+        path: fullPath,
+        method: req.method,
+        headers: {
+          ...req.headers,
+          host: `${routerHost}:${routerPort}`,
+        },
+      };
+
+      const proxyReq = http.request(options, (proxyRes) => {
+        // Copy status and headers
+        res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+        // Pipe response (supports streaming SSE)
+        proxyRes.pipe(res);
+      });
+
+      proxyReq.on('error', (err) => {
+        console.error('[Admin] Router proxy error:', err);
+        if (!res.headersSent) {
+          this.sendError(res, 502, 'Bad Gateway', `Router connection failed: ${err.message}`, 'ROUTER_PROXY_ERROR');
+        }
+      });
+
+      // Pipe request body
+      req.pipe(proxyReq);
+    } catch (error) {
+      console.error('[Admin] Error proxying to router:', error);
+      if (!res.headersSent) {
+        this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_PROXY_ERROR');
+      }
+    }
+  }
+
+  /**
    * List all servers
    */
   private async handleListServers(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -343,58 +405,6 @@ class AdminServer {
     }
 
     try {
-      // Resolve model path
-      const modelPath = await modelScanner.resolveModelPath(data.model);
-      if (!modelPath) {
-        this.sendError(res, 404, 'Not Found', `Model not found: ${data.model}`, 'MODEL_NOT_FOUND');
-        return;
-      }
-
-      const modelName = path.basename(modelPath);
-
-      // Check if server already exists
-      const existingServer = await stateManager.serverExistsForModel(modelPath);
-      if (existingServer) {
-        this.sendError(res, 409, 'Conflict', `Server already exists for model: ${modelName}`, 'SERVER_EXISTS');
-        return;
-      }
-
-      // Get model size
-      const modelSize = await modelScanner.getModelSize(modelName);
-      if (!modelSize) {
-        this.sendError(res, 500, 'Internal Server Error', 'Failed to read model file', 'MODEL_READ_ERROR');
-        return;
-      }
-
-      // Determine port
-      let port: number;
-      if (data.port) {
-        portManager.validatePort(data.port);
-        const available = await portManager.isPortAvailable(data.port);
-        if (!available) {
-          this.sendError(res, 409, 'Conflict', `Port ${data.port} is already in use`, 'PORT_IN_USE');
-          return;
-        }
-        port = data.port;
-      } else {
-        port = await portManager.findAvailablePort();
-      }
-
-      // Validate alias if provided
-      if (data.alias) {
-        const aliasError = validateAlias(data.alias);
-        if (aliasError) {
-          this.sendError(res, 400, 'Bad Request', `Invalid alias: ${aliasError}`, 'INVALID_ALIAS');
-          return;
-        }
-
-        const conflictingServerId = await stateManager.isAliasAvailable(data.alias);
-        if (conflictingServerId) {
-          this.sendError(res, 409, 'Conflict', `Alias "${data.alias}" is already used by server: ${conflictingServerId}`, 'ALIAS_IN_USE');
-          return;
-        }
-      }
-
       // Parse custom flags if provided
       let customFlags: string[] | undefined;
       if (data.customFlags) {
@@ -403,50 +413,33 @@ class AdminServer {
           : data.customFlags.split(',').map((f: string) => f.trim()).filter((f: string) => f.length > 0);
       }
 
-      // Generate configuration
-      const serverConfig = await configGenerator.generateConfig(
-        modelPath,
-        modelName,
-        modelSize,
-        port,
-        {
-          port: data.port,
-          host: data.host,
-          threads: data.threads,
-          ctxSize: data.ctxSize,
-          gpuLayers: data.gpuLayers,
-          verbose: data.verbose,
-          customFlags,
-          alias: data.alias,
+      // Create server using centralized service
+      const result = await serverLifecycleService.createServer(data.model, {
+        port: data.port,
+        host: data.host,
+        threads: data.threads,
+        ctxSize: data.ctxSize,
+        gpuLayers: data.gpuLayers,
+        verbose: data.verbose,
+        customFlags,
+        alias: data.alias,
+      });
+
+      if (!result.success) {
+        // Map common errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'MODEL_NOT_FOUND');
+        } else if (result.error?.includes('already in use') || result.error?.includes('already used')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'CONFLICT');
+        } else if (result.error?.includes('Invalid alias')) {
+          this.sendError(res, 400, 'Bad Request', result.error, 'INVALID_ALIAS');
+        } else {
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Server creation failed', 'CREATE_ERROR');
         }
-      );
-
-      // Save configuration
-      await stateManager.saveServerConfig(serverConfig);
-
-      // Create and start server
-      await launchctlManager.createPlist(serverConfig);
-      await launchctlManager.loadService(serverConfig.plistPath);
-      await launchctlManager.startService(serverConfig.label);
-
-      // Wait for startup
-      const started = await launchctlManager.waitForServiceStart(serverConfig.label, 5000);
-      if (!started) {
-        this.sendError(res, 500, 'Internal Server Error', 'Server failed to start', 'START_FAILED');
         return;
       }
 
-      // Update status
-      const status = await statusChecker.checkServer(serverConfig);
-      serverConfig.status = statusChecker.determineStatus(status, status.portListening);
-      serverConfig.pid = status.pid || undefined;
-      await stateManager.updateServerConfig(serverConfig.id, {
-        status: serverConfig.status,
-        pid: serverConfig.pid,
-        lastStarted: new Date().toISOString(),
-      });
-
-      this.sendJson(res, 201, { server: serverConfig });
+      this.sendJson(res, 201, { server: result.server });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'CREATE_ERROR');
     }

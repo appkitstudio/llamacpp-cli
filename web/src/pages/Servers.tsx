@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useServers, useStartServer, useStopServer } from '../hooks/useApi';
+import { useServers, useStartServer, useStopServer, useRouter } from '../hooks/useApi';
 import { Cpu, Database, Loader2, Plus, LayoutGrid, List } from 'lucide-react';
 import { ServerConfigModal } from '../components/ServerConfigModal';
 import { CreateServerModal } from '../components/CreateServerModal';
@@ -14,6 +14,7 @@ export function Servers() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: serversData, isLoading } = useServers();
+  const { data: routerData } = useRouter();
   const startServer = useStartServer();
   const stopServer = useStopServer();
 
@@ -298,6 +299,25 @@ export function Servers() {
                   Logs
                 </button>
                 <button
+                  onClick={() => navigate(`/servers/${server.port}/chat`)}
+                  disabled={
+                    server.status !== 'running' ||
+                    !routerData?.isRunning ||
+                    actionLoading?.id === server.id ||
+                    configUpdating === server.id
+                  }
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    !routerData?.isRunning
+                      ? 'Router must be running to chat'
+                      : server.status !== 'running'
+                      ? 'Server must be running to chat'
+                      : 'Chat'
+                  }
+                >
+                  Chat
+                </button>
+                <button
                   onClick={() => setConfigServer(server)}
                   disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
@@ -358,6 +378,25 @@ export function Servers() {
                   title="Logs"
                 >
                   Logs
+                </button>
+                <button
+                  onClick={() => navigate(`/servers/${server.port}/chat`)}
+                  disabled={
+                    server.status !== 'running' ||
+                    !routerData?.isRunning ||
+                    actionLoading?.id === server.id ||
+                    configUpdating === server.id
+                  }
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    !routerData?.isRunning
+                      ? 'Router must be running to chat'
+                      : server.status !== 'running'
+                      ? 'Server must be running to chat'
+                      : 'Chat'
+                  }
+                >
+                  Chat
                 </button>
                 <button
                   onClick={() => setConfigServer(server)}
@@ -423,6 +462,25 @@ export function Servers() {
                     title="Logs"
                   >
                     Logs
+                  </button>
+                  <button
+                    onClick={() => navigate(`/servers/${server.port}/chat`)}
+                    disabled={
+                      server.status !== 'running' ||
+                      !routerData?.isRunning ||
+                      actionLoading?.id === server.id ||
+                      configUpdating === server.id
+                    }
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={
+                      !routerData?.isRunning
+                        ? 'Router must be running to chat'
+                        : server.status !== 'running'
+                        ? 'Server must be running to chat'
+                        : 'Chat'
+                    }
+                  >
+                    Chat
                   </button>
                   <button
                     onClick={() => setConfigServer(server)}

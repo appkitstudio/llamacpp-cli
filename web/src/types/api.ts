@@ -249,3 +249,28 @@ export interface UpdateLogConfigRequest {
   autoRotate?: Partial<LogManagementConfig['autoRotate']>;
   autoDelete?: Partial<LogManagementConfig['autoDelete']>;
 }
+
+// Chat types
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string;
+}
+
+export interface ChatMessageRequest {
+  model: string;
+  messages: ChatMessage[];
+  max_tokens: number;
+  stream?: boolean;
+  temperature?: number;
+}
+
+export interface ChatMessageResponse {
+  id: string;
+  type: 'message';
+  role: 'assistant';
+  content: Array<{ type: 'text'; text: string }>;
+  model: string;
+  stop_reason: string;
+  usage: { input_tokens: number; output_tokens: number };
+}

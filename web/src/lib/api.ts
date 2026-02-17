@@ -272,6 +272,64 @@ class ApiClient {
       }
     );
   }
+
+  // Chat - Streaming via Router
+  async *streamChatMessage(
+    modelName: string,
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    options?: { max_tokens?: number; temperature?: number }
+  ): AsyncGenerator<any> {
+    const response = await fetch(`${API_BASE}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: modelName,
+        messages,
+        max_tokens: options?.max_tokens || 4096,
+        temperature: options?.temperature || 0.7,
+        stream: true,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || error.details || 'Chat request failed');
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              yield parsed;
+            } catch {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
 }
 
 export const api = new ApiClient();
