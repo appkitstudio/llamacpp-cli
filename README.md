@@ -1045,9 +1045,15 @@ llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --port 8080 --ctx-size 
 # Create with a friendly alias
 llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --alias thinking
 
+# Create multiple servers with the same model (different configurations)
+llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --ctx-size 8192 --alias short-context
+llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --ctx-size 32768 --alias long-context
+
 # Enable remote access (WARNING: security implications)
 llamacpp server create llama-3.2-3b-instruct-q4_k_m.gguf --host 0.0.0.0
 ```
+
+**Note:** You can create multiple servers using the same model file with different configurations (context size, GPU layers, etc.). Each server gets a unique ID automatically.
 
 **Options:**
 - `-a, --alias <name>` - Friendly alias for the server (alphanumeric, hyphens, underscores, 1-64 chars)

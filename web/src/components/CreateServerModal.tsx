@@ -200,13 +200,10 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
                     <button
                       key={model.filename}
                       type="button"
-                      onClick={() => !hasServer && setFormData({ ...formData, model: modelIdentifier })}
-                      disabled={hasServer}
+                      onClick={() => setFormData({ ...formData, model: modelIdentifier })}
                       className={`w-full text-left px-3 py-2 transition-colors ${
                         formData.model === modelIdentifier
                           ? 'bg-gray-100 cursor-pointer'
-                          : hasServer
-                          ? 'bg-gray-50 opacity-50 cursor-not-allowed'
                           : 'hover:bg-gray-50 cursor-pointer'
                       }`}
                     >
@@ -220,7 +217,7 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
                         <div className="flex items-center gap-2 ml-2">
                           <span className="text-xs text-gray-500">{formatSize(model.size)}</span>
                           {hasServer && (
-                            <span className="text-xs text-orange-600">in use</span>
+                            <span className="text-xs text-gray-500">({model.serversUsing} server{model.serversUsing > 1 ? 's' : ''})</span>
                           )}
                         </div>
                       </div>

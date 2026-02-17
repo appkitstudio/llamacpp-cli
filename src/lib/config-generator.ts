@@ -78,8 +78,9 @@ export class ConfigGenerator {
     const customFlags = options?.customFlags;  // Optional custom flags
     const alias = options?.alias;  // Optional alias
 
-    // Generate server ID
-    const id = sanitizeModelName(modelName);
+    // Generate unique server ID (handles multiple servers with same model)
+    const baseId = sanitizeModelName(modelName);
+    const id = await stateManager.generateUniqueServerId(baseId);
 
     // Generate paths
     const label = `studio.appkit.llamacpp-cli.${id}`;

@@ -216,6 +216,28 @@ export class StateManager {
   }
 
   /**
+   * Generate a unique server ID
+   * If the base ID is already taken, appends a counter (-2, -3, etc.)
+   */
+  async generateUniqueServerId(baseId: string): Promise<string> {
+    const servers = await this.getAllServers();
+    const existingIds = new Set(servers.map(s => s.id));
+
+    // If base ID is available, use it
+    if (!existingIds.has(baseId)) {
+      return baseId;
+    }
+
+    // Otherwise, find the next available counter
+    let counter = 2;
+    while (existingIds.has(`${baseId}-${counter}`)) {
+      counter++;
+    }
+
+    return `${baseId}-${counter}`;
+  }
+
+  /**
    * Get all used ports
    */
   async getUsedPorts(): Promise<Set<number>> {

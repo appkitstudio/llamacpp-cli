@@ -1304,21 +1304,6 @@ export async function createMultiServerMonitorUI(
     // Create a non-null reference for closures
     const model = selectedModel;
 
-    // Check if server already exists for this model
-    const existingServer = allServers.find((s) => s.modelPath === model.path);
-    if (existingServer) {
-      await showErrorModal(
-        `Server already exists for this model.\nServer ID: ${existingServer.id}\nPort: ${existingServer.port}`,
-      );
-      // Immediately render with cached data for instant feedback
-      const content = renderListView(lastSystemMetrics);
-      contentBox.setContent(content);
-      screen.render();
-      keyboardManager.popContext(); // Pop the blocking context
-      startPolling();
-      return;
-    }
-
     // Step 2: Configuration
     interface CreateConfig {
       host: string;
@@ -1630,114 +1615,29 @@ export async function createMultiServerMonitorUI(
     const progressModal = showProgressModal("Creating server...");
 
     try {
-      // Generate full server config
-      const serverOptions: ServerOptions = {
-        port: config.port,
-        host: config.host,
-        threads: config.threads,
-        ctxSize: config.ctxSize,
-        gpuLayers: config.gpuLayers,
-        verbose: config.verbose,
-      };
-
-      progressModal.setContent(
-        "\n  {cyan-fg}Generating configuration...{/cyan-fg}",
-      );
-      screen.render();
-
-      const serverConfig = await configGenerator.generateConfig(
-        model.path,
-        model.filename,
-        model.size,
-        config.port,
-        serverOptions,
+      // Create server using centralized service
+      const result = await serverLifecycleService.createServer(
+        model.baseModelName || model.filename,
+        {
+          port: config.port,
+          host: config.host,
+          threads: config.threads,
+          ctxSize: config.ctxSize,
+          gpuLayers: config.gpuLayers,
+          verbose: config.verbose,
+          metalDetectionDelayMs: 3000,
+          onProgress: (message) => {
+            progressModal.setContent(`\n  {cyan-fg}${message}{/cyan-fg}`);
+            screen.render();
+          },
+        },
       );
 
-      // Ensure log directory exists
-      await ensureDir(path.dirname(serverConfig.stdoutPath));
-
-      // Create plist
-      progressModal.setContent(
-        "\n  {cyan-fg}Creating launchctl service...{/cyan-fg}",
-      );
-      screen.render();
-      await launchctlManager.createPlist(serverConfig);
-
-      // Load service
-      try {
-        await launchctlManager.loadService(serverConfig.plistPath);
-      } catch (error) {
-        await launchctlManager.deletePlist(serverConfig.plistPath);
-        throw new Error(`Failed to load service: ${(error as Error).message}`);
+      if (!result.success) {
+        throw new Error(result.error);
       }
 
-      // Start service
-      progressModal.setContent("\n  {cyan-fg}Starting server...{/cyan-fg}");
-      screen.render();
-      try {
-        await launchctlManager.startService(serverConfig.label);
-      } catch (error) {
-        await launchctlManager.unloadService(serverConfig.plistPath);
-        await launchctlManager.deletePlist(serverConfig.plistPath);
-        throw new Error(`Failed to start service: ${(error as Error).message}`);
-      }
-
-      // Wait for startup
-      progressModal.setContent(
-        "\n  {cyan-fg}Waiting for server to start...{/cyan-fg}",
-      );
-      screen.render();
-      const started = await launchctlManager.waitForServiceStart(
-        serverConfig.label,
-        5000,
-      );
-
-      if (!started) {
-        await launchctlManager.unloadService(serverConfig.plistPath);
-        await launchctlManager.deletePlist(serverConfig.plistPath);
-        throw new Error("Server failed to start. Check logs.");
-      }
-
-      // Wait for port to be ready (server may take a moment to bind)
-      progressModal.setContent(
-        "\n  {cyan-fg}Waiting for server to be ready...{/cyan-fg}",
-      );
-      screen.render();
-      const portTimeout = 10000; // 10 seconds
-      const portStartTime = Date.now();
-      let portReady = false;
-      while (Date.now() - portStartTime < portTimeout) {
-        if (await isPortInUse(serverConfig.port)) {
-          portReady = true;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-
-      if (!portReady) {
-        await launchctlManager.unloadService(serverConfig.plistPath);
-        await launchctlManager.deletePlist(serverConfig.plistPath);
-        throw new Error("Server started but port not responding. Check logs.");
-      }
-
-      // Update config with running status
-      let updatedConfig = await statusChecker.updateServerStatus(serverConfig);
-
-      // Parse Metal memory allocation (wait a bit for model to load)
-      progressModal.setContent(
-        "\n  {cyan-fg}Detecting GPU memory allocation...{/cyan-fg}",
-      );
-      screen.render();
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      const metalMemoryMB = await parseMetalMemoryFromLog(
-        updatedConfig.stderrPath,
-      );
-      if (metalMemoryMB) {
-        updatedConfig = { ...updatedConfig, metalMemoryMB };
-      }
-
-      // Save server config
-      await stateManager.saveServerConfig(updatedConfig);
+      const updatedConfig = result.server;
 
       // Show success message briefly
       progressModal.setContent(

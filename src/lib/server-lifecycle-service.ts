@@ -1,8 +1,12 @@
-import { ServerConfig } from '../types/server-config';
+import * as path from 'path';
+import { ServerConfig, validateAlias } from '../types/server-config';
 import { launchctlManager } from './launchctl-manager';
 import { statusChecker } from './status-checker';
 import { stateManager } from './state-manager';
-import { parseMetalMemoryFromLog } from '../utils/file-utils';
+import { modelScanner } from './model-scanner';
+import { configGenerator, ServerOptions } from './config-generator';
+import { portManager } from './port-manager';
+import { parseMetalMemoryFromLog, ensureDir } from '../utils/file-utils';
 import { autoRotateIfNeeded } from '../utils/log-utils';
 import { isPortInUse } from '../utils/process-utils';
 
@@ -64,20 +68,235 @@ export interface StopResult {
   error?: string;
 }
 
+export interface CreateOptions extends ServerOptions {
+  /**
+   * Enable verbose output
+   * Signature: (message: string, currentStep: number, totalSteps: number) => void
+   */
+  onProgress?: (message: string, currentStep: number, totalSteps: number) => void;
+
+  /**
+   * Wait timeout for startup (ms)
+   * Default: 5000
+   */
+  startupTimeoutMs?: number;
+
+  /**
+   * Delay before Metal memory detection (ms)
+   * Default: 8000
+   */
+  metalDetectionDelayMs?: number;
+}
+
+export interface CreateResult {
+  success: boolean;
+  server: ServerConfig;
+  metalMemoryMB?: number;
+  error?: string;
+}
+
 /**
  * Centralized service lifecycle management
  *
- * Handles all server start/stop operations with:
+ * Handles all server create/start/stop operations with:
  * - Concurrency protection (prevents simultaneous operations on same server)
  * - Consistent behavior across CLI, TUI, and Admin API
  * - Progress callbacks for UI feedback
  * - Automatic plist regeneration
  * - Log rotation
  * - Metal memory detection
+ * - Unique ID generation for duplicate models
  */
 export class ServerLifecycleService {
   // Concurrency protection: tracks in-progress operations
   private operationsInProgress = new Map<string, 'starting' | 'stopping'>();
+
+  /**
+   * Create and start a new server with full lifecycle management
+   *
+   * Steps:
+   * 1. Resolve model path and get model info
+   * 2. Validate alias if provided
+   * 3. Determine port (auto-assign or validate provided port)
+   * 4. Generate unique server ID and configuration
+   * 5. Create plist file
+   * 6. Load and start service
+   * 7. Wait for startup
+   * 8. Detect Metal memory
+   * 9. Save configuration
+   */
+  async createServer(
+    model: string,
+    options: CreateOptions = {}
+  ): Promise<CreateResult> {
+    const {
+      onProgress = () => {},
+      startupTimeoutMs = 5000,
+      metalDetectionDelayMs = 8000,
+      alias,
+      ...serverOptions
+    } = options;
+
+    const totalSteps = 9;
+    let currentStep = 0;
+
+    try {
+      // Step 1: Resolve model path and get model info
+      onProgress('Resolving model path...', ++currentStep, totalSteps);
+      const modelPath = await modelScanner.resolveModelPath(model);
+      if (!modelPath) {
+        return {
+          success: false,
+          server: {} as ServerConfig,
+          error: `Model not found: ${model}`
+        };
+      }
+
+      const modelInfo = await modelScanner.getModelInfo(model);
+      if (!modelInfo || !modelInfo.size) {
+        return {
+          success: false,
+          server: {} as ServerConfig,
+          error: 'Failed to read model file'
+        };
+      }
+
+      // For sharded models, use base model name; otherwise use filename
+      let modelName = path.basename(modelPath);
+      if (modelInfo.isSharded && modelInfo.baseModelName) {
+        modelName = modelInfo.baseModelName;
+      }
+
+      const modelSize = modelInfo.size;
+
+      // Step 2: Validate alias if provided
+      if (alias) {
+        onProgress('Validating alias...', ++currentStep, totalSteps);
+        const validationError = validateAlias(alias);
+        if (validationError) {
+          return {
+            success: false,
+            server: {} as ServerConfig,
+            error: `Invalid alias: ${validationError}`
+          };
+        }
+
+        const conflictingServerId = await stateManager.isAliasAvailable(alias);
+        if (conflictingServerId) {
+          return {
+            success: false,
+            server: {} as ServerConfig,
+            error: `Alias "${alias}" is already used by server: ${conflictingServerId}`
+          };
+        }
+      } else {
+        currentStep++;
+      }
+
+      // Step 3: Determine port
+      onProgress('Determining port...', ++currentStep, totalSteps);
+      let port: number;
+      if (serverOptions.port) {
+        portManager.validatePort(serverOptions.port);
+        const available = await portManager.isPortAvailable(serverOptions.port);
+        if (!available) {
+          return {
+            success: false,
+            server: {} as ServerConfig,
+            error: `Port ${serverOptions.port} is already in use`
+          };
+        }
+        port = serverOptions.port;
+      } else {
+        port = await portManager.findAvailablePort();
+      }
+
+      // Step 4: Generate configuration (with unique ID)
+      onProgress('Generating configuration...', ++currentStep, totalSteps);
+      const config = await configGenerator.generateConfig(
+        modelPath,
+        modelName,
+        modelSize,
+        port,
+        { ...serverOptions, alias }
+      );
+
+      // Ensure log directory exists
+      await ensureDir(path.dirname(config.stdoutPath));
+
+      // Step 5: Create plist file
+      onProgress('Creating launchctl service...', ++currentStep, totalSteps);
+      await launchctlManager.createPlist(config);
+
+      // Step 6: Load and start service
+      try {
+        onProgress('Loading service...', ++currentStep, totalSteps);
+        await launchctlManager.loadService(config.plistPath);
+      } catch (error) {
+        // Clean up plist if load fails
+        await launchctlManager.deletePlist(config.plistPath);
+        return {
+          success: false,
+          server: config,
+          error: `Failed to load service: ${(error as Error).message}`
+        };
+      }
+
+      try {
+        onProgress('Starting service...', ++currentStep, totalSteps);
+        await launchctlManager.startService(config.label);
+      } catch (error) {
+        // Clean up if start fails
+        await launchctlManager.unloadService(config.plistPath);
+        await launchctlManager.deletePlist(config.plistPath);
+        return {
+          success: false,
+          server: config,
+          error: `Failed to start service: ${(error as Error).message}`
+        };
+      }
+
+      // Step 7: Wait for startup
+      onProgress('Waiting for server to start...', ++currentStep, totalSteps);
+      const started = await launchctlManager.waitForServiceStart(config.label, startupTimeoutMs);
+      if (!started) {
+        // Clean up if startup fails
+        await launchctlManager.unloadService(config.plistPath);
+        await launchctlManager.deletePlist(config.plistPath);
+        return {
+          success: false,
+          server: config,
+          error: 'Server failed to start'
+        };
+      }
+
+      // Update config with running status
+      let updatedConfig = await statusChecker.updateServerStatus(config);
+
+      // Step 8: Detect Metal memory (optional)
+      onProgress('Detecting Metal (GPU) memory...', ++currentStep, totalSteps);
+      const metalMemoryMB = await this.detectMetalMemory(updatedConfig, metalDetectionDelayMs);
+      if (metalMemoryMB) {
+        updatedConfig = { ...updatedConfig, metalMemoryMB };
+      }
+
+      // Step 9: Save configuration
+      onProgress('Saving configuration...', ++currentStep, totalSteps);
+      await stateManager.saveServerConfig(updatedConfig);
+
+      return {
+        success: true,
+        server: updatedConfig,
+        metalMemoryMB
+      };
+    } catch (error) {
+      return {
+        success: false,
+        server: {} as ServerConfig,
+        error: (error as Error).message
+      };
+    }
+  }
 
   /**
    * Start a server with full lifecycle management
@@ -126,14 +345,29 @@ export class ServerLifecycleService {
           throw new Error(`Server not found: ${identifier}`);
         }
 
-        // 2. Check if already running
-        if (server.status === 'running') {
+        // 2. Check actual runtime status (not config file status)
+        const status = await statusChecker.checkServer(server);
+        const actualStatus = statusChecker.determineStatus(status, status.portListening);
+
+        if (actualStatus === 'running') {
+          // Update config with actual status
+          server.status = actualStatus;
+          server.pid = status.pid || undefined;
+          await stateManager.updateServerConfig(server.id, {
+            status: server.status,
+            pid: server.pid,
+          });
+
           return {
             success: false,
             server,
             error: 'Server is already running',
           };
         }
+
+        // Update server with actual status
+        server.status = actualStatus;
+        server.pid = status.pid || undefined;
 
         // 3. Auto-rotate logs
         progress('Checking logs...');
@@ -243,14 +477,30 @@ export class ServerLifecycleService {
           throw new Error(`Server not found: ${identifier}`);
         }
 
-        // 2. Check if already stopped
-        if (server.status === 'stopped') {
+        // 2. Check actual runtime status (not config file status)
+        const status = await statusChecker.checkServer(server);
+        const actualStatus = statusChecker.determineStatus(status, status.portListening);
+
+        if (actualStatus === 'stopped') {
+          // Update config with actual status
+          server.status = actualStatus;
+          server.pid = undefined;
+          await stateManager.updateServerConfig(server.id, {
+            status: server.status,
+            pid: undefined,
+            lastStopped: new Date().toISOString(),
+          });
+
           return {
             success: false,
             server,
             error: 'Server is already stopped',
           };
         }
+
+        // Update server with actual status
+        server.status = actualStatus;
+        server.pid = status.pid || undefined;
 
         // 3. Stop service
         progress('Stopping server...');
