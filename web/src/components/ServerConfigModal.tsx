@@ -41,6 +41,7 @@ export function ServerConfigModal({ server, isOpen, onClose, onUpdateStart }: Se
   const [restartAfterSave, setRestartAfterSave] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [gpuLayersInput, setGpuLayersInput] = useState('60');
+  const [threadsInput, setThreadsInput] = useState('4');
 
   const models = modelsData?.models || [];
 
@@ -92,6 +93,7 @@ export function ServerConfigModal({ server, isOpen, onClose, onUpdateStart }: Se
         customFlags: server.customFlags?.join(', ') || '',
       });
       setGpuLayersInput(server.gpuLayers.toString());
+      setThreadsInput(server.threads.toString());
       setError(null);
     }
   }, [server, models]);
@@ -284,13 +286,52 @@ export function ServerConfigModal({ server, isOpen, onClose, onUpdateStart }: Se
             </label>
             <input
               type="number"
-              value={formData.threads}
-              onChange={(e) => setFormData({ ...formData, threads: parseInt(e.target.value) || 1 })}
-              min={1}
+              value={threadsInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                setThreadsInput(value);
+                // Only update formData if it's a valid number
+                if (value !== '' && value !== '-') {
+                  const num = parseInt(value);
+                  if (!isNaN(num)) {
+                    setFormData({ ...formData, threads: num });
+                  }
+                }
+              }}
+              onBlur={() => {
+                // On blur, ensure we have a valid number
+                const num = parseInt(threadsInput);
+                if (isNaN(num) || threadsInput === '' || threadsInput === '-' || num < -1 || num > 256) {
+                  setThreadsInput('4');
+                  setFormData({ ...formData, threads: 4 });
+                }
+              }}
+              min={-1}
               max={256}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent"
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent ${
+                (() => {
+                  const num = parseInt(threadsInput);
+                  const isComplete = threadsInput !== '' && threadsInput !== '-' && !isNaN(num);
+                  const isInvalid = isComplete && (num < -1 || num > 256);
+                  return isInvalid
+                    ? 'border-red-500 focus:ring-red-200'
+                    : 'border-gray-200 focus:ring-gray-200';
+                })()
+              }`}
             />
-            <p className="text-xs text-gray-500 mt-1">Number of CPU threads for inference</p>
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, threads: -1 });
+                  setThreadsInput('-1');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                Auto (-1)
+              </button>
+              <span className="text-xs text-gray-500">Number of CPU threads for inference</span>
+            </div>
           </div>
 
           {/* Context Size */}
