@@ -9,6 +9,9 @@ export interface MockLaunchctlManager {
   deletePlist: ReturnType<typeof vi.fn>;
   restartService: ReturnType<typeof vi.fn>;
   serviceExists: ReturnType<typeof vi.fn>;
+  waitForServiceStart: ReturnType<typeof vi.fn>;
+  waitForServiceStop: ReturnType<typeof vi.fn>;
+  needsPlistUpdate: ReturnType<typeof vi.fn>;
 }
 
 export function createMockLaunchctlManager(
@@ -23,6 +26,9 @@ export function createMockLaunchctlManager(
     deletePlist: vi.fn().mockResolvedValue(undefined),
     restartService: vi.fn().mockResolvedValue(undefined),
     serviceExists: vi.fn().mockResolvedValue(false),
+    waitForServiceStart: vi.fn().mockResolvedValue(true),
+    waitForServiceStop: vi.fn().mockResolvedValue(true),
+    needsPlistUpdate: vi.fn().mockResolvedValue(false),
     ...overrides,
   };
 }

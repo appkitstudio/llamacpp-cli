@@ -17,6 +17,7 @@ export interface MockStateManager {
   findServerByModelName: ReturnType<typeof vi.fn>;
   findServer: ReturnType<typeof vi.fn>;
   serverExistsForModel: ReturnType<typeof vi.fn>;
+  generateUniqueServerId: ReturnType<typeof vi.fn>;
   getUsedPorts: ReturnType<typeof vi.fn>;
   getModelsDirectory: ReturnType<typeof vi.fn>;
   setModelsDirectory: ReturnType<typeof vi.fn>;
@@ -42,6 +43,7 @@ export function createMockStateManager(
     findServerByModelName: vi.fn().mockResolvedValue(null),
     findServer: vi.fn().mockResolvedValue(null),
     serverExistsForModel: vi.fn().mockResolvedValue(false),
+    generateUniqueServerId: vi.fn().mockImplementation((baseId: string) => Promise.resolve(baseId)),
     getUsedPorts: vi.fn().mockResolvedValue(new Set<number>()),
     getModelsDirectory: vi.fn().mockResolvedValue('/test/models'),
     setModelsDirectory: vi.fn().mockResolvedValue(undefined),
