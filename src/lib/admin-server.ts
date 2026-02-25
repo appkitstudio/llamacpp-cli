@@ -213,6 +213,9 @@ class AdminServer {
       } else if (pathname.match(/^\/api\/servers\/[^/]+\/restart$/) && method === 'POST') {
         const serverId = pathname.split('/')[3];
         await this.handleRestartServer(req, res, serverId);
+      } else if (pathname.match(/^\/api\/servers\/[^/]+\/slots$/) && method === 'GET') {
+        const serverId = pathname.split('/')[3];
+        await this.handleGetServerSlots(req, res, serverId);
       } else if (pathname.match(/^\/api\/servers\/[^/]+\/logs$/) && method === 'GET') {
         const serverId = pathname.split('/')[3];
         await this.handleGetLogs(req, res, serverId, url);
@@ -531,22 +534,18 @@ class AdminServer {
       return;
     }
 
-    try {
-      // Stop server if running
-      const status = await statusChecker.checkServer(server);
-      if (statusChecker.determineStatus(status, status.portListening) === 'running') {
-        await launchctlManager.unloadService(server.plistPath);
-        await launchctlManager.waitForServiceStop(server.label, 5000);
+    const result = await serverLifecycleService.deleteServer(serverId);
+    if (!result.success) {
+      if (result.error?.includes('not found')) {
+        this.sendError(res, 404, 'Not Found', result.error, 'SERVER_NOT_FOUND');
+      } else if (result.error?.includes('already')) {
+        this.sendError(res, 409, 'Conflict', result.error, 'OPERATION_IN_PROGRESS');
+      } else {
+        this.sendError(res, 500, 'Internal Server Error', result.error || 'Unknown error', 'DELETE_ERROR');
       }
-
-      // Delete plist and config
-      await launchctlManager.deletePlist(server.plistPath);
-      await stateManager.deleteServerConfig(server.id);
-
-      this.sendJson(res, 200, { success: true });
-    } catch (error) {
-      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'DELETE_ERROR');
+      return;
     }
+    this.sendJson(res, 200, { success: true });
   }
 
   /**
@@ -639,6 +638,55 @@ class AdminServer {
       });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'RESTART_ERROR');
+    }
+  }
+
+  /**
+   * Get slot status from a running llama.cpp server
+   */
+  private async handleGetServerSlots(req: http.IncomingMessage, res: http.ServerResponse, serverId: string): Promise<void> {
+    const server = await stateManager.findServer(serverId);
+    if (!server) {
+      this.sendError(res, 404, 'Not Found', `Server not found: ${serverId}`, 'SERVER_NOT_FOUND');
+      return;
+    }
+
+    const emptySlots = { slots: [], activeSlots: 0, idleSlots: 0, totalSlots: 0 };
+
+    try {
+      const status = await statusChecker.checkServer(server);
+      if (statusChecker.determineStatus(status, status.portListening) !== 'running') {
+        this.sendJson(res, 200, emptySlots);
+        return;
+      }
+
+      const host = server.host || '127.0.0.1';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+
+      try {
+        const response = await fetch(`http://${host}:${server.port}/slots`, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          this.sendJson(res, 200, emptySlots);
+          return;
+        }
+
+        const slots = await response.json() as Array<{ is_processing: boolean; [key: string]: any }>;
+        const activeSlots = slots.filter(s => s.is_processing).length;
+        this.sendJson(res, 200, {
+          slots,
+          activeSlots,
+          idleSlots: slots.length - activeSlots,
+          totalSlots: slots.length,
+        });
+      } catch {
+        clearTimeout(timeout);
+        this.sendJson(res, 200, emptySlots);
+      }
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'SLOTS_ERROR');
     }
   }
 

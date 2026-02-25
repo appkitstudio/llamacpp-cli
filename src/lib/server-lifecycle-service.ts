@@ -68,6 +68,18 @@ export interface StopResult {
   error?: string;
 }
 
+export interface DeleteOptions {
+  onProgress?: (message: string, currentStep: number, totalSteps: number) => void;
+  shutdownTimeoutMs?: number;
+}
+
+export interface DeleteResult {
+  success: boolean;
+  serverId: string;
+  modelPath?: string;
+  error?: string;
+}
+
 export interface CreateOptions extends ServerOptions {
   /**
    * Enable verbose output
@@ -109,7 +121,7 @@ export interface CreateResult {
  */
 export class ServerLifecycleService {
   // Concurrency protection: tracks in-progress operations
-  private operationsInProgress = new Map<string, 'starting' | 'stopping'>();
+  private operationsInProgress = new Map<string, 'starting' | 'stopping' | 'deleting'>();
 
   /**
    * Create and start a new server with full lifecycle management
@@ -548,6 +560,108 @@ export class ServerLifecycleService {
       return {
         success: false,
         server: server!,
+        error: (error as Error).message,
+      };
+    }
+  }
+
+  /**
+   * Delete a server with full lifecycle management
+   *
+   * Steps:
+   * 1. Find server
+   * 2. Check status
+   * 3. Unload service (auto-stops if running)
+   * 4. Delete plist file
+   * 5. Delete server config
+   */
+  async deleteServer(
+    identifier: string,
+    options: DeleteOptions = {}
+  ): Promise<DeleteResult> {
+    const {
+      onProgress = () => {},
+      shutdownTimeoutMs = 5000,
+    } = options;
+
+    const TOTAL_STEPS = 5;
+    let currentStep = 0;
+    const progress = (msg: string) => onProgress(msg, ++currentStep, TOTAL_STEPS);
+
+    let resolvedId = identifier;
+
+    try {
+      // Check concurrency
+      if (this.operationsInProgress.has(identifier)) {
+        const op = this.operationsInProgress.get(identifier);
+        return {
+          success: false,
+          serverId: identifier,
+          error: `Server is already ${op} - please wait for operation to complete`,
+        };
+      }
+
+      // Lock this server
+      this.operationsInProgress.set(identifier, 'deleting');
+
+      try {
+        // 1. Find server
+        progress('Finding server...');
+        const server = await stateManager.findServer(identifier);
+        if (!server) {
+          return {
+            success: false,
+            serverId: identifier,
+            error: `Server not found: ${identifier}`,
+          };
+        }
+        resolvedId = server.id;
+
+        // 2. Check actual runtime status
+        progress('Checking status...');
+        const status = await statusChecker.checkServer(server);
+        const actualStatus = statusChecker.determineStatus(status, status.portListening);
+
+        // 3. Unload service (stops if running, no-op if already unloaded)
+        progress('Stopping service...');
+        if (actualStatus === 'running') {
+          try {
+            await launchctlManager.unloadService(server.plistPath);
+            await launchctlManager.waitForServiceStop(server.label, shutdownTimeoutMs);
+          } catch (error) {
+            // Non-fatal - continue with deletion
+            console.error(`Warning: unload failed (continuing): ${(error as Error).message}`);
+          }
+        } else {
+          // Try to unload in case service is registered but not running
+          try {
+            await launchctlManager.unloadService(server.plistPath);
+          } catch {
+            // Expected if already unloaded
+          }
+        }
+
+        // 4. Delete plist
+        progress('Removing configuration...');
+        await launchctlManager.deletePlist(server.plistPath);
+
+        // 5. Delete server config
+        progress('Deleting server record...');
+        await stateManager.deleteServerConfig(server.id);
+
+        return {
+          success: true,
+          serverId: server.id,
+          modelPath: server.modelPath,
+        };
+      } finally {
+        // Always unlock
+        this.operationsInProgress.delete(identifier);
+      }
+    } catch (error) {
+      return {
+        success: false,
+        serverId: resolvedId,
         error: (error as Error).message,
       };
     }

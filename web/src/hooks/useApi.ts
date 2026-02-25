@@ -118,6 +118,16 @@ export function useServerLogs(serverId: string | null, lines = 500) {
   });
 }
 
+export function useServerSlots(serverId: string | null) {
+  return useQuery({
+    queryKey: ['serverSlots', serverId],
+    queryFn: () => api.getServerSlots(serverId!),
+    enabled: !!serverId,
+    refetchInterval: 3000,
+    placeholderData: keepPreviousData,
+  });
+}
+
 // Models
 export function useModels() {
   return useQuery({

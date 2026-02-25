@@ -52,6 +52,12 @@ async function checkMigrationNeeded(): Promise<void> {
     return;
   }
 
+  // Skip for internal commands (non-interactive subprocesses like server-wrapper invoked by launchctl)
+  // These run with stdout/stderr redirected to log files, so warnings would pollute server logs
+  if (commandName === 'internal') {
+    return;
+  }
+
   // Skip for help and version flags
   if (commandName === '--help' || commandName === '-h' || commandName === '--version' || commandName === '-v') {
     return;

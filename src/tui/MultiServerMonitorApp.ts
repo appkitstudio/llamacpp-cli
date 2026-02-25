@@ -12,7 +12,6 @@ import {
 } from "./HistoricalMonitorApp.js";
 import { createConfigUI } from "./ConfigApp.js";
 import { stateManager } from "../lib/state-manager.js";
-import { launchctlManager } from "../lib/launchctl-manager.js";
 import { statusChecker } from "../lib/status-checker.js";
 import { serverLifecycleService } from "../lib/server-lifecycle-service.js";
 import { modelScanner } from "../lib/model-scanner.js";
@@ -616,7 +615,25 @@ export async function createMultiServerMonitorUI(
     // Show refresh status
     const refreshStatus = logsRefreshInterval ? "ON" : "OFF";
     const refreshColor = logsRefreshInterval ? "green" : "gray";
-    content += `{gray-fg}Auto-refresh: {${refreshColor}-fg}${refreshStatus}{/${refreshColor}-fg}{/gray-fg}\n\n`;
+    content += `{gray-fg}Auto-refresh: {${refreshColor}-fg}${refreshStatus}{/${refreshColor}-fg}{/gray-fg}\n`;
+
+    // Show slot status
+    const serverData = serverDataMap.get(server.id);
+    if (serverData?.data?.server) {
+      const active = serverData.data.server.activeSlots;
+      const total = serverData.data.server.totalSlots;
+      if (total > 0) {
+        if (active > 0) {
+          const tokStr = serverData.data.server.avgGenerateSpeed
+            ? ` · ${Math.round(serverData.data.server.avgGenerateSpeed)} tok/s`
+            : '';
+          content += `{green-fg}● Slots: ${active}/${total} processing${tokStr}{/green-fg}\n`;
+        } else {
+          content += `{gray-fg}○ Slots: ${total} idle{/gray-fg}\n`;
+        }
+      }
+    }
+    content += "\n";
 
     const logPath = logType === 'stdout' ? server.httpLogPath : server.stderrPath;
 
@@ -654,8 +671,9 @@ export async function createMultiServerMonitorUI(
       content += divider + "\n";
 
       if (logType === 'stdout') {
-        // Activity logs: Read entire HTTP log file (pre-parsed compact format)
-        const output = execSync(`cat "${logPath}"`, { encoding: "utf-8" });
+        // Activity logs: Read last 500 lines of HTTP log file (pre-parsed compact format)
+        // Using tail instead of cat avoids the 1MB default execSync buffer limit on large files
+        const output = execSync(`tail -n 500 "${logPath}"`, { encoding: "utf-8" });
         const lines = output.split("\n").filter((l: string) => l.trim());
 
         if (lines.length === 0) {
@@ -672,8 +690,8 @@ export async function createMultiServerMonitorUI(
           if (filteredLines.length === 0) {
             content += "{gray-fg}No requests logged yet{/gray-fg}\n";
           } else {
-            // Show last 30 lines, truncate to fit terminal width
-            const limitedLines = filteredLines.slice(-30);
+            // Show last 30 lines newest-first, truncate to fit terminal width
+            const limitedLines = filteredLines.slice(-30).reverse();
             const maxWidth = termWidth - 4;
 
             for (const line of limitedLines) {
@@ -686,14 +704,12 @@ export async function createMultiServerMonitorUI(
           }
         }
       } else {
-        // System logs: Show last 30 lines of stderr
+        // System logs: Show last 30 lines of stderr, newest-first
         const output = execSync(`tail -n 30 "${logPath}"`, { encoding: "utf-8" });
-        const lines = output.split("\n");
+        const lines = output.split("\n").filter((l: string) => l).reverse();
         const maxWidth = termWidth - 4;
 
         for (const line of lines) {
-          if (!line) continue;
-
           // Remove ANSI color codes to calculate visible length
           const visibleLine = line.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -791,6 +807,34 @@ export async function createMultiServerMonitorUI(
       if (viewMode === "detail" && detailSubView === "logs") {
         await render();
         return;
+      }
+
+      // Reload server configs from disk to pick up changes made via web UI or CLI
+      try {
+        const freshServers = await stateManager.getAllServers();
+        // Create aggregators/historyManagers for any newly added servers
+        for (const server of freshServers) {
+          if (!aggregators.has(server.id)) {
+            aggregators.set(server.id, new MetricsAggregator(server));
+            historyManagers.set(server.id, new HistoryManager(server.id));
+          }
+        }
+        // Clean up removed servers
+        for (const id of aggregators.keys()) {
+          if (!freshServers.find((s) => s.id === id)) {
+            aggregators.delete(id);
+            historyManagers.delete(id);
+            serverDataMap.delete(id);
+          }
+        }
+        // Clamp selected index if server list shrank
+        if (selectedServerIndex >= freshServers.length) {
+          selectedServerIndex = Math.max(0, freshServers.length - 1);
+          selectedRowIndex = selectedServerIndex;
+        }
+        servers = freshServers;
+      } catch {
+        // Keep using existing servers if the reload fails
       }
 
       // Collect system metrics ONCE for all servers (not per-server)
@@ -1090,36 +1134,13 @@ export async function createMultiServerMonitorUI(
         const progressModal = showProgressModal("Removing server...");
 
         try {
-          // Stop and unload service if running
-          if (server.status === "running") {
-            progressModal.setContent(
-              "\n  {cyan-fg}Stopping server...{/cyan-fg}",
-            );
-            screen.render();
-            try {
-              await launchctlManager.unloadService(server.plistPath);
-              await launchctlManager.waitForServiceStop(server.label, 5000);
-            } catch (err) {
-              // Continue even if unload fails
-            }
-          } else {
-            // Still try to unload in case it's in a weird state
-            try {
-              await launchctlManager.unloadService(server.plistPath);
-            } catch (err) {
-              // Ignore
-            }
-          }
-
-          // Delete plist
-          progressModal.setContent(
-            "\n  {cyan-fg}Removing configuration...{/cyan-fg}",
-          );
-          screen.render();
-          await launchctlManager.deletePlist(server.plistPath);
-
-          // Delete server config
-          await stateManager.deleteServerConfig(server.id);
+          const result = await serverLifecycleService.deleteServer(server.id, {
+            onProgress: (message) => {
+              progressModal.setContent(`\n  {cyan-fg}${message}{/cyan-fg}`);
+              screen.render();
+            },
+          });
+          if (!result.success) throw new Error(result.error || 'Failed to delete server');
 
           // Delete model if requested
           if (deleteModelOption && showDeleteModelOption) {

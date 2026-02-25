@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ArrowLeft, Loader2, ChevronDown, Trash2, Check } from 'lucide-react';
-import { useServerLogs, useServer } from '../hooks/useApi';
+import { useServerLogs, useServer, useServerSlots } from '../hooks/useApi';
 import { renderAnsiLine, stripAnsiCodes } from '../utils/ansi-parser';
 
 type LogSort = 'newest' | 'oldest';
@@ -290,6 +290,7 @@ export function ServerLogs() {
   // Fetch many lines since verbose logs have lots of non-request output
   // CLI uses lines * 100 multiplier, we use 50000 to get more parsed request lines
   const { data: logsData, isLoading: logsLoading } = useServerLogs(id || null, 50000);
+  const { data: slotsData } = useServerSlots(id || null);
 
   const server = serverData?.server;
 
@@ -314,13 +315,28 @@ export function ServerLogs() {
   const getFilteredLogs = (): { logs: ParsedLogLine[]; hasRawLogs: boolean; formattedCount: number } => {
     if (!logsData) return { logs: [], hasRawLogs: false, formattedCount: 0 };
 
-    // Parse HTTP logs first (these have timestamps)
+    // System view: raw stderr/stdout lines (newest activity always visible, matches TUI behavior)
+    if (viewMode === 'system') {
+      const rawLines = [
+        ...(logsData.stderr || '').split('\n'),
+        ...(logsData.stdout || '').split('\n'),
+      ].filter(line => stripAnsiCodes(line).trim().length > 0);
+
+      const parsed: ParsedLogLine[] = rawLines.slice(-200).map(line => ({
+        raw: line,
+        type: 'system' as const,
+      }));
+
+      const sorted = sortOrder === 'newest' ? [...parsed].reverse() : parsed;
+      return { logs: sorted, hasRawLogs: rawLines.length > 0, formattedCount: 0 };
+    }
+
+    // Activity view: parse HTTP logs with timestamps
     const httpLines = (logsData.http || '').split('\n').filter(line => {
       const stripped = stripAnsiCodes(line).trim();
       return stripped.length > 0;
     });
 
-    // Parse verbose logs (these don't have timestamps)
     const verboseLines = [
       ...(logsData.stderr || '').split('\n'),
       ...(logsData.stdout || '').split('\n'),
@@ -329,32 +345,20 @@ export function ServerLogs() {
       return stripped.length > 0;
     });
 
-    // Combine all lines (HTTP first for better timestamp availability)
     const allLines = [...httpLines, ...verboseLines];
-
-    // Parse logs
     const parsed = parseLogsToFormatted(allLines);
 
-    // Track counts for empty state messaging
     const hasRawLogs = allLines.length > 0;
     const formattedCount = parsed.filter(log => log.formatted && !log.isHealthCheck).length;
 
-    // Filter by view mode
-    let filtered = parsed;
-    if (viewMode === 'activity') {
-      // Show only HTTP logs (simple format with timestamps)
-      filtered = parsed.filter(log => log.timestamp && log.formatted);
-    } else {
-      // Show only system logs (stderr/stdout without formatted output from HTTP)
-      filtered = parsed.filter(log => !log.timestamp || !log.formatted || log.type !== 'request');
-    }
+    // Activity view: show only formatted request lines with timestamps
+    let filtered = parsed.filter(log => log.timestamp && log.formatted);
 
     // Filter out health check requests unless toggle is enabled
     if (!showHealthChecks) {
       filtered = filtered.filter(log => !log.isHealthCheck);
     }
 
-    // Apply sort
     if (sortOrder === 'oldest') {
       return { logs: filtered, hasRawLogs, formattedCount };
     }
@@ -414,7 +418,23 @@ export function ServerLogs() {
           </button>
           <div>
             <h1 className="text-lg font-semibold text-gray-900">Server Logs</h1>
-            <p className="text-sm text-gray-500">{server.modelName.replace('.gguf', '')} · Port {server.port}</p>
+            <p className="text-sm text-gray-500 flex items-center gap-2">
+              <span>{server.modelName.replace('.gguf', '')} · Port {server.port}</span>
+              {slotsData && slotsData.totalSlots > 0 && (
+                <span className={`flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
+                  slotsData.activeSlots > 0
+                    ? 'bg-green-100 text-green-700'
+                    : 'bg-gray-100 text-gray-500'
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    slotsData.activeSlots > 0 ? 'bg-green-500' : 'bg-gray-400'
+                  }`} />
+                  {slotsData.activeSlots > 0
+                    ? `${slotsData.activeSlots}/${slotsData.totalSlots} active`
+                    : `${slotsData.totalSlots} idle`}
+                </span>
+              )}
+            </p>
           </div>
         </div>
       </div>

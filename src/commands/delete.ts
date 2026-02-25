@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import * as readline from 'readline';
 import { stateManager } from '../lib/state-manager';
-import { launchctlManager } from '../lib/launchctl-manager';
+import { serverLifecycleService } from '../lib/server-lifecycle-service';
 
 export async function deleteCommand(identifier: string): Promise<void> {
   // Find server
@@ -24,28 +24,10 @@ export async function deleteCommand(identifier: string): Promise<void> {
   console.log();
   console.log(chalk.blue(`🗑️  Deleting server ${server.modelName}...`));
 
-  // Unload service (stops and removes from launchd)
-  if (server.status === 'running') {
-    console.log(chalk.dim('Stopping and unloading service...'));
-  } else {
-    console.log(chalk.dim('Unloading service...'));
-  }
-  try {
-    await launchctlManager.unloadService(server.plistPath);
-    if (server.status === 'running') {
-      await launchctlManager.waitForServiceStop(server.label, 5000);
-    }
-  } catch (error) {
-    console.log(chalk.yellow('⚠️  Failed to unload service gracefully'));
-  }
-
-  // Delete plist
-  console.log(chalk.dim('Deleting plist file...'));
-  await launchctlManager.deletePlist(server.plistPath);
-
-  // Delete server config
-  console.log(chalk.dim('Deleting server configuration...'));
-  await stateManager.deleteServerConfig(server.id);
+  const result = await serverLifecycleService.deleteServer(identifier, {
+    onProgress: (message, step, total) => console.log(chalk.dim(`[${step}/${total}] ${message}`)),
+  });
+  if (!result.success) throw new Error(result.error || 'Failed to delete server');
 
   // Success
   console.log();
@@ -53,7 +35,7 @@ export async function deleteCommand(identifier: string): Promise<void> {
   console.log(chalk.dim(`   Plist removed: ${server.plistPath}`));
   console.log(chalk.dim(`   Config removed`));
   console.log();
-  console.log(chalk.dim(`   Model file preserved at: ${server.modelPath}`));
+  console.log(chalk.dim(`   Model file preserved at: ${result.modelPath || server.modelPath}`));
 }
 
 /**

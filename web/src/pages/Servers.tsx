@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useServers, useStartServer, useStopServer, useRouter } from '../hooks/useApi';
-import { Cpu, Database, Loader2, Plus, LayoutGrid, List } from 'lucide-react';
+import { useServers, useStartServer, useStopServer, useDeleteServer, useRouter } from '../hooks/useApi';
+import { Cpu, Database, Loader2, Plus, LayoutGrid, List, Trash2 } from 'lucide-react';
 import { ServerConfigModal } from '../components/ServerConfigModal';
 import { CreateServerModal } from '../components/CreateServerModal';
 import type { Server } from '../types/api';
@@ -17,8 +17,10 @@ export function Servers() {
   const { data: routerData } = useRouter();
   const startServer = useStartServer();
   const stopServer = useStopServer();
+  const deleteServer = useDeleteServer();
 
-  const [actionLoading, setActionLoading] = useState<{ id: string; action: 'start' | 'stop' } | null>(null);
+  const [actionLoading, setActionLoading] = useState<{ id: string; action: 'start' | 'stop' | 'delete' } | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [configUpdating, setConfigUpdating] = useState<string | null>(null);
   const [configServer, setConfigServer] = useState<Server | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -81,6 +83,19 @@ export function Servers() {
     }
   };
 
+  const handleDelete = async (id: string) => {
+    setConfirmDeleteId(null);
+    setActionLoading({ id, action: 'delete' });
+    try {
+      await deleteServer.mutateAsync(id);
+      await queryClient.refetchQueries({ queryKey: ['servers'] });
+    } catch {
+      // mutation state surfaces the error
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const renderStatusBadge = (server: Server) => {
     const serverId = server.id;
 
@@ -94,6 +109,14 @@ export function Servers() {
     }
 
     if (actionLoading?.id === serverId) {
+      if (actionLoading.action === 'delete') {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-red-50 text-red-600">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Removing
+          </span>
+        );
+      }
       if (actionLoading.action === 'stop') {
         return (
           <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-neutral-100 text-neutral-700">
@@ -333,6 +356,33 @@ export function Servers() {
                 >
                   Stop
                 </button>
+                {confirmDeleteId === server.id ? (
+                  <span className="flex items-center gap-1">
+                    <span className="text-xs text-neutral-500 mr-1">Remove?</span>
+                    <button
+                      onClick={() => handleDelete(server.id)}
+                      disabled={actionLoading?.id === server.id}
+                      className="px-2 py-1 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="px-2 py-1 text-xs font-medium text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 rounded-md transition-colors cursor-pointer"
+                    >
+                      No
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteId(server.id)}
+                    disabled={actionLoading?.id === server.id || configUpdating === server.id}
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    title="Remove server"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
               {renderStatusBadge(server)}
             </div>
@@ -414,6 +464,33 @@ export function Servers() {
                 >
                   Start
                 </button>
+                {confirmDeleteId === server.id ? (
+                  <span className="flex items-center gap-1">
+                    <span className="text-xs text-neutral-500 mr-1">Remove?</span>
+                    <button
+                      onClick={() => handleDelete(server.id)}
+                      disabled={actionLoading?.id === server.id}
+                      className="px-2 py-1 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="px-2 py-1 text-xs font-medium text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 rounded-md transition-colors cursor-pointer"
+                    >
+                      No
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteId(server.id)}
+                    disabled={actionLoading?.id === server.id || configUpdating === server.id}
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    title="Remove server"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
               {renderStatusBadge(server)}
             </div>
@@ -507,6 +584,33 @@ export function Servers() {
                       title="Start"
                     >
                       Start
+                    </button>
+                  )}
+                  {confirmDeleteId === server.id ? (
+                    <span className="flex items-center gap-1">
+                      <span className="text-xs text-neutral-500 mr-1">Remove?</span>
+                      <button
+                        onClick={() => handleDelete(server.id)}
+                        disabled={actionLoading?.id === server.id}
+                        className="px-2 py-1 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="px-2 py-1 text-xs font-medium text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 rounded-md transition-colors cursor-pointer"
+                      >
+                        No
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteId(server.id)}
+                      disabled={actionLoading?.id === server.id || configUpdating === server.id}
+                      className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                      title="Remove server"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>

@@ -129,6 +129,12 @@ class ApiClient {
     );
   }
 
+  async getServerSlots(id: string) {
+    return this.request<{ slots: any[]; activeSlots: number; idleSlots: number; totalSlots: number }>(
+      `/api/servers/${id}/slots`
+    );
+  }
+
   // Models
   async listModels() {
     return this.request<{ models: Model[] }>('/api/models');

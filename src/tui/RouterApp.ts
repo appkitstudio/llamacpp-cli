@@ -352,7 +352,7 @@ export async function createRouterUI(
     try {
       const { execSync } = require('child_process');
       const output = execSync(`tail -n 30 "${logPath}"`, { encoding: 'utf-8' });
-      const lines = output.split('\n');
+      const lines = output.split('\n').filter((l: string) => l).reverse();
 
       content += divider + '\n';
 
@@ -360,7 +360,6 @@ export async function createRouterUI(
       const maxWidth = termWidth - 4;
 
       for (const line of lines) {
-        if (!line) continue;
 
         // Remove ANSI color codes to calculate visible length
         const visibleLine = line.replace(/\x1b\[[0-9;]*m/g, '');
