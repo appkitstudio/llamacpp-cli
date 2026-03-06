@@ -803,12 +803,6 @@ export async function createMultiServerMonitorUI(
   // Fetch and update display
   async function fetchData() {
     try {
-      // Skip fetching metrics if we're in logs view (don't need server data)
-      if (viewMode === "detail" && detailSubView === "logs") {
-        await render();
-        return;
-      }
-
       // Reload server configs from disk to pick up changes made via web UI or CLI
       try {
         const freshServers = await stateManager.getAllServers();
@@ -835,6 +829,12 @@ export async function createMultiServerMonitorUI(
         servers = freshServers;
       } catch {
         // Keep using existing servers if the reload fails
+      }
+
+      // Skip fetching metrics if we're in logs view (don't need server data)
+      if (viewMode === "detail" && detailSubView === "logs") {
+        await render();
+        return;
       }
 
       // Collect system metrics ONCE for all servers (not per-server)
