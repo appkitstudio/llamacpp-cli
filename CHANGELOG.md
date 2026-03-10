@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.1.0](https://github.com/appkitstudio/llamacpp-cli/compare/v2.1.0-beta.1...v2.1.0) (2026-03-10)
+
+
+### Features
+
+* add AdminLogs page for viewing admin service logs ([94dc6e9](https://github.com/appkitstudio/llamacpp-cli/commit/94dc6e9db0ed3747aaedbf16ed4930f28990c1b4))
+* add chat interface for llama.cpp servers ([9eae413](https://github.com/appkitstudio/llamacpp-cli/commit/9eae413a07e23c815a44ee06531cb8fdbef4899f))
+* add input handling for CPU threads in server creation and configuration modals ([b795b91](https://github.com/appkitstudio/llamacpp-cli/commit/b795b9171705b5dbc8bfa12af0ef1dbe85cbf87f))
+* add Manage page for service management and log handling ([753b73b](https://github.com/appkitstudio/llamacpp-cli/commit/753b73bedc0e7b4099d94976868d621357aa14b9))
+* Display verbose config option in router/admin status commands ([bc9a83c](https://github.com/appkitstudio/llamacpp-cli/commit/bc9a83c7e5959ecc52553dad4bcbe0cd3da575a3))
+* enhance model retrieval in RouterServer and optimize data fetching in MultiServerMonitorApp ([7af6751](https://github.com/appkitstudio/llamacpp-cli/commit/7af675168a41df74edd25bac0553821d390f2a6b))
+* enhance server creation process with support for multiple configurations and unique server IDs ([8a4b23c](https://github.com/appkitstudio/llamacpp-cli/commit/8a4b23c36564c9a7751ab306e337fc484d6c926e))
+* implement server deletion and slot management features in TUI ([6de992a](https://github.com/appkitstudio/llamacpp-cli/commit/6de992ab28e174e051ea8b7aca9fe16b3994955d))
+* merge tui-refactor branch ([a08cd06](https://github.com/appkitstudio/llamacpp-cli/commit/a08cd0677def97063f0719186bf5be6c482b8e56))
+* migrate service labels to studio.appkit.llamacpp-cli namespace ([8eecdce](https://github.com/appkitstudio/llamacpp-cli/commit/8eecdcedd3b9c1eeb08826a11c227a2ff7552c27))
+
+
+### Bug Fixes
+
+* Router and admin services now show correct names in macOS notifications ([42cc877](https://github.com/appkitstudio/llamacpp-cli/commit/42cc877ec057631424da8abd782dc933eacada2b))
+* Router config page keyboard handling now works correctly ([649492c](https://github.com/appkitstudio/llamacpp-cli/commit/649492cd6e50ff85053f8807ec57a0844ba76c93))
+* Web UI now shows base model name for sharded models in server create/config ([d8b4eff](https://github.com/appkitstudio/llamacpp-cli/commit/d8b4effa6856fcfcf5759362284b91e502fb8d0c))
+
+
+### Code Refactoring
+
+* remove log clearing functionality from admin server and related services ([d6e1150](https://github.com/appkitstudio/llamacpp-cli/commit/d6e115091545a258246db17a1f10605fb5994e11))
+* remove Router link from Nav and update Admin section visibility states ([b26e269](https://github.com/appkitstudio/llamacpp-cli/commit/b26e26941120e9897ffb17b2d43f058cdb2dc52f))
+* update log file naming and improve logging notices in UI ([f137587](https://github.com/appkitstudio/llamacpp-cli/commit/f1375877b6a335d1f2f7040282c9b8f495541415))
+
 ## [2.0.0] (2026-02-10)
 
 ### BREAKING CHANGES
