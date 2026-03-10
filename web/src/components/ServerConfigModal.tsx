@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Loader2, Save, RotateCcw, HardDrive, AlertTriangle } from 'lucide-react';
+import { X, Loader2, Save, RotateCcw, AlertTriangle } from 'lucide-react';
 import { useUpdateServer, useModels } from '../hooks/useApi';
 import type { Server } from '../types/api';
 
@@ -7,6 +7,7 @@ interface ServerConfigModalProps {
   server: Server | null;
   isOpen: boolean;
   onClose: () => void;
+  onUpdateStart?: () => void;
 }
 
 interface FormData {
@@ -21,7 +22,7 @@ interface FormData {
   customFlags: string;
 }
 
-export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModalProps) {
+export function ServerConfigModal({ server, isOpen, onClose, onUpdateStart }: ServerConfigModalProps) {
   const updateServer = useUpdateServer();
   const { data: modelsData, isLoading: modelsLoading } = useModels();
 
@@ -39,14 +40,49 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
 
   const [restartAfterSave, setRestartAfterSave] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [gpuLayersInput, setGpuLayersInput] = useState('60');
+  const [threadsInput, setThreadsInput] = useState('4');
 
   const models = modelsData?.models || [];
+
+  // Helper to get the correct model identifier
+  const getModelIdentifier = (model: typeof models[0]): string => {
+    return model.isSharded && model.baseModelName
+      ? model.baseModelName
+      : model.filename;
+  };
+
+  // Helper to get display name for a model
+  const getModelDisplayName = (model: typeof models[0]): string => {
+    const identifier = getModelIdentifier(model);
+    return identifier.replace('.gguf', '');
+  };
+
+  // Helper to find the model that matches a server's modelName
+  // (handles both direct filename match and shard path match)
+  const findServerModel = (serverModelName: string) => {
+    return models.find(m => {
+      // Direct filename match (non-sharded or exact first shard match)
+      if (m.filename === serverModelName) return true;
+      // Base model name match (sharded models)
+      if (m.baseModelName === serverModelName) return true;
+      // Check if serverModelName matches any shard path
+      if (m.isSharded && m.shardPaths) {
+        return m.shardPaths.some(p => p.endsWith(serverModelName));
+      }
+      return false;
+    });
+  };
 
   // Initialize form when server changes
   useEffect(() => {
     if (server) {
+      // Find the model in the list (handles sharded models correctly)
+      const serverModel = findServerModel(server.modelName);
+      const modelIdentifier = serverModel ? getModelIdentifier(serverModel) : server.modelName;
+
       setFormData({
-        model: server.modelName,
+        model: modelIdentifier,
         alias: server.alias || '',
         port: server.port,
         host: server.host,
@@ -56,9 +92,11 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
         verbose: server.verbose,
         customFlags: server.customFlags?.join(', ') || '',
       });
+      setGpuLayersInput(server.gpuLayers.toString());
+      setThreadsInput(server.threads.toString());
       setError(null);
     }
-  }, [server]);
+  }, [server, models]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,24 +110,22 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
         .map(f => f.trim())
         .filter(f => f.length > 0);
 
-      // If alias changed, include it (empty string means remove, same value means don't change)
-      const aliasUpdate = formData.alias.trim() === (server.alias || '')
-        ? undefined
-        : formData.alias.trim() || null;
-
       // Check if model changed
       const modelUpdate = formData.model !== server.modelName ? formData.model : undefined;
+
+      // Notify parent that update is starting
+      onUpdateStart?.();
 
       await updateServer.mutateAsync({
         id: server.id,
         data: {
           ...(modelUpdate && { model: modelUpdate }),
-          ...(aliasUpdate !== undefined && { alias: aliasUpdate }),
+          alias: formData.alias.trim() || null,
           port: formData.port,
           host: formData.host,
           threads: formData.threads,
           ctxSize: formData.ctxSize,
-          gpuLayers: formData.gpuLayers,
+          gpuLayers: isNaN(formData.gpuLayers) ? 60 : formData.gpuLayers,
           verbose: formData.verbose,
           customFlags: customFlags.length > 0 ? customFlags : undefined,
           restart: server.status === 'running' && restartAfterSave,
@@ -114,9 +150,12 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
     return `${(bytes / 1e3).toFixed(1)} KB`;
   };
 
-  const modelChanged = server && formData.model !== server.modelName;
-
   if (!isOpen || !server) return null;
+
+  const serverModel = findServerModel(server.modelName);
+  const currentModelIdentifier = serverModel ? getModelIdentifier(serverModel) : server.modelName;
+  const modelChanged = formData.model !== currentModelIdentifier;
+  const displayName = serverModel ? getModelDisplayName(serverModel) : server.modelName.replace('.gguf', '');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -125,7 +164,7 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Configure Server</h2>
-            <p className="text-sm text-gray-500">{server.modelName.replace('.gguf', '')}</p>
+            <p className="text-sm text-gray-500">{displayName}</p>
           </div>
           <button
             onClick={onClose}
@@ -151,46 +190,37 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
                 No models available
               </div>
             ) : (
-              <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
+              <select
+                value={formData.model}
+                onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent bg-white"
+              >
                 {models.map((model) => {
-                  const isCurrentModel = model.filename === server.modelName;
+                  const modelIdentifier = getModelIdentifier(model);
+                  const serverModel = findServerModel(server.modelName);
+                  const isCurrentModel = serverModel && getModelIdentifier(serverModel) === modelIdentifier;
                   const hasOtherServer = model.serversUsing > 0 && !isCurrentModel;
                   const canSelect = isCurrentModel || !hasOtherServer;
+
+                  let label = getModelDisplayName(model);
+                  if (isCurrentModel) {
+                    label += ' (current)';
+                  } else if (hasOtherServer) {
+                    label += ' (in use)';
+                  }
+                  label += ` - ${formatSize(model.size)}`;
+
                   return (
-                    <button
+                    <option
                       key={model.filename}
-                      type="button"
-                      onClick={() => canSelect && setFormData({ ...formData, model: model.filename })}
+                      value={modelIdentifier}
                       disabled={!canSelect}
-                      className={`w-full text-left px-3 py-2 transition-colors ${
-                        formData.model === model.filename
-                          ? 'bg-gray-100 cursor-pointer'
-                          : !canSelect
-                          ? 'bg-gray-50 opacity-50 cursor-not-allowed'
-                          : 'hover:bg-gray-50 cursor-pointer'
-                      }`}
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <HardDrive className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                          <span className="text-sm text-gray-900 truncate">
-                            {model.filename.replace('.gguf', '')}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 ml-2">
-                          <span className="text-xs text-gray-500">{formatSize(model.size)}</span>
-                          {isCurrentModel && (
-                            <span className="text-xs text-blue-600">current</span>
-                          )}
-                          {hasOtherServer && (
-                            <span className="text-xs text-orange-600">in use</span>
-                          )}
-                        </div>
-                      </div>
-                    </button>
+                      {label}
+                    </option>
                   );
                 })}
-              </div>
+              </select>
             )}
             {modelChanged && (
               <div className="flex items-start gap-2 mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg">
@@ -256,13 +286,52 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
             </label>
             <input
               type="number"
-              value={formData.threads}
-              onChange={(e) => setFormData({ ...formData, threads: parseInt(e.target.value) || 1 })}
-              min={1}
+              value={threadsInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                setThreadsInput(value);
+                // Only update formData if it's a valid number
+                if (value !== '' && value !== '-') {
+                  const num = parseInt(value);
+                  if (!isNaN(num)) {
+                    setFormData({ ...formData, threads: num });
+                  }
+                }
+              }}
+              onBlur={() => {
+                // On blur, ensure we have a valid number
+                const num = parseInt(threadsInput);
+                if (isNaN(num) || threadsInput === '' || threadsInput === '-' || num < -1 || num > 256) {
+                  setThreadsInput('4');
+                  setFormData({ ...formData, threads: 4 });
+                }
+              }}
+              min={-1}
               max={256}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent"
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent ${
+                (() => {
+                  const num = parseInt(threadsInput);
+                  const isComplete = threadsInput !== '' && threadsInput !== '-' && !isNaN(num);
+                  const isInvalid = isComplete && (num < -1 || num > 256);
+                  return isInvalid
+                    ? 'border-red-500 focus:ring-red-200'
+                    : 'border-gray-200 focus:ring-gray-200';
+                })()
+              }`}
             />
-            <p className="text-xs text-gray-500 mt-1">Number of CPU threads for inference</p>
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, threads: -1 });
+                  setThreadsInput('-1');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                Auto (-1)
+              </button>
+              <span className="text-xs text-gray-500">Number of CPU threads for inference</span>
+            </div>
           </div>
 
           {/* Context Size */}
@@ -329,13 +398,71 @@ export function ServerConfigModal({ server, isOpen, onClose }: ServerConfigModal
             </label>
             <input
               type="number"
-              value={formData.gpuLayers}
-              onChange={(e) => setFormData({ ...formData, gpuLayers: parseInt(e.target.value) || 0 })}
-              min={0}
+              value={gpuLayersInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                setGpuLayersInput(value);
+                // Only update formData if it's a valid number
+                if (value !== '' && value !== '-') {
+                  const num = parseInt(value);
+                  if (!isNaN(num)) {
+                    setFormData({ ...formData, gpuLayers: num });
+                  }
+                }
+              }}
+              onBlur={() => {
+                // On blur, ensure we have a valid number
+                const num = parseInt(gpuLayersInput);
+                if (isNaN(num) || gpuLayersInput === '' || gpuLayersInput === '-' || num < -1 || num > 999) {
+                  setGpuLayersInput('60');
+                  setFormData({ ...formData, gpuLayers: 60 });
+                }
+              }}
+              min={-1}
               max={999}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent"
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent ${
+                (() => {
+                  const num = parseInt(gpuLayersInput);
+                  const isComplete = gpuLayersInput !== '' && gpuLayersInput !== '-' && !isNaN(num);
+                  const isInvalid = isComplete && (num < -1 || num > 999);
+                  return isInvalid
+                    ? 'border-red-500 focus:ring-red-200'
+                    : 'border-gray-200 focus:ring-gray-200';
+                })()
+              }`}
             />
-            <p className="text-xs text-gray-500 mt-1">Layers to offload to GPU (0 = CPU only)</p>
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, gpuLayers: -1 });
+                  setGpuLayersInput('-1');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                All (-1)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, gpuLayers: 60 });
+                  setGpuLayersInput('60');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                Recommended (60)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, gpuLayers: 0 });
+                  setGpuLayersInput('0');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                CPU only (0)
+              </button>
+            </div>
           </div>
 
           {/* Verbose */}

@@ -9,6 +9,11 @@ import type {
   DownloadJob,
   RouterInfo,
   UpdateRouterRequest,
+  AdminInfo,
+  AdminLogsResponse,
+  RotateLogsRequest,
+  ClearArchivedLogsRequest,
+  UpdateLogConfigRequest,
 } from '../types/api';
 
 const API_BASE = '';  // Proxy handles routing
@@ -118,9 +123,15 @@ class ApiClient {
     });
   }
 
-  async getServerLogs(id: string, type: 'stdout' | 'stderr' | 'both' = 'both', lines = 100) {
-    return this.request<{ stdout: string; stderr: string }>(
+  async getServerLogs(id: string, type: 'activity' | 'system' | 'all' = 'all', lines = 100) {
+    return this.request<{ http: string; stdout: string; stderr: string }>(
       `/api/servers/${id}/logs?type=${type}&lines=${lines}`
+    );
+  }
+
+  async getServerSlots(id: string) {
+    return this.request<{ slots: any[]; activeSlots: number; idleSlots: number; totalSlots: number }>(
+      `/api/servers/${id}/slots`
     );
   }
 
@@ -206,7 +217,7 @@ class ApiClient {
     );
   }
 
-  async getRouterLogs(type: 'stdout' | 'stderr' | 'both' = 'both', lines = 100) {
+  async getRouterLogs(type: 'activity' | 'system' | 'both' = 'both', lines = 100) {
     return this.request<{ stdout: string; stderr: string }>(
       `/api/router/logs?type=${type}&lines=${lines}`
     );
@@ -220,6 +231,110 @@ class ApiClient {
         body: JSON.stringify(data),
       }
     );
+  }
+
+  // Admin
+  async getAdmin() {
+    return this.request<AdminInfo>('/api/admin');
+  }
+
+  // Admin Log Management
+  async getAdminLogs() {
+    return this.request<AdminLogsResponse>('/api/admin/logs');
+  }
+
+  async getAdminServiceLogs(type: 'activity' | 'system' | 'both' = 'both', lines = 100) {
+    return this.request<{ stdout: string; stderr: string }>(
+      `/api/admin/service-logs?type=${type}&lines=${lines}`
+    );
+  }
+
+  async rotateLogs(data: RotateLogsRequest) {
+    return this.request<{ success: boolean; message: string; archivedFiles: string[] }>(
+      '/api/admin/logs/rotate',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  async clearArchivedLogs(data: ClearArchivedLogsRequest) {
+    return this.request<{ success: boolean; count: number; totalSize: number }>(
+      '/api/admin/logs/clear-archived',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  async updateLogConfig(data: UpdateLogConfigRequest) {
+    return this.request<{ success: boolean; config: any }>(
+      '/api/admin/logs/config',
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
+    );
+  }
+
+  // Chat - Streaming via Router
+  async *streamChatMessage(
+    modelName: string,
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    options?: { max_tokens?: number; temperature?: number }
+  ): AsyncGenerator<any> {
+    const response = await fetch(`${API_BASE}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: modelName,
+        messages,
+        max_tokens: options?.max_tokens || 4096,
+        temperature: options?.temperature || 0.7,
+        stream: true,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || error.details || 'Chat request failed');
+    }
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              return;
+            }
+            try {
+              const parsed = JSON.parse(data);
+              yield parsed;
+            } catch {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
   }
 }
 

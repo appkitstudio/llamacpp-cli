@@ -15,6 +15,7 @@ export interface Server {
   verbose: boolean;
   customFlags?: string[];
   status: ServerStatus;
+  healthy?: boolean;  // Health check from /health endpoint
   pid?: number;
   createdAt: string;
   lastStarted?: string;
@@ -34,6 +35,12 @@ export interface Model {
   exists: boolean;
   serversUsing: number;
   serverIds: string[];
+  // Shard metadata (optional - only present for multi-file models)
+  isSharded?: boolean;
+  shardCount?: number;
+  shardIndex?: number;
+  shardPaths?: string[];
+  baseModelName?: string;
 }
 
 export interface SystemStatus {
@@ -122,7 +129,7 @@ export interface RouterInfo {
   config: {
     port: number;
     host: string;
-    verbose: boolean;
+    logging: boolean;
     requestTimeout: number;
     healthCheckInterval: number;
   } | null;
@@ -137,7 +144,133 @@ export interface RouterInfo {
 export interface UpdateRouterRequest {
   port?: number;
   host?: string;
-  verbose?: boolean;
+  logging?: boolean;
   requestTimeout?: number;
   healthCheckInterval?: number;
+}
+
+// Admin types
+export type AdminStatus = 'not_configured' | 'running' | 'stopped';
+
+export interface AdminInfo {
+  status: AdminStatus;
+  config: {
+    port: number;
+    host: string;
+    logging: boolean;
+    requestTimeout: number;
+  } | null;
+  pid: number | null;
+  isRunning: boolean;
+  apiKey?: string;
+  createdAt?: string;
+  lastStarted?: string;
+  lastStopped?: string;
+}
+
+// Log management types
+export interface LogFileInfo {
+  path: string;
+  size: number;
+}
+
+export interface ServerLogInfo {
+  serverId: string;
+  stdout: LogFileInfo;
+  stderr: LogFileInfo;
+  httpLog: LogFileInfo;
+  currentTotal: number;
+  archived: {
+    count: number;
+    totalSize: number;
+  };
+}
+
+export interface ServiceLogInfo {
+  stdout: LogFileInfo;
+  stderr: LogFileInfo;
+  currentTotal: number;
+  archived: {
+    count: number;
+    totalSize: number;
+  };
+}
+
+export interface LogManagementConfig {
+  autoRotate: {
+    enabled: boolean;
+    intervalHours: number;
+    thresholdMB: number;
+  };
+  autoDelete: {
+    enabled: boolean;
+    intervalHours: number;
+    afterDays: number;
+  };
+}
+
+export interface WorkerStatus {
+  autoRotate: {
+    enabled: boolean;
+    running: boolean;
+    lastRun?: string;
+  };
+  autoDelete: {
+    enabled: boolean;
+    running: boolean;
+    lastRun?: string;
+  };
+}
+
+export interface AdminLogsResponse {
+  servers: ServerLogInfo[];
+  router: ServiceLogInfo;
+  admin: ServiceLogInfo;
+  summary: {
+    totalCurrent: number;
+    totalArchived: number;
+    grandTotal: number;
+  };
+  config: LogManagementConfig;
+  workers: WorkerStatus;
+}
+
+export interface RotateLogsRequest {
+  type: 'server' | 'router' | 'admin';
+  serverId?: string;
+  streams: ('stdout' | 'stderr' | 'httpLog')[];
+}
+
+export interface ClearArchivedLogsRequest {
+  serverId?: string;
+}
+
+export interface UpdateLogConfigRequest {
+  autoRotate?: Partial<LogManagementConfig['autoRotate']>;
+  autoDelete?: Partial<LogManagementConfig['autoDelete']>;
+}
+
+// Chat types
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string;
+}
+
+export interface ChatMessageRequest {
+  model: string;
+  messages: ChatMessage[];
+  max_tokens: number;
+  stream?: boolean;
+  temperature?: number;
+}
+
+export interface ChatMessageResponse {
+  id: string;
+  type: 'message';
+  role: 'assistant';
+  content: Array<{ type: 'text'; text: string }>;
+  model: string;
+  stop_reason: string;
+  usage: { input_tokens: number; output_tokens: number };
 }

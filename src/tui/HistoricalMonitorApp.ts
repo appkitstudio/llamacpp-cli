@@ -9,6 +9,8 @@ import {
   getDownsampleRatio,
   TimeSeriesPoint
 } from '../utils/downsample-utils.js';
+import { ModalController } from './shared/modal-controller.js';
+import { KeyboardManager } from '../lib/keyboard-manager.js';
 
 type ViewMode = 'recent' | 'hour';
 
@@ -158,6 +160,10 @@ export async function createHistoricalUI(
   const REFRESH_INTERVAL = 1000;
   let lastGoodRender: string | null = null;
   let consecutiveErrors = 0;
+
+  // Keyboard manager and modal controller for centralized keyboard handling
+  const keyboardManager = new KeyboardManager(screen);
+  const modalController = new ModalController(screen, keyboardManager);
 
   const contentBox = createContentBox();
   screen.append(contentBox);
@@ -314,6 +320,7 @@ export async function createHistoricalUI(
       render();
     },
     escape: () => {
+      if (modalController.isModalOpen()) return; // Don't handle if modal is open
       cleanup();
       screen.remove(contentBox);
       onBack();
@@ -360,6 +367,10 @@ export async function createMultiServerHistoricalUI(
   const REFRESH_INTERVAL = 3000;
   let lastGoodRender: string | null = null;
   let consecutiveErrors = 0;
+
+  // Keyboard manager and modal controller for centralized keyboard handling
+  const keyboardManager = new KeyboardManager(screen);
+  const modalController = new ModalController(screen, keyboardManager);
 
   const contentBox = createContentBox();
   screen.append(contentBox);
@@ -551,6 +562,7 @@ export async function createMultiServerHistoricalUI(
       render();
     },
     escape: () => {
+      if (modalController.isModalOpen()) return; // Don't handle if modal is open
       cleanup();
       screen.remove(contentBox);
       onBack();

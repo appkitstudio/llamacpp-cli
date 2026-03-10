@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { useServers, useStartServer, useStopServer } from '../hooks/useApi';
-import { Cpu, Database, Loader2, Plus, LayoutGrid, List } from 'lucide-react';
+import { useServers, useStartServer, useStopServer, useDeleteServer, useRouter } from '../hooks/useApi';
+import { Cpu, Database, Loader2, Plus, LayoutGrid, List, Trash2 } from 'lucide-react';
 import { ServerConfigModal } from '../components/ServerConfigModal';
 import { CreateServerModal } from '../components/CreateServerModal';
 import type { Server } from '../types/api';
@@ -14,10 +14,14 @@ export function Servers() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: serversData, isLoading } = useServers();
+  const { data: routerData } = useRouter();
   const startServer = useStartServer();
   const stopServer = useStopServer();
+  const deleteServer = useDeleteServer();
 
-  const [actionLoading, setActionLoading] = useState<{ id: string; action: 'start' | 'stop' } | null>(null);
+  const [actionLoading, setActionLoading] = useState<{ id: string; action: 'start' | 'stop' | 'delete' } | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [configUpdating, setConfigUpdating] = useState<string | null>(null);
   const [configServer, setConfigServer] = useState<Server | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [filter, setFilter] = useState<ServerFilter>('all');
@@ -44,7 +48,16 @@ export function Servers() {
         setActionLoading(null);
       }
     }
-  }, [servers, actionLoading]);
+
+    // Clear config updating state once data is refreshed
+    if (configUpdating && servers.length > 0) {
+      // Wait a bit to ensure backend has processed the update
+      const timer = setTimeout(() => {
+        setConfigUpdating(null);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [servers, actionLoading, configUpdating]);
 
   const handleStart = async (id: string) => {
     setActionLoading({ id, action: 'start' });
@@ -70,10 +83,40 @@ export function Servers() {
     }
   };
 
+  const handleDelete = async (id: string) => {
+    setConfirmDeleteId(null);
+    setActionLoading({ id, action: 'delete' });
+    try {
+      await deleteServer.mutateAsync(id);
+      await queryClient.refetchQueries({ queryKey: ['servers'] });
+    } catch {
+      // mutation state surfaces the error
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const renderStatusBadge = (server: Server) => {
     const serverId = server.id;
 
+    if (configUpdating === serverId) {
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-neutral-100 text-neutral-700">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          Updating
+        </span>
+      );
+    }
+
     if (actionLoading?.id === serverId) {
+      if (actionLoading.action === 'delete') {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-red-50 text-red-600">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Removing
+          </span>
+        );
+      }
       if (actionLoading.action === 'stop') {
         return (
           <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-neutral-100 text-neutral-700">
@@ -93,6 +136,15 @@ export function Servers() {
     }
 
     if (server.status === 'running') {
+      // Check if server is unhealthy (running but health check failed)
+      if (server.healthy === false) {
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-red-50 text-red-700 border border-red-200/50">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+            Unhealthy
+          </span>
+        );
+      }
       return (
         <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-green-50 text-green-700 border border-green-200/50">
           <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
@@ -263,15 +315,34 @@ export function Servers() {
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => navigate(`/servers/${server.id}/logs`)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                   title="Logs"
                 >
                   Logs
                 </button>
                 <button
+                  onClick={() => navigate(`/servers/${server.port}/chat`)}
+                  disabled={
+                    server.status !== 'running' ||
+                    !routerData?.isRunning ||
+                    actionLoading?.id === server.id ||
+                    configUpdating === server.id
+                  }
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    !routerData?.isRunning
+                      ? 'Router must be running to chat'
+                      : server.status !== 'running'
+                      ? 'Server must be running to chat'
+                      : 'Chat'
+                  }
+                >
+                  Chat
+                </button>
+                <button
                   onClick={() => setConfigServer(server)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                   title="Config"
                 >
@@ -279,12 +350,39 @@ export function Servers() {
                 </button>
                 <button
                   onClick={() => handleStop(server.id)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
                   title="Stop"
                 >
                   Stop
                 </button>
+                {confirmDeleteId === server.id ? (
+                  <span className="flex items-center gap-1">
+                    <span className="text-xs text-neutral-500 mr-1">Remove?</span>
+                    <button
+                      onClick={() => handleDelete(server.id)}
+                      disabled={actionLoading?.id === server.id}
+                      className="px-2 py-1 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="px-2 py-1 text-xs font-medium text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 rounded-md transition-colors cursor-pointer"
+                    >
+                      No
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteId(server.id)}
+                    disabled={actionLoading?.id === server.id || configUpdating === server.id}
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    title="Remove server"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
               {renderStatusBadge(server)}
             </div>
@@ -325,15 +423,34 @@ export function Servers() {
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => navigate(`/servers/${server.id}/logs`)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                   title="Logs"
                 >
                   Logs
                 </button>
                 <button
+                  onClick={() => navigate(`/servers/${server.port}/chat`)}
+                  disabled={
+                    server.status !== 'running' ||
+                    !routerData?.isRunning ||
+                    actionLoading?.id === server.id ||
+                    configUpdating === server.id
+                  }
+                  className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    !routerData?.isRunning
+                      ? 'Router must be running to chat'
+                      : server.status !== 'running'
+                      ? 'Server must be running to chat'
+                      : 'Chat'
+                  }
+                >
+                  Chat
+                </button>
+                <button
                   onClick={() => setConfigServer(server)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                   title="Config"
                 >
@@ -341,12 +458,39 @@ export function Servers() {
                 </button>
                 <button
                   onClick={() => handleStart(server.id)}
-                  disabled={actionLoading?.id === server.id}
+                  disabled={actionLoading?.id === server.id || configUpdating === server.id}
                   className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
                   title="Start"
                 >
                   Start
                 </button>
+                {confirmDeleteId === server.id ? (
+                  <span className="flex items-center gap-1">
+                    <span className="text-xs text-neutral-500 mr-1">Remove?</span>
+                    <button
+                      onClick={() => handleDelete(server.id)}
+                      disabled={actionLoading?.id === server.id}
+                      className="px-2 py-1 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(null)}
+                      className="px-2 py-1 text-xs font-medium text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 rounded-md transition-colors cursor-pointer"
+                    >
+                      No
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setConfirmDeleteId(server.id)}
+                    disabled={actionLoading?.id === server.id || configUpdating === server.id}
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    title="Remove server"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
               {renderStatusBadge(server)}
             </div>
@@ -390,15 +534,34 @@ export function Servers() {
                 <div className="flex items-center gap-1">
                   <button
                     onClick={() => navigate(`/servers/${server.id}/logs`)}
-                    disabled={actionLoading?.id === server.id}
+                    disabled={actionLoading?.id === server.id || configUpdating === server.id}
                     className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                     title="Logs"
                   >
                     Logs
                   </button>
                   <button
+                    onClick={() => navigate(`/servers/${server.port}/chat`)}
+                    disabled={
+                      server.status !== 'running' ||
+                      !routerData?.isRunning ||
+                      actionLoading?.id === server.id ||
+                      configUpdating === server.id
+                    }
+                    className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={
+                      !routerData?.isRunning
+                        ? 'Router must be running to chat'
+                        : server.status !== 'running'
+                        ? 'Server must be running to chat'
+                        : 'Chat'
+                    }
+                  >
+                    Chat
+                  </button>
+                  <button
                     onClick={() => setConfigServer(server)}
-                    disabled={actionLoading?.id === server.id}
+                    disabled={actionLoading?.id === server.id || configUpdating === server.id}
                     className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-neutral-900 hover:bg-neutral-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                     title="Config"
                   >
@@ -407,7 +570,7 @@ export function Servers() {
                   {server.status === 'running' ? (
                     <button
                       onClick={() => handleStop(server.id)}
-                      disabled={actionLoading?.id === server.id}
+                      disabled={actionLoading?.id === server.id || configUpdating === server.id}
                       className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
                       title="Stop"
                     >
@@ -416,11 +579,38 @@ export function Servers() {
                   ) : (
                     <button
                       onClick={() => handleStart(server.id)}
-                      disabled={actionLoading?.id === server.id}
+                      disabled={actionLoading?.id === server.id || configUpdating === server.id}
                       className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-green-600 hover:bg-green-50 rounded-md transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-wait"
                       title="Start"
                     >
                       Start
+                    </button>
+                  )}
+                  {confirmDeleteId === server.id ? (
+                    <span className="flex items-center gap-1">
+                      <span className="text-xs text-neutral-500 mr-1">Remove?</span>
+                      <button
+                        onClick={() => handleDelete(server.id)}
+                        disabled={actionLoading?.id === server.id}
+                        className="px-2 py-1 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="px-2 py-1 text-xs font-medium text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 rounded-md transition-colors cursor-pointer"
+                      >
+                        No
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDeleteId(server.id)}
+                      disabled={actionLoading?.id === server.id || configUpdating === server.id}
+                      className="px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                      title="Remove server"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
@@ -462,6 +652,11 @@ export function Servers() {
         server={configServer}
         isOpen={configServer !== null}
         onClose={() => setConfigServer(null)}
+        onUpdateStart={() => {
+          if (configServer) {
+            setConfigUpdating(configServer.id);
+          }
+        }}
       />
 
       {/* Create Modal */}

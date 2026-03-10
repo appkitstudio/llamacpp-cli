@@ -42,8 +42,10 @@ export class ConfigGenerator {
       ctxSize = 16384;       // 6GB+: very large
     }
 
-    // GPU layers - always max for Metal (macOS)
-    const gpuLayers = 60;  // llama.cpp auto-detects optimal value
+    // GPU layers - conservative default of 60 works reliably on all Apple Silicon devices
+    // Users can override with -1 to use all available layers (max performance, may OOM on large models)
+    // or 0 for CPU-only mode. llama-server auto-detects optimal layer distribution.
+    const gpuLayers = 60;
 
     // Threads - use half of available cores (better performance)
     const cpuCount = os.cpus().length;
@@ -76,15 +78,17 @@ export class ConfigGenerator {
     const customFlags = options?.customFlags;  // Optional custom flags
     const alias = options?.alias;  // Optional alias
 
-    // Generate server ID
-    const id = sanitizeModelName(modelName);
+    // Generate unique server ID (handles multiple servers with same model)
+    const baseId = sanitizeModelName(modelName);
+    const id = await stateManager.generateUniqueServerId(baseId);
 
     // Generate paths
-    const label = `com.llama.${id}`;
+    const label = `studio.appkit.llamacpp-cli.${id}`;
     const plistPath = path.join(getLaunchAgentsDir(), `${label}.plist`);
     const logsDir = getLogsDir();
     const stdoutPath = path.join(logsDir, `${id}.stdout`);
     const stderrPath = path.join(logsDir, `${id}.stderr`);
+    const httpLogPath = path.join(logsDir, `${id}.http`);
 
     const config: ServerConfig = {
       id,
@@ -106,6 +110,7 @@ export class ConfigGenerator {
       label,
       stdoutPath,
       stderrPath,
+      httpLogPath,
     };
 
     return config;

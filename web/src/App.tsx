@@ -5,9 +5,12 @@ import { Nav } from './components/Nav';
 import { ApiKeyPrompt } from './components/ApiKeyPrompt';
 import { Servers } from './pages/Servers';
 import { ServerLogs } from './pages/ServerLogs';
+import { ServerChat } from './pages/ServerChat';
 import { Models } from './pages/Models';
 import { Router } from './pages/Router';
 import { RouterLogs } from './pages/RouterLogs';
+import { Manage } from './pages/Manage';
+import { AdminLogs } from './pages/AdminLogs';
 import { api } from './lib/api';
 
 const queryClient = new QueryClient({
@@ -37,9 +40,12 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         <Route path="/" element={<Navigate to="/servers" replace />} />
         <Route path="/servers" element={<Servers />} />
         <Route path="/servers/:id/logs" element={<ServerLogs />} />
+        <Route path="/servers/:port/chat" element={<ServerChat />} />
         <Route path="/models" element={<Models searchQuery={searchQuery} />} />
         <Route path="/router" element={<Router />} />
         <Route path="/router/logs" element={<RouterLogs />} />
+        <Route path="/manage" element={<Manage />} />
+        <Route path="/admin/logs" element={<AdminLogs />} />
       </Routes>
     </div>
   );

@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { fileExists, getLogsDir } from './file-utils';
+import { fileExists, getLogsDir, getServersDir } from './file-utils';
 
 /**
  * Get the size of a file in bytes
@@ -62,17 +62,6 @@ export async function rotateLogFile(logPath: string): Promise<string> {
   return archivedPath;
 }
 
-/**
- * Clear (truncate) a log file to zero bytes
- */
-export async function clearLogFile(logPath: string): Promise<void> {
-  if (!(await fileExists(logPath))) {
-    throw new Error(`Log file does not exist: ${logPath}`);
-  }
-
-  // Truncate file to 0 bytes
-  await fs.truncate(logPath, 0);
-}
 
 /**
  * Auto-rotate log files if they exceed threshold
@@ -172,6 +161,223 @@ export async function deleteArchivedLogs(serverId: string): Promise<{
     }
   } catch (error) {
     throw new Error(`Failed to delete archived logs: ${(error as Error).message}`);
+  }
+
+  return { count, totalSize };
+}
+
+// ==============================================================================
+// NEW LOG SCANNING FUNCTIONS
+// ==============================================================================
+
+export interface LogFileInfo {
+  path: string;
+  size: number;
+}
+
+export interface ServerLogInfo {
+  serverId: string;
+  stdout: LogFileInfo;
+  stderr: LogFileInfo;
+  httpLog: LogFileInfo;
+  currentTotal: number;
+  archived: {
+    count: number;
+    totalSize: number;
+  };
+}
+
+export interface ServiceLogInfo {
+  stdout: LogFileInfo;
+  stderr: LogFileInfo;
+  currentTotal: number;
+  archived: {
+    count: number;
+    totalSize: number;
+  };
+}
+
+export interface AllLogInfo {
+  servers: ServerLogInfo[];
+  router: ServiceLogInfo;
+  admin: ServiceLogInfo;
+  summary: {
+    totalCurrent: number;
+    totalArchived: number;
+    grandTotal: number;
+  };
+}
+
+/**
+ * Get log information for a specific server
+ */
+export async function getServerLogInfo(serverId: string): Promise<ServerLogInfo> {
+  const logsDir = getLogsDir();
+
+  const stdoutPath = path.join(logsDir, `${serverId}.stdout`);
+  const stderrPath = path.join(logsDir, `${serverId}.stderr`);
+  const httpLogPath = path.join(logsDir, `${serverId}.http`);
+
+  const stdoutSize = (await fileExists(stdoutPath)) ? await getFileSize(stdoutPath) : 0;
+  const stderrSize = (await fileExists(stderrPath)) ? await getFileSize(stderrPath) : 0;
+  const httpLogSize = (await fileExists(httpLogPath)) ? await getFileSize(httpLogPath) : 0;
+
+  const archived = await getArchivedLogInfo(serverId);
+
+  return {
+    serverId,
+    stdout: { path: stdoutPath, size: stdoutSize },
+    stderr: { path: stderrPath, size: stderrSize },
+    httpLog: { path: httpLogPath, size: httpLogSize },
+    currentTotal: stdoutSize + stderrSize + httpLogSize,
+    archived,
+  };
+}
+
+/**
+ * Get log information for router service
+ */
+export async function getRouterLogInfo(): Promise<ServiceLogInfo> {
+  const logsDir = getLogsDir();
+
+  const stdoutPath = path.join(logsDir, 'router.stdout');
+  const stderrPath = path.join(logsDir, 'router.stderr');
+
+  const stdoutSize = (await fileExists(stdoutPath)) ? await getFileSize(stdoutPath) : 0;
+  const stderrSize = (await fileExists(stderrPath)) ? await getFileSize(stderrPath) : 0;
+
+  const archived = await getArchivedLogInfo('router');
+
+  return {
+    stdout: { path: stdoutPath, size: stdoutSize },
+    stderr: { path: stderrPath, size: stderrSize },
+    currentTotal: stdoutSize + stderrSize,
+    archived,
+  };
+}
+
+/**
+ * Get log information for admin service
+ */
+export async function getAdminLogInfo(): Promise<ServiceLogInfo> {
+  const logsDir = getLogsDir();
+
+  const stdoutPath = path.join(logsDir, 'admin.stdout');
+  const stderrPath = path.join(logsDir, 'admin.stderr');
+
+  const stdoutSize = (await fileExists(stdoutPath)) ? await getFileSize(stdoutPath) : 0;
+  const stderrSize = (await fileExists(stderrPath)) ? await getFileSize(stderrPath) : 0;
+
+  const archived = await getArchivedLogInfo('admin');
+
+  return {
+    stdout: { path: stdoutPath, size: stdoutSize },
+    stderr: { path: stderrPath, size: stderrSize },
+    currentTotal: stdoutSize + stderrSize,
+    archived,
+  };
+}
+
+/**
+ * Get log information for all services (servers, router, admin)
+ */
+export async function getAllLogInfo(): Promise<AllLogInfo> {
+  const serversDir = getServersDir();
+  const servers: ServerLogInfo[] = [];
+
+  // Scan all server configs
+  try {
+    const files = await fs.readdir(serversDir);
+    const serverFiles = files.filter((f) => f.endsWith('.json'));
+
+    for (const file of serverFiles) {
+      try {
+        const configPath = path.join(serversDir, file);
+        const configData = await fs.readFile(configPath, 'utf-8');
+        const config = JSON.parse(configData);
+        const serverInfo = await getServerLogInfo(config.id);
+        servers.push(serverInfo);
+      } catch {
+        // Skip invalid config files
+        continue;
+      }
+    }
+  } catch {
+    // Servers directory doesn't exist or can't be read
+  }
+
+  // Get router and admin logs
+  const router = await getRouterLogInfo();
+  const admin = await getAdminLogInfo();
+
+  // Calculate summary
+  const serversCurrent = servers.reduce((sum, s) => sum + s.currentTotal, 0);
+  const serversArchived = servers.reduce((sum, s) => sum + s.archived.totalSize, 0);
+
+  const totalCurrent = serversCurrent + router.currentTotal + admin.currentTotal;
+  const totalArchived = serversArchived + router.archived.totalSize + admin.archived.totalSize;
+
+  return {
+    servers,
+    router,
+    admin,
+    summary: {
+      totalCurrent,
+      totalArchived,
+      grandTotal: totalCurrent + totalArchived,
+    },
+  };
+}
+
+/**
+ * Delete archived log files older than specified days
+ * @param afterDays Delete logs older than this many days (0 = delete all archived logs)
+ * @returns Count and total size of deleted files
+ */
+export async function deleteOldArchivedLogs(afterDays: number): Promise<{
+  count: number;
+  totalSize: number;
+}> {
+  const logsDir = getLogsDir();
+  let count = 0;
+  let totalSize = 0;
+
+  try {
+    const files = await fs.readdir(logsDir);
+
+    // Pattern matches archived logs: *.YYYY-MM-DD-HH-MM-SS.*
+    const archivedPattern = /\.\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\./;
+
+    const now = Date.now();
+    const thresholdMs = afterDays * 24 * 60 * 60 * 1000;
+
+    for (const file of files) {
+      // Only process archived log files (with timestamp in name)
+      if (!archivedPattern.test(file)) {
+        continue;
+      }
+
+      const filePath = path.join(logsDir, file);
+
+      try {
+        const stats = await fs.stat(filePath);
+        const fileAge = now - stats.mtime.getTime();
+
+        // Delete if older than threshold
+        if (fileAge >= thresholdMs) {
+          const size = stats.size;
+          await fs.unlink(filePath);
+          count++;
+          totalSize += size;
+        }
+      } catch {
+        // Skip files that can't be stat'd or deleted
+        continue;
+      }
+    }
+  } catch {
+    // Directory doesn't exist or can't be read
+    return { count: 0, totalSize: 0 };
   }
 
   return { count, totalSize };

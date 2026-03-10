@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react';
 import { useModels, useDeleteModel, useDownloadJobs } from '../hooks/useApi';
-import { HardDrive, Server, Trash2, Clock, Loader2, Download, LayoutGrid, List } from 'lucide-react';
+import { HardDrive, Server, Trash2, Clock, Loader2, Download, LayoutGrid, List, AlertTriangle } from 'lucide-react';
 import { SearchModal } from '../components/SearchModal';
 import { DownloadProgress } from '../components/DownloadProgress';
 import { useQueryClient } from '@tanstack/react-query';
+import type { Model } from '../types/api';
 
 interface ModelsProps {
   searchQuery?: string;
@@ -62,18 +63,26 @@ export function Models({ searchQuery = '' }: ModelsProps) {
     return filtered;
   }, [models, searchQuery, filter]);
 
-  const handleDelete = async (name: string, serversUsing: number) => {
-    if (serversUsing > 0) {
-      if (!confirm(`Model "${name}" is used by ${serversUsing} server(s). Delete the model AND all associated servers?`)) {
+  const getModelIdentifier = (model: Model): string => {
+    // For sharded models, use base name; otherwise use filename
+    return model.isSharded && model.baseModelName ? model.baseModelName : model.filename;
+  };
+
+  const handleDelete = async (model: Model) => {
+    const identifier = getModelIdentifier(model);
+    const displayName = getDisplayName(model);
+
+    if (model.serversUsing > 0) {
+      if (!confirm(`Model "${displayName}" is used by ${model.serversUsing} server(s). Delete the model AND all associated servers?`)) {
         return;
       }
     } else {
-      if (!confirm(`Delete model "${name}"? This cannot be undone.`)) return;
+      if (!confirm(`Delete model "${displayName}"? This cannot be undone.`)) return;
     }
 
-    setActionLoading(name);
+    setActionLoading(identifier);
     try {
-      await deleteModel.mutateAsync({ name, cascade: serversUsing > 0 });
+      await deleteModel.mutateAsync({ name: identifier, cascade: model.serversUsing > 0 });
     } finally {
       setActionLoading(null);
     }
@@ -96,6 +105,32 @@ export function Models({ searchQuery = '' }: ModelsProps) {
     if (diffDays < 7) return `${diffDays}d ago`;
     if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const getModelError = (model: Model): string | null => {
+    if (model.isSharded) {
+      const foundShards = model.shardPaths?.length || 0;
+      const totalShards = model.shardCount || 0;
+      if (foundShards < totalShards) {
+        return `${foundShards}/${totalShards} incomplete`;
+      }
+    } else {
+      if (!model.exists) return 'missing';
+      if (model.size === 0) return 'empty';
+    }
+    return null;
+  };
+
+  const getDisplayName = (model: Model): string => {
+    if (model.isSharded) {
+      const foundShards = model.shardPaths?.length || 0;
+      const totalShards = model.shardCount || 0;
+      if (foundShards < totalShards) {
+        return `${model.baseModelName} (${foundShards}/${totalShards} incomplete)`;
+      }
+      return `${model.baseModelName} (${foundShards}/${totalShards})`;
+    }
+    return model.filename.replace('.gguf', '');
   };
 
   if (isLoading) {
@@ -220,28 +255,48 @@ export function Models({ searchQuery = '' }: ModelsProps) {
         </div>
       ) : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredModels.map((model) => (
-            <div
-              key={model.filename}
-              className="group bg-white border border-neutral-200 rounded-lg p-5 hover:border-neutral-300 hover:shadow-sm transition-all"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-base font-semibold text-neutral-900 truncate mb-2">
-                    {model.filename.replace('.gguf', '')}
-                  </h3>
-                  <div className="flex flex-wrap gap-1.5">
-                    {model.serversUsing > 0 && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-green-200/50 bg-green-50 text-xs font-medium text-green-700">
-                        active
+          {filteredModels.map((model) => {
+            const error = getModelError(model);
+            const displayName = getDisplayName(model);
+
+            return (
+              <div
+                key={model.filename}
+                className="group bg-white border border-neutral-200 rounded-lg p-5 hover:border-neutral-300 hover:shadow-sm transition-all"
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start gap-2 mb-2">
+                      {error && (
+                        <AlertTriangle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                      )}
+                      <h3 className={`text-base font-semibold truncate ${error ? 'text-amber-600' : 'text-neutral-900'}`}>
+                        {displayName}
+                      </h3>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {error && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-amber-200/50 bg-amber-50 text-xs font-medium text-amber-700">
+                          {error}
+                        </span>
+                      )}
+                      {model.serversUsing > 0 && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-green-200/50 bg-green-50 text-xs font-medium text-green-700">
+                          active
+                        </span>
+                      )}
+                      {model.isSharded && !error && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-blue-200/50 bg-blue-50 text-xs font-medium text-blue-700">
+                          sharded
+                        </span>
+                      )}
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-600">
+                        gguf
                       </span>
-                    )}
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-600">
-                      gguf
-                    </span>
+                    </div>
                   </div>
                 </div>
-              </div>
+            );
 
               {/* Stats */}
               <div className="space-y-2 mb-4">
@@ -261,11 +316,11 @@ export function Models({ searchQuery = '' }: ModelsProps) {
 
               {/* Delete Action */}
               <button
-                onClick={() => handleDelete(model.filename, model.serversUsing)}
-                disabled={actionLoading === model.filename}
+                onClick={() => handleDelete(model)}
+                disabled={actionLoading === getModelIdentifier(model)}
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors opacity-0 group-hover:opacity-100 disabled:opacity-100 cursor-pointer disabled:cursor-wait"
               >
-                {actionLoading === model.filename ? (
+                {actionLoading === getModelIdentifier(model) ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                     Deleting
@@ -278,51 +333,70 @@ export function Models({ searchQuery = '' }: ModelsProps) {
                 )}
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         /* List View */
         <div className="bg-white border border-neutral-200 rounded-lg divide-y divide-neutral-200">
-          {filteredModels.map((model) => (
-            <div
-              key={model.filename}
-              className="group px-5 py-4 hover:bg-neutral-50 transition-colors"
-            >
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-4 flex-1 min-w-0">
-                  <HardDrive className="w-5 h-5 text-neutral-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-sm font-semibold text-neutral-900 truncate">
-                      {model.filename.replace('.gguf', '')}
-                    </h3>
-                    <div className="flex items-center gap-3 mt-1">
-                      <span className="text-xs text-neutral-600">{formatSize(model.size)}</span>
-                      <span className="text-xs text-neutral-400">•</span>
-                      <span className="text-xs text-neutral-600">
-                        {model.serversUsing} server{model.serversUsing !== 1 ? 's' : ''}
-                      </span>
-                      <span className="text-xs text-neutral-400">•</span>
-                      <span className="text-xs text-neutral-600">{formatDate(model.modified)}</span>
+          {filteredModels.map((model) => {
+            const error = getModelError(model);
+            const displayName = getDisplayName(model);
+
+            return (
+              <div
+                key={model.filename}
+                className="group px-5 py-4 hover:bg-neutral-50 transition-colors"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                    {error ? (
+                      <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+                    ) : (
+                      <HardDrive className="w-5 h-5 text-neutral-400 flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <h3 className={`text-sm font-semibold truncate ${error ? 'text-amber-600' : 'text-neutral-900'}`}>
+                        {displayName}
+                      </h3>
+                      <div className="flex items-center gap-3 mt-1">
+                        <span className="text-xs text-neutral-600">{formatSize(model.size)}</span>
+                        <span className="text-xs text-neutral-400">•</span>
+                        <span className="text-xs text-neutral-600">
+                          {model.serversUsing} server{model.serversUsing !== 1 ? 's' : ''}
+                        </span>
+                        <span className="text-xs text-neutral-400">•</span>
+                        <span className="text-xs text-neutral-600">{formatDate(model.modified)}</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1.5">
-                    {model.serversUsing > 0 && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-green-200/50 bg-green-50 text-xs font-medium text-green-700">
-                        active
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      {error && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-amber-200/50 bg-amber-50 text-xs font-medium text-amber-700">
+                          {error}
+                        </span>
+                      )}
+                      {model.serversUsing > 0 && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-green-200/50 bg-green-50 text-xs font-medium text-green-700">
+                          active
+                        </span>
+                      )}
+                      {model.isSharded && !error && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-blue-200/50 bg-blue-50 text-xs font-medium text-blue-700">
+                          sharded
+                        </span>
+                      )}
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-600">
+                        gguf
                       </span>
-                    )}
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md border border-neutral-200 bg-neutral-50 text-xs font-medium text-neutral-600">
-                      gguf
-                    </span>
-                  </div>
+                    </div>
                   <button
-                    onClick={() => handleDelete(model.filename, model.serversUsing)}
-                    disabled={actionLoading === model.filename}
+                    onClick={() => handleDelete(model)}
+                    disabled={actionLoading === getModelIdentifier(model)}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer disabled:cursor-wait"
                   >
-                    {actionLoading === model.filename ? (
+                    {actionLoading === getModelIdentifier(model) ? (
                       <>
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         Deleting
@@ -337,7 +411,8 @@ export function Models({ searchQuery = '' }: ModelsProps) {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

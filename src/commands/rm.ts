@@ -1,29 +1,20 @@
 import chalk from 'chalk';
 import * as readline from 'readline';
-import * as fs from 'fs/promises';
-import { modelScanner } from '../lib/model-scanner';
+import { modelManagementService } from '../lib/model-management-service';
 import { stateManager } from '../lib/state-manager';
-import { launchctlManager } from '../lib/launchctl-manager';
 
 export async function rmCommand(modelIdentifier: string): Promise<void> {
   await stateManager.initialize();
 
-  // 1. Resolve model path
-  const modelPath = await modelScanner.resolveModelPath(modelIdentifier);
-  if (!modelPath) {
-    throw new Error(`Model not found: ${modelIdentifier}\n\nRun: llamacpp ls`);
-  }
+  // Get model dependencies to show preview
+  const dependencies = await modelManagementService.getModelDependencies(modelIdentifier);
 
-  // 2. Check if any servers are using this model
-  const allServers = await stateManager.getAllServers();
-  const serversUsingModel = allServers.filter((s) => s.modelPath === modelPath);
-
-  // 3. Confirm deletion
-  console.log(chalk.yellow(`⚠️  Delete model file: ${modelPath}`));
-
-  if (serversUsingModel.length > 0) {
-    console.log(chalk.yellow(`\n   This model has ${serversUsingModel.length} server(s) configured:`));
-    for (const server of serversUsingModel) {
+  if (dependencies.length === 0) {
+    console.log(chalk.yellow(`⚠️  Delete model: ${modelIdentifier}`));
+  } else {
+    console.log(chalk.yellow(`⚠️  Delete model: ${modelIdentifier}`));
+    console.log(chalk.yellow(`\n   This model has ${dependencies.length} server(s) configured:`));
+    for (const server of dependencies) {
       const statusColor = server.status === 'running' ? chalk.green : chalk.dim;
       console.log(chalk.yellow(`   - ${server.id} (${statusColor(server.status)})`));
     }
@@ -40,53 +31,28 @@ export async function rmCommand(modelIdentifier: string): Promise<void> {
 
   console.log();
 
-  // 4. Delete all servers using this model
-  if (serversUsingModel.length > 0) {
-    console.log(chalk.blue(`🗑️  Removing ${serversUsingModel.length} server(s)...\n`));
+  // Delegate to modelManagementService (cascade always true for CLI)
+  const result = await modelManagementService.deleteModel({
+    modelIdentifier,
+    cascade: true, // CLI always cascades (we already warned user above)
+    onProgress: (message) => {
+      console.log(chalk.dim(message));
+    },
+  });
 
-    for (const server of serversUsingModel) {
-      console.log(chalk.dim(`  Removing server: ${server.id}`));
-
-      // Unload service (stops and removes from launchd)
-      try {
-        await launchctlManager.unloadService(server.plistPath);
-        if (server.status === 'running') {
-          await launchctlManager.waitForServiceStop(server.label, 5000);
-        }
-      } catch (error) {
-        console.log(chalk.yellow(`    ⚠️  Failed to unload service gracefully`));
-      }
-
-      // Delete plist
-      await launchctlManager.deletePlist(server.plistPath);
-
-      // Delete server config
-      await stateManager.deleteServerConfig(server.id);
-
-      console.log(chalk.dim(`    ✓ Server removed`));
-    }
-
-    console.log();
-  }
-
-  // 5. Delete model file
-  console.log(chalk.blue(`🗑️  Deleting model file...`));
-
-  try {
-    await fs.unlink(modelPath);
-  } catch (error) {
-    throw new Error(`Failed to delete model file: ${(error as Error).message}`);
+  if (!result.success) {
+    throw new Error(result.error || 'Failed to delete model');
   }
 
   // Success
   console.log();
   console.log(chalk.green('✅ Model deleted successfully'));
 
-  if (serversUsingModel.length > 0) {
-    console.log(chalk.dim(`   Removed ${serversUsingModel.length} server(s)`));
+  if (result.deletedServers.length > 0) {
+    console.log(chalk.dim(`   Removed ${result.deletedServers.length} server(s)`));
   }
 
-  console.log(chalk.dim(`   Deleted: ${modelPath}`));
+  console.log(chalk.dim(`   Deleted: ${result.modelPath}`));
 }
 
 /**

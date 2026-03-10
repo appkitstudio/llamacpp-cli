@@ -46,8 +46,8 @@ class RouterServer {
     }
     this.config = await readJson<RouterConfig>(configPath);
 
-    // Initialize logger with verbose setting
-    this.logger = new RouterLogger(this.config.verbose);
+    // Initialize logger with logging setting
+    this.logger = new RouterLogger(this.config.logging);
 
     // Rotate log file if needed
     await this.logger.rotateIfNeeded();
@@ -152,12 +152,14 @@ class RouterServer {
     const servers = await this.getAllServers();
     const runningServers = servers.filter(s => s.status === 'running');
 
-    const models: ModelInfo[] = runningServers.map(server => ({
-      id: server.modelName,
-      object: 'model',
-      created: Math.floor(new Date(server.createdAt).getTime() / 1000),
-      owned_by: 'llamacpp',
-    }));
+    const models: ModelInfo[] = runningServers.flatMap(server => {
+      const created = Math.floor(new Date(server.createdAt).getTime() / 1000);
+      const entries: ModelInfo[] = [{ id: server.modelName, object: 'model', created, owned_by: 'llamacpp' }];
+      if (server.alias) {
+        entries.push({ id: server.alias, object: 'model', created, owned_by: 'llamacpp' });
+      }
+      return entries;
+    });
 
     const response: ModelsResponse = {
       object: 'list',

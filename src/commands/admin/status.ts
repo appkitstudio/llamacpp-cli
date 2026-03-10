@@ -60,6 +60,7 @@ export async function adminStatusCommand(): Promise<void> {
 
     // Configuration
     console.log(chalk.bold('  Configuration:'));
+    console.log(chalk.bold('    Logging: '), config.logging ? chalk.green('Enabled') : chalk.gray('Disabled'));
     console.log(chalk.bold('    Config:  '), chalk.gray(config.plistPath.replace(process.env.HOME || '', '~')));
     console.log(chalk.bold('    Plist:   '), chalk.gray(config.plistPath.replace(process.env.HOME || '', '~')));
     console.log(chalk.bold('    Logs:    '), chalk.gray(config.stdoutPath.replace('.stdout', '.{stdout,stderr}').replace(process.env.HOME || '', '~')));

@@ -173,8 +173,7 @@ export async function createMonitorUI(
 
       // Footer
       content += divider + '\n';
-      content += `{gray-fg}Updated: ${data.lastUpdated.toLocaleTimeString()} | `;
-      content += `Interval: ${updateInterval}ms | `;
+      content += `{gray-fg}Interval: ${updateInterval}ms | `;
       content += `[H]istory [R]efresh [+/-]Speed [Q]uit{/gray-fg}`;
 
       contentBox.setContent(content);
@@ -296,7 +295,6 @@ export async function createMonitorUI(
 
         // Footer
         content += divider + '\n';
-        content += `{yellow-fg}Last good data: ${lastGoodData.lastUpdated.toLocaleTimeString()}{/yellow-fg}\n`;
         content += `{yellow-fg}Connection failures: ${consecutiveFailures}{/yellow-fg}\n`;
         content += `{gray-fg}Interval: ${updateInterval}ms | [H]istory [R]efresh [+/-]Speed [Q]uit{/gray-fg}`;
 

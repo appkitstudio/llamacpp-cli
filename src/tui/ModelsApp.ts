@@ -7,6 +7,9 @@ import { ServerConfig } from '../types/server-config.js';
 import { formatBytes, formatDateShort } from '../utils/format-utils.js';
 import * as fs from 'fs/promises';
 import { createSearchUI } from './SearchApp.js';
+import { ModalController } from './shared/modal-controller.js';
+import { createOverlay } from './shared/overlay-utils.js';
+import { KeyboardManager } from '../lib/keyboard-manager.js';
 
 /**
  * Models management TUI
@@ -20,6 +23,10 @@ export async function createModelsUI(
   let models: ModelInfo[] = [];
   let selectedIndex = 0;
   let isLoading = false;
+
+  // Keyboard manager and modal controller for centralized keyboard handling
+  const keyboardManager = new KeyboardManager(screen);
+  const modalController = new ModalController(screen, keyboardManager);
 
   // Create content box
   const contentBox = blessed.box({
@@ -87,15 +94,47 @@ export async function createModelsUI(
       const isSelected = i === selectedIndex;
 
       // Count servers using this model
-      const serversUsingModel = allServers.filter(s => s.modelPath === model.path);
+      const serversUsingModel = allServers.filter(s => {
+        if (model.isSharded) {
+          return model.shardPaths?.includes(s.modelPath);
+        } else {
+          return s.modelPath === model.path;
+        }
+      });
       const serverCount = serversUsingModel.length;
 
       // Selection indicator
       const indicator = isSelected ? '►' : ' ';
 
-      // Model filename (truncate if too long)
+      // Model filename with error status (truncate if too long)
       const maxFilenameLen = 46;
-      let filename = model.filename;
+      let filename: string;
+      let hasError = false;
+
+      if (model.isSharded) {
+        // Show shard status as fraction: (1/2 incomplete) or (2/2)
+        const foundShards = model.shardPaths?.length || 0;
+        const totalShards = model.shardCount || 0;
+
+        if (foundShards < totalShards) {
+          filename = `${model.baseModelName} (${foundShards}/${totalShards} incomplete)`;
+          hasError = true;
+        } else {
+          filename = `${model.baseModelName} (${foundShards}/${totalShards})`;
+        }
+      } else {
+        // Single-file model - check for errors
+        if (!model.exists) {
+          filename = `${model.filename} (missing)`;
+          hasError = true;
+        } else if (model.size === 0) {
+          filename = `${model.filename} (empty)`;
+          hasError = true;
+        } else {
+          filename = model.filename;
+        }
+      }
+
       if (filename.length > maxFilenameLen) {
         filename = filename.substring(0, maxFilenameLen - 3) + '...';
       }
@@ -124,14 +163,24 @@ export async function createModelsUI(
         }
       }
 
+      // Apply color and warning symbol for models with errors
+      let displayFilename = filename;
+      const warningSymbol = hasError ? '⚠ ' : '';
+
+      if (hasError && !isSelected) {
+        // Yellow for incomplete/missing/empty models (non-selected only)
+        displayFilename = `{yellow-fg}⚠ ${filename}{/yellow-fg}`;
+      }
+
       // Build row content
       let rowContent = '';
       if (isSelected) {
-        // Selected row: cyan background with bright white text
-        rowContent = `{cyan-bg}{15-fg}${indicator} │ ${filename} │ ${size} │ ${modified} │ ${serversTextPlain}{/15-fg}{/cyan-bg}`;
+        // Selected row: cyan background with bright white text (show warning symbol but no color)
+        const selectedFilename = hasError ? `⚠ ${filename}` : filename;
+        rowContent = `{cyan-bg}{15-fg}${indicator} │ ${selectedFilename} │ ${size} │ ${modified} │ ${serversTextPlain}{/15-fg}{/cyan-bg}`;
       } else {
-        // Normal row: with colored server text
-        rowContent = `${indicator} │ ${filename} │ ${size} │ ${modified} │ ${serversText}`;
+        // Normal row: with colored server text and filename
+        rowContent = `${indicator} │ ${displayFilename} │ ${size} │ ${modified} │ ${serversText}`;
       }
 
       content += rowContent + '\n';
@@ -165,8 +214,14 @@ export async function createModelsUI(
     const allServers = await stateManager.getAllServers();
     const serversUsingModel = allServers.filter(s => s.modelPath === model.path);
 
+    // Note: Custom blessed.box modals don't use modalController directly, but we track state
+    // by keeping modal elements on screen until removed
+
+    // Create overlay for modal
+    const overlay = createOverlay(screen);
+
     // Show confirmation dialog
-    const confirmBox = blessed.message({
+    const confirmBox = blessed.box({
       parent: screen,
       top: 'center',
       left: 'center',
@@ -178,9 +233,10 @@ export async function createModelsUI(
         fg: 'white',
       },
       tags: true,
+      label: ' Delete Model ',
     });
 
-    let confirmText = `{bold}Delete model: ${model.filename}?{/bold}\n\n`;
+    let confirmText = `\n{bold}Delete model: ${model.filename}?{/bold}\n\n`;
     confirmText += `Size: ${model.sizeFormatted}\n\n`;
 
     if (serversUsingModel.length > 0) {
@@ -192,12 +248,24 @@ export async function createModelsUI(
       confirmText += `\n{yellow-fg}These servers will be deleted before removing the model.{/yellow-fg}\n\n`;
     }
 
-    confirmText += `Type 'yes' to confirm:\n\n\n\n`; // Extra lines for input box space
+    // Count lines to position input box correctly
+    const contentLines = confirmText.split('\n').length;
 
-    // Create input box for confirmation
+    confirmBox.setContent(confirmText);
+
+    // Add label for input
+    blessed.text({
+      parent: confirmBox,
+      top: contentLines,
+      left: 2,
+      content: `Type 'yes' to confirm:`,
+      tags: true,
+    });
+
+    // Create input box for confirmation (using top positioning, not bottom)
     const inputBox = blessed.textbox({
       parent: confirmBox,
-      bottom: 1,
+      top: contentLines + 1,
       left: 2,
       right: 2,
       height: 3,
@@ -208,15 +276,14 @@ export async function createModelsUI(
         focus: { border: { fg: 'green' } },
       },
     });
-
-    confirmBox.setContent(confirmText);
+    screen.append(overlay);
     screen.append(confirmBox);
-    confirmBox.focus();
     inputBox.focus();
     screen.render();
 
     inputBox.on('submit', async (value: string) => {
       screen.remove(confirmBox);
+      screen.remove(overlay);
 
       if (value.toLowerCase() !== 'yes') {
         await render();
@@ -254,8 +321,10 @@ export async function createModelsUI(
         // Reload models
         await loadModels();
       } catch (error) {
-        // Show error
-        const errorBox = blessed.message({
+        // Show error with overlay
+        const errorOverlay = createOverlay(screen);
+
+        const errorBox = blessed.box({
           parent: screen,
           top: 'center',
           left: 'center',
@@ -267,11 +336,21 @@ export async function createModelsUI(
             fg: 'red',
           },
           tags: true,
+          label: ' Error ',
+          keys: true,
         });
 
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        errorBox.display(`{bold}Delete failed{/bold}\n\n${errorMsg}\n\nPress any key to continue`, () => {
+        errorBox.setContent(`\n  {bold}Delete failed{/bold}\n\n  ${errorMsg}\n\n  {gray-fg}Press any key to continue{/gray-fg}`);
+
+        screen.append(errorOverlay);
+        screen.append(errorBox);
+        errorBox.focus();
+        screen.render();
+
+        errorBox.once('keypress', () => {
           screen.remove(errorBox);
+          screen.remove(errorOverlay);
           isLoading = false;
           render();
         });
@@ -280,11 +359,13 @@ export async function createModelsUI(
 
     inputBox.on('cancel', () => {
       screen.remove(confirmBox);
+      screen.remove(overlay);
       render();
     });
 
     inputBox.key(['escape'], () => {
       screen.remove(confirmBox);
+      screen.remove(overlay);
       render();
     });
   }
@@ -321,6 +402,8 @@ export async function createModelsUI(
       loadModels();
     },
     escape: async () => {
+      // Note: Custom blessed.box modals have their own focus and ESC handling
+      // Screen handlers don't fire when modals are focused
       cleanup();
       await onBack();
     },

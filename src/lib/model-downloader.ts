@@ -4,6 +4,8 @@ import * as path from 'path';
 import chalk from 'chalk';
 import { getModelsDir } from '../utils/file-utils';
 import { formatBytes } from '../utils/format-utils';
+import { parseShardFilename } from '../utils/shard-utils';
+import { modelSearch } from './model-search';
 
 export interface DownloadProgress {
   filename: string;
@@ -219,9 +221,45 @@ export class ModelDownloader {
   }
 
   /**
-   * Download a model from Hugging Face
+   * Download a model from Hugging Face (automatically handles sharded models)
    */
   async downloadModel(
+    repoId: string,
+    filename: string,
+    onProgress?: (progress: DownloadProgress) => void,
+    modelsDir?: string,
+    options?: DownloadOptions
+  ): Promise<string> {
+    // Detect if this is a sharded model
+    const basename = path.basename(filename);
+    const shardInfo = parseShardFilename(basename);
+
+    if (shardInfo.isSharded) {
+      // Multi-file download
+      return await this.downloadShardedModel(
+        repoId,
+        filename,
+        shardInfo,
+        onProgress,
+        modelsDir,
+        options
+      );
+    } else {
+      // Single-file download
+      return await this.downloadSingleFile(
+        repoId,
+        filename,
+        onProgress,
+        modelsDir,
+        options
+      );
+    }
+  }
+
+  /**
+   * Download a single-file (non-sharded) model
+   */
+  private async downloadSingleFile(
     repoId: string,
     filename: string,
     onProgress?: (progress: DownloadProgress) => void,
@@ -243,6 +281,14 @@ export class ModelDownloader {
 
     // Build download URL
     const url = this.buildDownloadUrl(repoId, filename);
+
+    // Create subdirectory if filename includes path (e.g., "Q8_0/Model.gguf")
+    const subdirPath = path.dirname(filename);
+    if (subdirPath && subdirPath !== '.') {
+      const fullSubdirPath = path.join(targetDir, subdirPath);
+      await fs.promises.mkdir(fullSubdirPath, { recursive: true });
+    }
+
     const destPath = path.join(targetDir, filename);
 
     // Check if file already exists
@@ -298,6 +344,108 @@ export class ModelDownloader {
     }
 
     return destPath;
+  }
+
+  /**
+   * Download a sharded model (multiple files)
+   */
+  private async downloadShardedModel(
+    repoId: string,
+    firstShardFilename: string,
+    shardInfo: ReturnType<typeof parseShardFilename>,
+    onProgress?: (progress: DownloadProgress) => void,
+    modelsDir?: string,
+    options?: DownloadOptions
+  ): Promise<string> {
+    const silent = options?.silent ?? false;
+    const signal = options?.signal;
+    const targetDir = modelsDir || await this.getModelsDirectory();
+
+    if (!silent) {
+      console.log(chalk.blue(`📦 Downloading sharded model: ${shardInfo.baseModelName}`));
+      console.log(chalk.dim(`Repository: ${repoId}`));
+      console.log(chalk.dim(`Shards: ${shardInfo.shardCount} files`));
+      console.log(chalk.dim(`Destination: ${targetDir}`));
+      console.log();
+    }
+
+    // Get all files in the repository
+    const allFiles = await modelSearch.getModelFiles(repoId);
+
+    // Filter to matching shards
+    const shardFiles = allFiles
+      .filter(f => shardInfo.shardPattern!.test(path.basename(f)))
+      .sort();
+
+    // Validate count
+    if (shardFiles.length !== shardInfo.shardCount) {
+      throw new Error(
+        `Shard count mismatch: expected ${shardInfo.shardCount}, found ${shardFiles.length} in repository`
+      );
+    }
+
+    if (!silent) {
+      console.log(chalk.cyan(`Found all ${shardFiles.length} shard files:`));
+      shardFiles.forEach((file, idx) => {
+        console.log(chalk.dim(`  [${idx + 1}/${shardFiles.length}] ${path.basename(file)}`));
+      });
+      console.log();
+    }
+
+    // Track downloaded shards for cleanup on error
+    const downloadedPaths: string[] = [];
+
+    try {
+      // Download each shard sequentially
+      for (let i = 0; i < shardFiles.length; i++) {
+        const shardFile = shardFiles[i];
+        const shardBasename = path.basename(shardFile);
+
+        if (!silent) {
+          console.log(chalk.blue(`⬇️  Downloading shard ${i + 1}/${shardFiles.length}: ${shardBasename}`));
+        }
+
+        // Download this shard
+        const destPath = await this.downloadSingleFile(
+          repoId,
+          shardFile,
+          onProgress,
+          modelsDir,
+          { silent: true, signal }  // Suppress per-file output
+        );
+
+        downloadedPaths.push(destPath);
+
+        if (!silent) {
+          console.log(chalk.green(`✅ Shard ${i + 1}/${shardFiles.length} complete\n`));
+        }
+      }
+
+      if (!silent) {
+        console.log(chalk.green.bold('🎉 All shards downloaded successfully!'));
+        console.log(chalk.dim(`   Location: ${path.dirname(downloadedPaths[0])}`));
+        console.log(chalk.dim(`   Files: ${downloadedPaths.length}`));
+      }
+
+      // Return path to first shard (used by llama-server)
+      return downloadedPaths[0];
+
+    } catch (error) {
+      // Cleanup partial downloads
+      if (!silent) {
+        console.log(chalk.yellow('\n⚠️  Download failed, cleaning up partial files...'));
+      }
+
+      for (const downloadedPath of downloadedPaths) {
+        try {
+          await fs.promises.unlink(downloadedPath);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+
+      throw error;
+    }
   }
 
   /**

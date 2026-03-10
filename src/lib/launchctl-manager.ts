@@ -13,36 +13,95 @@ export interface ServiceStatus {
 
 export class LaunchctlManager {
   /**
+   * Check if plist needs updating (old format without wrapper)
+   */
+  async needsPlistUpdate(plistPath: string): Promise<boolean> {
+    try {
+      const plistContent = await fs.readFile(plistPath, 'utf-8');
+
+      // Check if it uses the wrapper (new format) or node directly (old format)
+      const hasWrapper = plistContent.includes('/launchers/llamacpp-server');
+      const hasProcessType = plistContent.includes('<key>ProcessType</key>');
+
+      // Needs update if missing wrapper or ProcessType
+      return !hasWrapper || !hasProcessType;
+    } catch (error) {
+      // If plist doesn't exist or can't be read, it needs to be created
+      return true;
+    }
+  }
+
+  /**
+   * Get the path to the wrapper script
+   * Handles both development (src/) and production (dist/) scenarios
+   */
+  private getWrapperPath(): string {
+    // Try relative to current module location (works for both dev and prod)
+    let wrapperPath = path.join(__dirname, '..', 'launchers', 'llamacpp-server');
+    if (require('fs').existsSync(wrapperPath)) {
+      return wrapperPath;
+    }
+
+    // Try from the CLI binary location (global install)
+    const binPath = process.argv[1];
+    wrapperPath = path.join(path.dirname(binPath), '..', 'launchers', 'llamacpp-server');
+    if (require('fs').existsSync(wrapperPath)) {
+      return wrapperPath;
+    }
+
+    throw new Error('Could not locate llamacpp-server wrapper script');
+  }
+
+  /**
    * Generate plist XML content for a server
    */
   generatePlist(config: ServerConfig): string {
-    // Build program arguments array
-    const args = [
-      '/opt/homebrew/bin/llama-server',
+    // Get path to wrapper script
+    const wrapperPath = this.getWrapperPath();
+
+    // Get node executable path (for wrapper to use)
+    const nodePath = process.execPath;
+
+    // Build arguments for llamacpp internal server-wrapper command
+    // First arg to wrapper is node path, then comes our CLI arguments
+    const wrapperArgs = [
+      wrapperPath,
+      nodePath,      // Wrapper needs this to find node
+      'internal',
+      'server-wrapper',
+      '--http-log-path', config.httpLogPath,
+    ];
+
+    // Add verbose flag if enabled
+    if (config.verbose) {
+      wrapperArgs.push('--verbose');
+    }
+
+    // Add llama-server arguments
+    wrapperArgs.push(
+      '--',
       '--model', config.modelPath,
       '--host', config.host,
       '--port', config.port.toString(),
       '--threads', config.threads.toString(),
       '--ctx-size', config.ctxSize.toString(),
-      '--gpu-layers', config.gpuLayers.toString(),
-    ];
+      '--gpu-layers', config.gpuLayers === -1 ? 'all' : config.gpuLayers.toString(),
+    );
 
     // Add flags
-    if (config.embeddings) args.push('--embeddings');
-    if (config.jinja) args.push('--jinja');
+    if (config.embeddings) wrapperArgs.push('--embeddings');
+    if (config.jinja) wrapperArgs.push('--jinja');
 
-    // Conditionally enable verbose HTTP logging for detailed request/response info
-    if (config.verbose) {
-      args.push('--log-verbose');
-    }
+    // Always enable verbose logging (so HTTP logs are generated)
+    wrapperArgs.push('--log-verbose');
 
     // Add custom flags
     if (config.customFlags && config.customFlags.length > 0) {
-      args.push(...config.customFlags);
+      wrapperArgs.push(...config.customFlags);
     }
 
-    // Generate XML array elements
-    const argsXml = args.map(arg => `      <string>${arg}</string>`).join('\n');
+    // Build ProgramArguments array for plist (wrapper handles node execution)
+    const programArguments = wrapperArgs.map(arg => `      <string>${arg}</string>`).join('\n');
 
     return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -54,7 +113,7 @@ export class LaunchctlManager {
 
     <key>ProgramArguments</key>
     <array>
-${argsXml}
+${programArguments}
     </array>
 
     <key>RunAtLoad</key>
@@ -76,6 +135,9 @@ ${argsXml}
 
     <key>WorkingDirectory</key>
     <string>/tmp</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
 
     <key>ThrottleInterval</key>
     <integer>10</integer>

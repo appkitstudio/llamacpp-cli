@@ -50,16 +50,27 @@ export class RouterManager {
       id: 'router',
       port: 9100,
       host: '127.0.0.1',
-      label: 'com.llama.router',
-      plistPath: path.join(this.launchAgentsDir, 'com.llama.router.plist'),
+      label: 'studio.appkit.llamacpp-cli.router',
+      plistPath: path.join(this.launchAgentsDir, 'studio.appkit.llamacpp-cli.router.plist'),
       stdoutPath: path.join(this.logsDir, 'router.stdout'),
       stderrPath: path.join(this.logsDir, 'router.stderr'),
       healthCheckInterval: 5000,
       requestTimeout: 120000,
-      verbose: false,
+      logging: false,
       status: 'stopped',
       createdAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Migrate old config format (verbose → logging)
+   */
+  private migrateConfig(config: any): RouterConfig {
+    if ('verbose' in config && !('logging' in config)) {
+      config.logging = config.verbose;
+      delete config.verbose;
+    }
+    return config as RouterConfig;
   }
 
   /**
@@ -69,7 +80,8 @@ export class RouterManager {
     if (!(await fileExists(this.configPath))) {
       return null;
     }
-    return await readJson<RouterConfig>(this.configPath);
+    const config = await readJson<any>(this.configPath);
+    return this.migrateConfig(config);
   }
 
   /**
@@ -104,26 +116,25 @@ export class RouterManager {
    * Generate plist XML content for the router
    */
   generatePlist(config: RouterConfig): string {
-    // Find the compiled router-server.js file
-    // In dev mode (tsx), __dirname is src/lib/
-    // In production, __dirname is dist/lib/
-    // Always use the compiled dist version for launchctl
-    let routerServerPath: string;
-    if (__dirname.includes('/src/')) {
-      // Dev mode - point to dist/lib/router-server.js
-      const projectRoot = path.resolve(__dirname, '../..');
-      routerServerPath = path.join(projectRoot, 'dist/lib/router-server.js');
-    } else {
-      // Production mode - already in dist/lib/
-      routerServerPath = path.join(__dirname, 'router-server.js');
+    // Find the wrapper script
+    // Try relative to current module location (works for both dev and prod)
+    let wrapperPath = path.join(__dirname, '..', 'launchers', 'llamacpp-router');
+    if (!require('fs').existsSync(wrapperPath)) {
+      // Try from the CLI binary location (global install)
+      const binPath = process.argv[1];
+      wrapperPath = path.join(path.dirname(binPath), '..', 'launchers', 'llamacpp-router');
+      if (!require('fs').existsSync(wrapperPath)) {
+        throw new Error(`Router wrapper script not found at ${wrapperPath}`);
+      }
     }
 
     // Use the current Node.js executable path (resolves symlinks)
     const nodePath = process.execPath;
 
+    // Build arguments: wrapper receives node path, then config path
     const args = [
+      wrapperPath,
       nodePath,
-      routerServerPath,
       '--config', this.configPath,
     ];
 
@@ -164,6 +175,9 @@ ${argsXml}
 
     <key>ThrottleInterval</key>
     <integer>10</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
   </dict>
 </plist>
 `;

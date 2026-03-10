@@ -31,15 +31,62 @@ import { adminStatusCommand } from './commands/admin/status';
 import { adminRestartCommand } from './commands/admin/restart';
 import { adminConfigCommand } from './commands/admin/config';
 import { adminLogsCommand } from './commands/admin/logs';
+import { adminLogConfigCommand } from './commands/admin/log-config';
 import { launchClaude } from './commands/launch/claude';
+import { serverWrapperCommand } from './commands/internal/server-wrapper';
+import { migrateLabelsCommand, rollbackLabelsCommand } from './commands/migrate-labels';
+import { labelMigration } from './lib/label-migration';
 import packageJson from '../package.json';
 
 const program = new Command();
+
+/**
+ * Pre-command hook: Check if label migration is needed
+ * Runs before any command except migration commands themselves
+ */
+async function checkMigrationNeeded(): Promise<void> {
+  const commandName = process.argv[2];
+
+  // Skip migration check for migration commands themselves
+  if (commandName === 'migrate-labels' || commandName === 'rollback-labels') {
+    return;
+  }
+
+  // Skip for internal commands (non-interactive subprocesses like server-wrapper invoked by launchctl)
+  // These run with stdout/stderr redirected to log files, so warnings would pollute server logs
+  if (commandName === 'internal') {
+    return;
+  }
+
+  // Skip for help and version flags
+  if (commandName === '--help' || commandName === '-h' || commandName === '--version' || commandName === '-v') {
+    return;
+  }
+
+  try {
+    const needsMigration = await labelMigration.needsMigration();
+    if (needsMigration) {
+      const oldLabels = await labelMigration.detectOldLabels();
+      console.log(chalk.cyan('\n🔄 Service Label Migration Required\n'));
+      console.log(chalk.yellow(`Found ${oldLabels.length} service(s) using old label format (com.llama.*).\n`));
+      console.log(chalk.gray('The new label format (studio.appkit.llamacpp-cli.*) improves clarity'));
+      console.log(chalk.gray('and reduces security false positives.\n'));
+      console.log(chalk.cyan('Run the following command to migrate:\n'));
+      console.log(chalk.white('  llamacpp migrate-labels\n'));
+      process.exit(0);
+    }
+  } catch (error) {
+    // Silently ignore migration check errors - don't block user commands
+  }
+}
 
 program
   .name('llamacpp')
   .description('CLI tool to manage local llama.cpp servers on macOS')
   .version(packageJson.version, '-v, --version', 'Output the version number')
+  .hook('preAction', async () => {
+    await checkMigrationNeeded();
+  })
   .action(async () => {
     // Default action: launch TUI when no command provided
     try {
@@ -184,7 +231,7 @@ server
   .option('-h, --host <address>', 'Bind address (default: 127.0.0.1, use 0.0.0.0 for remote access)')
   .option('-t, --threads <number>', 'Thread count (default: auto)', parseInt)
   .option('-c, --ctx-size <number>', 'Context size (default: auto)', parseInt)
-  .option('-g, --gpu-layers <number>', 'GPU layers (default: 60)', parseInt)
+  .option('-g, --gpu-layers <number>', 'GPU layers (-1 = all, 0 = CPU only, default: 60)', parseInt)
   .option('-v, --verbose', 'Enable verbose HTTP logging (detailed request/response info)')
   .option('-f, --flags <flags>', 'Additional llama-server flags (comma-separated, e.g., "--pooling,mean")')
   .option('-a, --alias <name>', 'Optional stable identifier for the server (e.g., "thinking", "coder")')
@@ -220,7 +267,7 @@ server
   .option('-h, --host <address>', 'Update bind address (127.0.0.1 for localhost, 0.0.0.0 for remote access)')
   .option('-t, --threads <number>', 'Update thread count', parseInt)
   .option('-c, --ctx-size <number>', 'Update context size', parseInt)
-  .option('-g, --gpu-layers <number>', 'Update GPU layers', parseInt)
+  .option('-g, --gpu-layers <number>', 'Update GPU layers (-1 = all, 0 = CPU only)', parseInt)
   .option('-v, --verbose', 'Enable verbose logging')
   .option('--no-verbose', 'Disable verbose logging')
   .option('-f, --flags <flags>', 'Update custom llama-server flags (comma-separated, empty string to clear)')
@@ -295,15 +342,14 @@ server
 // View logs
 server
   .command('logs')
-  .description('View server logs (default: compact one-line per request)')
+  .description('View server logs (default: Activity logs - HTTP requests)')
   .argument('<identifier>', 'Server identifier: alias, port (9000), server ID (llama-3-2-3b), or partial model name')
   .option('-f, --follow', 'Follow log output in real-time')
   .option('-n, --lines <number>', 'Number of lines to show (default: 50)', parseInt)
-  .option('--http', 'Show full HTTP JSON request/response logs')
-  .option('--errors', 'Show only error messages')
-  .option('--verbose', 'Show all messages including debug internals')
+  .option('--activity', 'Show HTTP activity logs (default)')
+  .option('--system', 'Show system logs (all server output)')
+  .option('--errors', 'Filter system logs for errors only')
   .option('--filter <pattern>', 'Custom grep pattern for filtering')
-  .option('--stdout', 'Show stdout instead of stderr (rarely needed)')
   .option('--clear', 'Clear (truncate) log file to zero bytes')
   .option('--clear-archived', 'Delete only archived logs (preserves current logs)')
   .option('--clear-all', 'Clear current logs AND delete all archived logs')
@@ -398,7 +444,7 @@ router
   .option('-h, --host <address>', 'Update bind address')
   .option('--timeout <ms>', 'Update request timeout (milliseconds)', parseInt)
   .option('--health-interval <ms>', 'Update health check interval (milliseconds)', parseInt)
-  .option('-v, --verbose [boolean]', 'Enable/disable verbose logging to file (true/false)', (val) => val === 'true' || val === '1')
+  .option('-l, --logging [boolean]', 'Enable/disable logging to file (true/false)', (val) => val === 'true' || val === '1')
   .option('-r, --restart', 'Automatically restart router if running')
   .action(async (options) => {
     try {
@@ -412,14 +458,14 @@ router
 // Router logs
 router
   .command('logs')
-  .description('View router logs')
+  .description('View router logs (default: Activity logs)')
   .option('-f, --follow', 'Follow logs in real-time (like tail -f)')
   .option('-n, --lines <number>', 'Number of lines to show (default: 50)', parseInt)
-  .option('--stderr', 'Show system logs (stderr) instead of activity logs (stdout)')
-  .option('-v, --verbose', 'Show verbose JSON log file (if enabled)')
+  .option('--activity', 'Show activity logs (router requests)')
+  .option('--system', 'Show system logs (diagnostics)')
   .option('--clear', 'Clear the log file')
   .option('--rotate', 'Rotate the log file with timestamp')
-  .option('--clear-all', 'Clear all router logs (activity, system, verbose)')
+  .option('--clear-all', 'Clear all router logs (activity and system)')
   .action(async (options) => {
     try {
       await routerLogsCommand(options);
@@ -493,7 +539,7 @@ admin
   .option('-p, --port <number>', 'Update port number', parseInt)
   .option('-h, --host <address>', 'Update bind address')
   .option('--regenerate-key', 'Generate a new API key')
-  .option('-v, --verbose [boolean]', 'Enable/disable verbose logging', (val) => val === 'true' || val === '1')
+  .option('-l, --logging [boolean]', 'Enable/disable logging', (val) => val === 'true' || val === '1')
   .option('-r, --restart', 'Automatically restart admin service if running')
   .action(async (options) => {
     try {
@@ -507,15 +553,34 @@ admin
 // Admin logs
 admin
   .command('logs')
-  .description('View admin service logs')
+  .description('View admin service logs (default: both Activity and System)')
   .option('-f, --follow', 'Follow logs in real-time (like tail -f)')
   .option('-n, --lines <number>', 'Number of lines to show (default: 100)', parseInt)
-  .option('--stdout', 'Show activity logs (stdout)')
-  .option('--stderr', 'Show system logs (stderr)')
+  .option('--activity', 'Show activity logs only (HTTP API requests)')
+  .option('--system', 'Show system logs only (diagnostics)')
   .option('--clear', 'Clear the log files')
   .action(async (options) => {
     try {
       await adminLogsCommand(options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Admin log management configuration
+admin
+  .command('log-config')
+  .description('Configure log management automation (rotation and deletion)')
+  .option('--auto-rotate-enabled <boolean>', 'Enable/disable auto-rotation', (val) => val === 'true' || val === '1')
+  .option('--auto-rotate-interval <hours>', 'Rotation check interval in hours', parseInt)
+  .option('--auto-rotate-threshold <MB>', 'File size threshold for rotation in MB', parseInt)
+  .option('--auto-delete-enabled <boolean>', 'Enable/disable auto-deletion', (val) => val === 'true' || val === '1')
+  .option('--auto-delete-interval <hours>', 'Deletion check interval in hours', parseInt)
+  .option('--auto-delete-days <days>', 'Delete logs older than this many days', parseInt)
+  .action(async (options) => {
+    try {
+      await adminLogConfigCommand(options);
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
       process.exit(1);
@@ -545,6 +610,54 @@ launch
       await launchClaude({ ...options, claudeArgs });
     } catch (error) {
       console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Migration commands
+program
+  .command('migrate-labels')
+  .description('Migrate service labels from com.llama.* to studio.appkit.llamacpp-cli.*')
+  .option('--dry-run', 'Show what would be migrated without making changes')
+  .option('--force', 'Skip confirmation prompt')
+  .action(async (options) => {
+    try {
+      await migrateLabelsCommand(options);
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('rollback-labels')
+  .description('Rollback label migration to previous state (uses backup)')
+  .action(async () => {
+    try {
+      await rollbackLabelsCommand();
+    } catch (error) {
+      console.error(chalk.red('❌ Error:'), (error as Error).message);
+      process.exit(1);
+    }
+  });
+
+// Internal commands (not meant for direct user invocation)
+const internal = program
+  .command('internal')
+  .description('Internal commands (not for direct use)');
+
+// Server wrapper for launchctl
+internal
+  .command('server-wrapper [args...]')
+  .description('Wrapper for llama-server (invoked by launchctl)')
+  .requiredOption('--http-log-path <path>', 'Path to HTTP log file')
+  .option('--verbose', 'Pass through all logs to stderr')
+  .allowUnknownOption()
+  .action(async (args: string[], options: any) => {
+    try {
+      await serverWrapperCommand(args, options);
+    } catch (error) {
+      console.error('❌ Server wrapper error:', (error as Error).message);
       process.exit(1);
     }
   });

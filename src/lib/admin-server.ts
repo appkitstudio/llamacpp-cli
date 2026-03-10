@@ -6,17 +6,25 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { AdminConfig } from '../types/admin-config';
 import { ServerConfig, validateAlias } from '../types/server-config';
-import { readJson, fileExists, getConfigDir, getServersDir } from '../utils/file-utils';
+import { readJson, fileExists, getConfigDir, getServersDir, writeJsonAtomic } from '../utils/file-utils';
 import { stateManager } from './state-manager';
 import { launchctlManager } from './launchctl-manager';
 import { modelScanner } from './model-scanner';
 import { configGenerator } from './config-generator';
 import { portManager } from './port-manager';
 import { statusChecker } from './status-checker';
+import { serverLifecycleService } from './server-lifecycle-service';
+import { serverConfigService } from './server-config-service';
+import { modelManagementService } from './model-management-service';
 import { modelDownloader } from './model-downloader';
 import { modelSearch } from './model-search';
 import { downloadJobManager } from './download-job-manager';
 import { routerManager } from './router-manager';
+import { adminManager } from './admin-manager';
+import { logManagementService } from './log-management-service';
+import { AutoRotateWorker, AutoDeleteWorker } from './log-workers';
+import type { LogManagementConfig } from '../types/admin-config';
+import { openApiSpec } from './openapi-spec';
 
 interface ErrorResponse {
   error: string;
@@ -35,6 +43,8 @@ interface SuccessResponse {
 class AdminServer {
   private config!: AdminConfig;
   private server!: http.Server;
+  private autoRotateWorker?: AutoRotateWorker;
+  private autoDeleteWorker?: AutoDeleteWorker;
 
   async initialize(): Promise<void> {
     // Load admin config
@@ -52,6 +62,7 @@ class AdminServer {
     // Graceful shutdown
     process.on('SIGTERM', async () => {
       console.error('[Admin] Received SIGTERM, shutting down gracefully...');
+      await this.stopWorkers();
       this.server.close(() => {
         console.error('[Admin] Server closed');
         process.exit(0);
@@ -60,6 +71,7 @@ class AdminServer {
 
     process.on('SIGINT', async () => {
       console.error('[Admin] Received SIGINT, shutting down gracefully...');
+      await this.stopWorkers();
       this.server.close(() => {
         console.error('[Admin] Server closed');
         process.exit(0);
@@ -70,11 +82,50 @@ class AdminServer {
   async start(): Promise<void> {
     await this.initialize();
 
+    // Start log management workers if configured
+    await this.startWorkers();
+
     this.server.listen(this.config.port, this.config.host, () => {
       console.error(`[Admin] Listening on http://${this.config.host}:${this.config.port}`);
       console.error(`[Admin] PID: ${process.pid}`);
       console.error(`[Admin] API Key: ${this.config.apiKey}`);
     });
+  }
+
+  /**
+   * Start log management workers based on configuration
+   */
+  private async startWorkers(): Promise<void> {
+    const logConfig = this.config.logManagement;
+
+    if (!logConfig) {
+      // No log management configured, use defaults
+      return;
+    }
+
+    // Start auto-rotate worker
+    if (logConfig.autoRotate.enabled) {
+      this.autoRotateWorker = new AutoRotateWorker(logConfig.autoRotate);
+      await this.autoRotateWorker.start();
+    }
+
+    // Start auto-delete worker
+    if (logConfig.autoDelete.enabled) {
+      this.autoDeleteWorker = new AutoDeleteWorker(logConfig.autoDelete);
+      await this.autoDeleteWorker.start();
+    }
+  }
+
+  /**
+   * Stop log management workers
+   */
+  private async stopWorkers(): Promise<void> {
+    if (this.autoRotateWorker) {
+      await this.autoRotateWorker.stop();
+    }
+    if (this.autoDeleteWorker) {
+      await this.autoDeleteWorker.stop();
+    }
   }
 
   /**
@@ -106,6 +157,24 @@ class AdminServer {
       // Health endpoint (no auth required)
       if (pathname === '/health' && method === 'GET') {
         await this.handleHealth(req, res);
+        return;
+      }
+
+      // Swagger UI - OpenAPI spec (no auth required)
+      if (pathname === '/api-docs.json') {
+        this.sendJson(res, 200, openApiSpec);
+        return;
+      }
+
+      // Swagger UI - HTML interface (no auth required)
+      if (pathname === '/api-docs' || pathname.startsWith('/api-docs/')) {
+        await this.handleSwaggerUI(req, res, pathname);
+        return;
+      }
+
+      // Proxy chat requests to router (production mode)
+      if (pathname.startsWith('/v1/')) {
+        await this.handleRouterProxy(req, res, pathname);
         return;
       }
 
@@ -144,6 +213,9 @@ class AdminServer {
       } else if (pathname.match(/^\/api\/servers\/[^/]+\/restart$/) && method === 'POST') {
         const serverId = pathname.split('/')[3];
         await this.handleRestartServer(req, res, serverId);
+      } else if (pathname.match(/^\/api\/servers\/[^/]+\/slots$/) && method === 'GET') {
+        const serverId = pathname.split('/')[3];
+        await this.handleGetServerSlots(req, res, serverId);
       } else if (pathname.match(/^\/api\/servers\/[^/]+\/logs$/) && method === 'GET') {
         const serverId = pathname.split('/')[3];
         await this.handleGetLogs(req, res, serverId, url);
@@ -186,6 +258,18 @@ class AdminServer {
         await this.handleGetRouterLogs(req, res, url);
       } else if (pathname === '/api/router' && method === 'PATCH') {
         await this.handleUpdateRouter(req, res);
+      } else if (pathname === '/api/admin' && method === 'GET') {
+        await this.handleGetAdmin(req, res);
+      } else if (pathname === '/api/admin/logs' && method === 'GET') {
+        await this.handleGetAdminLogs(req, res);
+      } else if (pathname === '/api/admin/logs/rotate' && method === 'POST') {
+        await this.handleRotateLogs(req, res);
+      } else if (pathname === '/api/admin/logs/clear-archived' && method === 'POST') {
+        await this.handleClearArchivedLogs(req, res);
+      } else if (pathname === '/api/admin/logs/config' && method === 'PATCH') {
+        await this.handleUpdateLogConfig(req, res);
+      } else if (pathname === '/api/admin/service-logs' && method === 'GET') {
+        await this.handleGetAdminServiceLogs(req, res, url);
       } else {
         // API endpoint not found
         this.sendError(res, 404, 'Not Found', `Unknown endpoint: ${method} ${pathname}`, 'NOT_FOUND');
@@ -212,16 +296,74 @@ class AdminServer {
   }
 
   /**
+   * Proxy router requests (production mode)
+   */
+  private async handleRouterProxy(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
+    try {
+      // Check if router is running
+      const routerStatus = await routerManager.getStatus();
+      if (!routerStatus || !routerStatus.status.isRunning) {
+        this.sendError(res, 503, 'Service Unavailable', 'Router is not running. Start router to use chat.', 'ROUTER_NOT_RUNNING');
+        return;
+      }
+
+      const { config } = routerStatus;
+      const routerHost = config.host || '127.0.0.1';
+      const routerPort = config.port || 9100;
+
+      // Parse URL to get query string
+      const url = new URL(req.url!, `http://${req.headers.host}`);
+      const fullPath = pathname + url.search;
+
+      // Create proxy request
+      const options = {
+        hostname: routerHost,
+        port: routerPort,
+        path: fullPath,
+        method: req.method,
+        headers: {
+          ...req.headers,
+          host: `${routerHost}:${routerPort}`,
+        },
+      };
+
+      const proxyReq = http.request(options, (proxyRes) => {
+        // Copy status and headers
+        res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+        // Pipe response (supports streaming SSE)
+        proxyRes.pipe(res);
+      });
+
+      proxyReq.on('error', (err) => {
+        console.error('[Admin] Router proxy error:', err);
+        if (!res.headersSent) {
+          this.sendError(res, 502, 'Bad Gateway', `Router connection failed: ${err.message}`, 'ROUTER_PROXY_ERROR');
+        }
+      });
+
+      // Pipe request body
+      req.pipe(proxyReq);
+    } catch (error) {
+      console.error('[Admin] Error proxying to router:', error);
+      if (!res.headersSent) {
+        this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_PROXY_ERROR');
+      }
+    }
+  }
+
+  /**
    * List all servers
    */
   private async handleListServers(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const servers = await stateManager.getAllServers();
 
-    // Update status for each server
+    // Update status for each server (including health check)
     for (const server of servers) {
       const status = await statusChecker.checkServer(server);
       server.status = statusChecker.determineStatus(status, status.portListening);
       server.pid = status.pid || undefined;
+      // Add health check result (only meaningful if server is running)
+      (server as any).healthy = server.status === 'running' ? status.healthy : undefined;
     }
 
     this.sendJson(res, 200, { servers });
@@ -240,6 +382,8 @@ class AdminServer {
     const status = await statusChecker.checkServer(server);
     server.status = statusChecker.determineStatus(status, status.portListening);
     server.pid = status.pid || undefined;
+    // Add health check result (only meaningful if server is running)
+    (server as any).healthy = server.status === 'running' ? status.healthy : undefined;
 
     this.sendJson(res, 200, { server, status });
   }
@@ -264,58 +408,6 @@ class AdminServer {
     }
 
     try {
-      // Resolve model path
-      const modelPath = await modelScanner.resolveModelPath(data.model);
-      if (!modelPath) {
-        this.sendError(res, 404, 'Not Found', `Model not found: ${data.model}`, 'MODEL_NOT_FOUND');
-        return;
-      }
-
-      const modelName = path.basename(modelPath);
-
-      // Check if server already exists
-      const existingServer = await stateManager.serverExistsForModel(modelPath);
-      if (existingServer) {
-        this.sendError(res, 409, 'Conflict', `Server already exists for model: ${modelName}`, 'SERVER_EXISTS');
-        return;
-      }
-
-      // Get model size
-      const modelSize = await modelScanner.getModelSize(modelName);
-      if (!modelSize) {
-        this.sendError(res, 500, 'Internal Server Error', 'Failed to read model file', 'MODEL_READ_ERROR');
-        return;
-      }
-
-      // Determine port
-      let port: number;
-      if (data.port) {
-        portManager.validatePort(data.port);
-        const available = await portManager.isPortAvailable(data.port);
-        if (!available) {
-          this.sendError(res, 409, 'Conflict', `Port ${data.port} is already in use`, 'PORT_IN_USE');
-          return;
-        }
-        port = data.port;
-      } else {
-        port = await portManager.findAvailablePort();
-      }
-
-      // Validate alias if provided
-      if (data.alias) {
-        const aliasError = validateAlias(data.alias);
-        if (aliasError) {
-          this.sendError(res, 400, 'Bad Request', `Invalid alias: ${aliasError}`, 'INVALID_ALIAS');
-          return;
-        }
-
-        const conflictingServerId = await stateManager.isAliasAvailable(data.alias);
-        if (conflictingServerId) {
-          this.sendError(res, 409, 'Conflict', `Alias "${data.alias}" is already used by server: ${conflictingServerId}`, 'ALIAS_IN_USE');
-          return;
-        }
-      }
-
       // Parse custom flags if provided
       let customFlags: string[] | undefined;
       if (data.customFlags) {
@@ -324,50 +416,33 @@ class AdminServer {
           : data.customFlags.split(',').map((f: string) => f.trim()).filter((f: string) => f.length > 0);
       }
 
-      // Generate configuration
-      const serverConfig = await configGenerator.generateConfig(
-        modelPath,
-        modelName,
-        modelSize,
-        port,
-        {
-          port: data.port,
-          host: data.host,
-          threads: data.threads,
-          ctxSize: data.ctxSize,
-          gpuLayers: data.gpuLayers,
-          verbose: data.verbose,
-          customFlags,
-          alias: data.alias,
+      // Create server using centralized service
+      const result = await serverLifecycleService.createServer(data.model, {
+        port: data.port,
+        host: data.host,
+        threads: data.threads,
+        ctxSize: data.ctxSize,
+        gpuLayers: data.gpuLayers,
+        verbose: data.verbose,
+        customFlags,
+        alias: data.alias,
+      });
+
+      if (!result.success) {
+        // Map common errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'MODEL_NOT_FOUND');
+        } else if (result.error?.includes('already in use') || result.error?.includes('already used')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'CONFLICT');
+        } else if (result.error?.includes('Invalid alias')) {
+          this.sendError(res, 400, 'Bad Request', result.error, 'INVALID_ALIAS');
+        } else {
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Server creation failed', 'CREATE_ERROR');
         }
-      );
-
-      // Save configuration
-      await stateManager.saveServerConfig(serverConfig);
-
-      // Create and start server
-      await launchctlManager.createPlist(serverConfig);
-      await launchctlManager.loadService(serverConfig.plistPath);
-      await launchctlManager.startService(serverConfig.label);
-
-      // Wait for startup
-      const started = await launchctlManager.waitForServiceStart(serverConfig.label, 5000);
-      if (!started) {
-        this.sendError(res, 500, 'Internal Server Error', 'Server failed to start', 'START_FAILED');
         return;
       }
 
-      // Update status
-      const status = await statusChecker.checkServer(serverConfig);
-      serverConfig.status = statusChecker.determineStatus(status, status.portListening);
-      serverConfig.pid = status.pid || undefined;
-      await stateManager.updateServerConfig(serverConfig.id, {
-        status: serverConfig.status,
-        pid: serverConfig.pid,
-        lastStarted: new Date().toISOString(),
-      });
-
-      this.sendJson(res, 201, { server: serverConfig });
+      this.sendJson(res, 201, { server: result.server });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'CREATE_ERROR');
     }
@@ -393,92 +468,57 @@ class AdminServer {
     }
 
     try {
-      // Build updates object
-      const updates: Partial<ServerConfig> = {};
-
-      if (data.model !== undefined) {
-        const modelPath = await modelScanner.resolveModelPath(data.model);
-        if (!modelPath) {
-          this.sendError(res, 404, 'Not Found', `Model not found: ${data.model}`, 'MODEL_NOT_FOUND');
-          return;
-        }
-        updates.modelPath = modelPath;
-        updates.modelName = path.basename(modelPath);
-      }
-
-      if (data.port !== undefined) {
-        portManager.validatePort(data.port);
-        const available = await portManager.isPortAvailable(data.port);
-        if (!available && data.port !== server.port) {
-          this.sendError(res, 409, 'Conflict', `Port ${data.port} is already in use`, 'PORT_IN_USE');
-          return;
-        }
-        updates.port = data.port;
-      }
-
-      if (data.host !== undefined) updates.host = data.host;
-      if (data.threads !== undefined) updates.threads = data.threads;
-      if (data.ctxSize !== undefined) updates.ctxSize = data.ctxSize;
-      if (data.gpuLayers !== undefined) updates.gpuLayers = data.gpuLayers;
-      if (data.verbose !== undefined) updates.verbose = data.verbose;
+      // Parse custom flags
+      let customFlags: string[] | undefined;
       if (data.customFlags !== undefined) {
-        updates.customFlags = Array.isArray(data.customFlags)
+        customFlags = Array.isArray(data.customFlags)
           ? data.customFlags
           : data.customFlags.split(',').map((f: string) => f.trim()).filter((f: string) => f.length > 0);
       }
-      if (data.alias !== undefined) {
-        // Empty string or null means remove alias
-        if (data.alias === '' || data.alias === null) {
-          updates.alias = undefined;
+
+      // Handle alias empty string/null -> null conversion
+      let aliasValue: string | null | undefined = data.alias;
+      if (data.alias === '' || data.alias === null) {
+        aliasValue = null; // null means remove alias
+      }
+
+      // Delegate to serverConfigService (FIX: now handles model migration properly)
+      const result = await serverConfigService.updateConfig({
+        serverId: server.id,
+        updates: {
+          model: data.model,
+          port: data.port,
+          host: data.host,
+          threads: data.threads,
+          ctxSize: data.ctxSize,
+          gpuLayers: data.gpuLayers,
+          verbose: data.verbose,
+          customFlags,
+          alias: aliasValue,
+        },
+        restartIfNeeded: data.restart === true,
+      });
+
+      if (!result.success) {
+        // Map common errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'NOT_FOUND');
+        } else if (result.error?.includes('already in use') || result.error?.includes('already exists')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'CONFLICT');
+        } else if (result.error?.includes('Invalid')) {
+          this.sendError(res, 400, 'Bad Request', result.error, 'VALIDATION_ERROR');
         } else {
-          // Validate alias format
-          const aliasError = validateAlias(data.alias);
-          if (aliasError) {
-            this.sendError(res, 400, 'Bad Request', `Invalid alias: ${aliasError}`, 'INVALID_ALIAS');
-            return;
-          }
-
-          // Check uniqueness (exclude current server)
-          const conflictingServerId = await stateManager.isAliasAvailable(data.alias, server.id);
-          if (conflictingServerId) {
-            this.sendError(res, 409, 'Conflict', `Alias "${data.alias}" is already used by server: ${conflictingServerId}`, 'ALIAS_IN_USE');
-            return;
-          }
-
-          updates.alias = data.alias;
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Update failed', 'UPDATE_ERROR');
         }
+        return;
       }
 
-      // Check if server is running
-      const status = await statusChecker.checkServer(server);
-      const isRunning = statusChecker.determineStatus(status, status.portListening) === 'running';
-
-      // Apply updates
-      await stateManager.updateServerConfig(server.id, updates);
-
-      // Regenerate plist with new config
-      const updatedServer = await stateManager.loadServerConfig(server.id);
-      if (updatedServer) {
-        await launchctlManager.createPlist(updatedServer);
-
-        // Restart if requested and running
-        if (data.restart && isRunning) {
-          await launchctlManager.unloadService(updatedServer.plistPath);
-          await launchctlManager.loadService(updatedServer.plistPath);
-          await launchctlManager.startService(updatedServer.label);
-          await launchctlManager.waitForServiceStart(updatedServer.label, 5000);
-
-          const newStatus = await statusChecker.checkServer(updatedServer);
-          await stateManager.updateServerConfig(updatedServer.id, {
-            status: statusChecker.determineStatus(newStatus, newStatus.portListening),
-            pid: newStatus.pid || undefined,
-            lastStarted: new Date().toISOString(),
-          });
-        }
-      }
-
-      const finalServer = await stateManager.loadServerConfig(server.id);
-      this.sendJson(res, 200, { server: finalServer });
+      // Return updated server (with migration info if applicable)
+      this.sendJson(res, 200, {
+        server: result.server,
+        migrated: result.migrated,
+        oldServerId: result.oldServerId,
+      });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'UPDATE_ERROR');
     }
@@ -494,67 +534,48 @@ class AdminServer {
       return;
     }
 
-    try {
-      // Stop server if running
-      const status = await statusChecker.checkServer(server);
-      if (statusChecker.determineStatus(status, status.portListening) === 'running') {
-        await launchctlManager.unloadService(server.plistPath);
-        await launchctlManager.waitForServiceStop(server.label, 5000);
+    const result = await serverLifecycleService.deleteServer(serverId);
+    if (!result.success) {
+      if (result.error?.includes('not found')) {
+        this.sendError(res, 404, 'Not Found', result.error, 'SERVER_NOT_FOUND');
+      } else if (result.error?.includes('already')) {
+        this.sendError(res, 409, 'Conflict', result.error, 'OPERATION_IN_PROGRESS');
+      } else {
+        this.sendError(res, 500, 'Internal Server Error', result.error || 'Unknown error', 'DELETE_ERROR');
       }
-
-      // Delete plist and config
-      await launchctlManager.deletePlist(server.plistPath);
-      await stateManager.deleteServerConfig(server.id);
-
-      this.sendJson(res, 200, { success: true });
-    } catch (error) {
-      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'DELETE_ERROR');
+      return;
     }
+    this.sendJson(res, 200, { success: true });
   }
 
   /**
    * Start server
    */
   private async handleStartServer(req: http.IncomingMessage, res: http.ServerResponse, serverId: string): Promise<void> {
-    const server = await stateManager.findServer(serverId);
-    if (!server) {
-      this.sendError(res, 404, 'Not Found', `Server not found: ${serverId}`, 'SERVER_NOT_FOUND');
-      return;
-    }
-
     try {
-      const status = await statusChecker.checkServer(server);
-      if (statusChecker.determineStatus(status, status.portListening) === 'running') {
-        this.sendError(res, 409, 'Conflict', 'Server is already running', 'ALREADY_RUNNING');
+      // Use centralized lifecycle service
+      const result = await serverLifecycleService.startServer(serverId);
+
+      if (!result.success) {
+        // Map common errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'SERVER_NOT_FOUND');
+        } else if (result.error?.includes('already running')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'ALREADY_RUNNING');
+        } else if (result.error?.includes('already starting')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'OPERATION_IN_PROGRESS');
+        } else {
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Unknown error', 'START_FAILED');
+        }
         return;
       }
 
-      // Recreate plist if missing
-      if (!(await fileExists(server.plistPath))) {
-        await launchctlManager.createPlist(server);
-      }
-
-      await launchctlManager.loadService(server.plistPath);
-      await launchctlManager.startService(server.label);
-      const started = await launchctlManager.waitForServiceStart(server.label, 5000);
-
-      if (!started) {
-        this.sendError(res, 500, 'Internal Server Error', 'Server failed to start', 'START_FAILED');
-        return;
-      }
-
-      // Give server a moment to fully start before checking status
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const newStatus = await statusChecker.checkServer(server);
-      await stateManager.updateServerConfig(server.id, {
-        status: statusChecker.determineStatus(newStatus, newStatus.portListening),
-        pid: newStatus.pid || undefined,
-        lastStarted: new Date().toISOString(),
+      // Return success with server details
+      this.sendJson(res, 200, {
+        server: result.server,
+        metalMemoryMB: result.metalMemoryMB,
+        rotatedLogs: result.rotatedLogs,
       });
-
-      const updatedServer = await stateManager.loadServerConfig(server.id);
-      this.sendJson(res, 200, { server: updatedServer });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'START_ERROR');
     }
@@ -564,30 +585,26 @@ class AdminServer {
    * Stop server
    */
   private async handleStopServer(req: http.IncomingMessage, res: http.ServerResponse, serverId: string): Promise<void> {
-    const server = await stateManager.findServer(serverId);
-    if (!server) {
-      this.sendError(res, 404, 'Not Found', `Server not found: ${serverId}`, 'SERVER_NOT_FOUND');
-      return;
-    }
-
     try {
-      const status = await statusChecker.checkServer(server);
-      if (statusChecker.determineStatus(status, status.portListening) !== 'running') {
-        this.sendError(res, 409, 'Conflict', 'Server is not running', 'NOT_RUNNING');
+      // Use centralized lifecycle service
+      const result = await serverLifecycleService.stopServer(serverId);
+
+      if (!result.success) {
+        // Map common errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'SERVER_NOT_FOUND');
+        } else if (result.error?.includes('already stopped')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'NOT_RUNNING');
+        } else if (result.error?.includes('already stopping')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'OPERATION_IN_PROGRESS');
+        } else {
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Unknown error', 'STOP_FAILED');
+        }
         return;
       }
 
-      await launchctlManager.unloadService(server.plistPath);
-      await launchctlManager.waitForServiceStop(server.label, 5000);
-
-      await stateManager.updateServerConfig(server.id, {
-        status: 'stopped',
-        pid: undefined,
-        lastStopped: new Date().toISOString(),
-      });
-
-      const updatedServer = await stateManager.loadServerConfig(server.id);
-      this.sendJson(res, 200, { server: updatedServer });
+      // Return success with server details
+      this.sendJson(res, 200, { server: result.server });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'STOP_ERROR');
     }
@@ -597,44 +614,79 @@ class AdminServer {
    * Restart server
    */
   private async handleRestartServer(req: http.IncomingMessage, res: http.ServerResponse, serverId: string): Promise<void> {
+    try {
+      // Use centralized lifecycle service
+      const result = await serverLifecycleService.restartServer(serverId);
+
+      if (!result.success) {
+        // Map common errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'SERVER_NOT_FOUND');
+        } else if (result.error?.includes('Failed to stop')) {
+          this.sendError(res, 500, 'Internal Server Error', result.error, 'STOP_FAILED');
+        } else {
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Unknown error', 'RESTART_FAILED');
+        }
+        return;
+      }
+
+      // Return success with server details
+      this.sendJson(res, 200, {
+        server: result.server,
+        metalMemoryMB: result.metalMemoryMB,
+        rotatedLogs: result.rotatedLogs,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'RESTART_ERROR');
+    }
+  }
+
+  /**
+   * Get slot status from a running llama.cpp server
+   */
+  private async handleGetServerSlots(req: http.IncomingMessage, res: http.ServerResponse, serverId: string): Promise<void> {
     const server = await stateManager.findServer(serverId);
     if (!server) {
       this.sendError(res, 404, 'Not Found', `Server not found: ${serverId}`, 'SERVER_NOT_FOUND');
       return;
     }
 
+    const emptySlots = { slots: [], activeSlots: 0, idleSlots: 0, totalSlots: 0 };
+
     try {
-      // Stop if running
       const status = await statusChecker.checkServer(server);
-      if (statusChecker.determineStatus(status, status.portListening) === 'running') {
-        await launchctlManager.unloadService(server.plistPath);
-        await launchctlManager.waitForServiceStop(server.label, 5000);
-      }
-
-      // Start
-      await launchctlManager.loadService(server.plistPath);
-      await launchctlManager.startService(server.label);
-      const started = await launchctlManager.waitForServiceStart(server.label, 5000);
-
-      if (!started) {
-        this.sendError(res, 500, 'Internal Server Error', 'Server failed to start', 'START_FAILED');
+      if (statusChecker.determineStatus(status, status.portListening) !== 'running') {
+        this.sendJson(res, 200, emptySlots);
         return;
       }
 
-      // Give server a moment to fully start before checking status
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const host = server.host || '127.0.0.1';
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
 
-      const newStatus = await statusChecker.checkServer(server);
-      await stateManager.updateServerConfig(server.id, {
-        status: statusChecker.determineStatus(newStatus, newStatus.portListening),
-        pid: newStatus.pid || undefined,
-        lastStarted: new Date().toISOString(),
-      });
+      try {
+        const response = await fetch(`http://${host}:${server.port}/slots`, { signal: controller.signal });
+        clearTimeout(timeout);
 
-      const updatedServer = await stateManager.loadServerConfig(server.id);
-      this.sendJson(res, 200, { server: updatedServer });
+        if (!response.ok) {
+          this.sendJson(res, 200, emptySlots);
+          return;
+        }
+
+        const slots = await response.json() as Array<{ is_processing: boolean; [key: string]: any }>;
+        const activeSlots = slots.filter(s => s.is_processing).length;
+        this.sendJson(res, 200, {
+          slots,
+          activeSlots,
+          idleSlots: slots.length - activeSlots,
+          totalSlots: slots.length,
+        });
+      } catch {
+        clearTimeout(timeout);
+        this.sendJson(res, 200, emptySlots);
+      }
     } catch (error) {
-      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'RESTART_ERROR');
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'SLOTS_ERROR');
     }
   }
 
@@ -649,47 +701,73 @@ class AdminServer {
     }
 
     try {
-      const type = url.searchParams.get('type') || 'both'; // stdout, stderr, or both
+      const type = url.searchParams.get('type') || 'activity'; // activity (default), system, http, stderr, stdout, or all
       const lines = parseInt(url.searchParams.get('lines') || '100');
 
+      // Support both new terminology and old parameter names (backward compatibility):
+      // - 'activity' (new) or 'http' (old) -> HTTP activity logs only
+      // - 'system' (new) -> stderr + stdout (system diagnostic logs, no http)
+      // - 'all' (old) -> everything (http + stderr + stdout)
+      // - 'stderr' (old) -> stderr only
+      // - 'stdout' (old) -> stdout only
+
+      let http = '';
       let stdout = '';
       let stderr = '';
 
-      if ((type === 'stdout' || type === 'both') && (await fileExists(server.stdoutPath))) {
+      // HTTP logs
+      if ((type === 'activity' || type === 'http' || type === 'all') && (await fileExists(server.httpLogPath))) {
+        const content = await fs.readFile(server.httpLogPath, 'utf-8');
+        const logLines = content.split('\n');
+        http = logLines.slice(-lines).join('\n');
+      }
+
+      // Stdout logs
+      if ((type === 'system' || type === 'stdout' || type === 'all') && (await fileExists(server.stdoutPath))) {
         const content = await fs.readFile(server.stdoutPath, 'utf-8');
         const logLines = content.split('\n');
         stdout = logLines.slice(-lines).join('\n');
       }
 
-      if ((type === 'stderr' || type === 'both') && (await fileExists(server.stderrPath))) {
+      // Stderr logs
+      if ((type === 'system' || type === 'stderr' || type === 'all') && (await fileExists(server.stderrPath))) {
         const content = await fs.readFile(server.stderrPath, 'utf-8');
         const logLines = content.split('\n');
         stderr = logLines.slice(-lines).join('\n');
       }
 
-      this.sendJson(res, 200, { stdout, stderr });
+      this.sendJson(res, 200, { http, stdout, stderr });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'LOGS_ERROR');
     }
   }
 
   /**
-   * List models
+   * List models (handles sharded models correctly)
    */
   private async handleListModels(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     try {
       const models = await modelScanner.scanModels();
-      const modelsWithServers = await Promise.all(
-        models.map(async (model) => {
-          const servers = await stateManager.getAllServers();
-          const usingServers = servers.filter(s => s.modelName === model.filename);
-          return {
-            ...model,
-            serversUsing: usingServers.length,
-            serverIds: usingServers.map(s => s.id),
-          };
-        })
-      );
+      const allServers = await stateManager.getAllServers();
+
+      const modelsWithServers = models.map((model) => {
+        // Find servers using this model (handles sharded models)
+        const usingServers = allServers.filter(server => {
+          if (model.isSharded && model.shardPaths) {
+            // Check if server uses any shard of this model
+            return model.shardPaths.includes(server.modelPath);
+          } else {
+            // Single-file model: exact path match
+            return server.modelPath === model.path;
+          }
+        });
+
+        return {
+          ...model,
+          serversUsing: usingServers.length,
+          serverIds: usingServers.map(s => s.id),
+        };
+      });
 
       this.sendJson(res, 200, { models: modelsWithServers });
     } catch (error) {
@@ -838,57 +916,38 @@ class AdminServer {
 
   /**
    * Delete model
+   * FIX: Now uses modelManagementService which filters by modelPath (not modelName)
    */
   private async handleDeleteModel(req: http.IncomingMessage, res: http.ServerResponse, modelName: string, url: URL): Promise<void> {
     try {
       const cascade = url.searchParams.get('cascade') === 'true';
 
-      // Find servers using this model
-      const servers = await stateManager.getAllServers();
-      const usingServers = servers.filter(s => s.modelName === modelName);
+      // Delegate to modelManagementService (FIX: now filters by modelPath correctly)
+      const result = await modelManagementService.deleteModel({
+        modelIdentifier: modelName,
+        cascade,
+      });
 
-      // Block deletion if servers exist and cascade not specified
-      if (usingServers.length > 0 && !cascade) {
-        this.sendError(
-          res,
-          409,
-          'Conflict',
-          `Model is used by ${usingServers.length} server(s). Use ?cascade=true to delete model and servers.`,
-          'MODEL_IN_USE'
-        );
-        return;
-      }
-
-      // Delete servers if cascade
-      const deletedServers: string[] = [];
-      if (cascade) {
-        for (const server of usingServers) {
-          const status = await statusChecker.checkServer(server);
-          if (statusChecker.determineStatus(status, status.portListening) === 'running') {
-            await launchctlManager.unloadService(server.plistPath);
-            await launchctlManager.waitForServiceStop(server.label, 5000);
-          }
-          await launchctlManager.deletePlist(server.plistPath);
-          await stateManager.deleteServerConfig(server.id);
-          deletedServers.push(server.id);
+      if (!result.success) {
+        // Map errors to appropriate HTTP status codes
+        if (result.error?.includes('not found')) {
+          this.sendError(res, 404, 'Not Found', result.error, 'MODEL_NOT_FOUND');
+        } else if (result.error?.includes('used by')) {
+          this.sendError(res, 409, 'Conflict', result.error, 'MODEL_IN_USE');
+        } else {
+          this.sendError(res, 500, 'Internal Server Error', result.error || 'Delete failed', 'DELETE_ERROR');
         }
-      }
-
-      // Delete model file
-      const modelPath = await modelScanner.resolveModelPath(modelName);
-      if (!modelPath) {
-        this.sendError(res, 404, 'Not Found', `Model not found: ${modelName}`, 'MODEL_NOT_FOUND');
         return;
       }
 
-      await fs.unlink(modelPath);
-
+      // Success - return deleted servers info
       this.sendJson(res, 200, {
         success: true,
-        deletedServers: deletedServers.length > 0 ? deletedServers : undefined,
+        modelPath: result.modelPath,
+        deletedServers: result.deletedServers,
       });
     } catch (error) {
-      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'DELETE_MODEL_ERROR');
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'DELETE_ERROR');
     }
   }
 
@@ -970,7 +1029,7 @@ class AdminServer {
         config: {
           port: config.port,
           host: config.host,
-          verbose: config.verbose,
+          logging: config.logging,
           requestTimeout: config.requestTimeout,
           healthCheckInterval: config.healthCheckInterval,
         },
@@ -983,6 +1042,44 @@ class AdminServer {
       });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_STATUS_ERROR');
+    }
+  }
+
+  /**
+   * Get admin status
+   */
+  private async handleGetAdmin(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const adminStatus = await adminManager.getStatus();
+
+      if (!adminStatus) {
+        this.sendJson(res, 200, {
+          status: 'not_configured',
+          config: null,
+          isRunning: false,
+        });
+        return;
+      }
+
+      const { config, status } = adminStatus;
+
+      this.sendJson(res, 200, {
+        status: status.isRunning ? 'running' : 'stopped',
+        config: {
+          port: config.port,
+          host: config.host,
+          logging: config.logging,
+          requestTimeout: config.requestTimeout,
+        },
+        pid: status.pid,
+        isRunning: status.isRunning,
+        apiKey: config.apiKey,
+        createdAt: config.createdAt,
+        lastStarted: config.lastStarted,
+        lastStopped: config.lastStopped,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ADMIN_STATUS_ERROR');
     }
   }
 
@@ -1049,19 +1146,26 @@ class AdminServer {
         return;
       }
 
-      const type = url.searchParams.get('type') || 'both'; // stdout, stderr, or both
+      const type = url.searchParams.get('type') || 'both'; // activity, system, stdout, stderr, or both
       const lines = parseInt(url.searchParams.get('lines') || '100');
+
+      // Support both new terminology and old parameter names (backward compatibility):
+      // - 'activity' (new) or 'stdout' (old) -> router activity logs
+      // - 'system' (new) or 'stderr' (old) -> system diagnostic logs
+      // - 'both' (old) -> both stdout + stderr
 
       let stdout = '';
       let stderr = '';
 
-      if ((type === 'stdout' || type === 'both') && (await fileExists(config.stdoutPath))) {
+      // Activity logs (stdout)
+      if ((type === 'activity' || type === 'stdout' || type === 'both') && (await fileExists(config.stdoutPath))) {
         const content = await fs.readFile(config.stdoutPath, 'utf-8');
         const logLines = content.split('\n');
         stdout = logLines.slice(-lines).join('\n');
       }
 
-      if ((type === 'stderr' || type === 'both') && (await fileExists(config.stderrPath))) {
+      // System logs (stderr)
+      if ((type === 'system' || type === 'stderr' || type === 'both') && (await fileExists(config.stderrPath))) {
         const content = await fs.readFile(config.stderrPath, 'utf-8');
         const logLines = content.split('\n');
         stderr = logLines.slice(-lines).join('\n');
@@ -1070,6 +1174,37 @@ class AdminServer {
       this.sendJson(res, 200, { stdout, stderr });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_LOGS_ERROR');
+    }
+  }
+
+  /**
+   * Get admin service logs content
+   */
+  private async handleGetAdminServiceLogs(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
+    try {
+      const type = url.searchParams.get('type') || 'both'; // activity, system, or both
+      const lines = parseInt(url.searchParams.get('lines') || '100');
+
+      let stdout = '';
+      let stderr = '';
+
+      // Activity logs (stdout)
+      if ((type === 'activity' || type === 'both') && (await fileExists(this.config.stdoutPath))) {
+        const content = await fs.readFile(this.config.stdoutPath, 'utf-8');
+        const logLines = content.split('\n');
+        stdout = logLines.slice(-lines).join('\n');
+      }
+
+      // System logs (stderr)
+      if ((type === 'system' || type === 'both') && (await fileExists(this.config.stderrPath))) {
+        const content = await fs.readFile(this.config.stderrPath, 'utf-8');
+        const logLines = content.split('\n');
+        stderr = logLines.slice(-lines).join('\n');
+      }
+
+      this.sendJson(res, 200, { stdout, stderr });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ADMIN_SERVICE_LOGS_ERROR');
     }
   }
 
@@ -1088,7 +1223,7 @@ class AdminServer {
       }
 
       // Validate updates
-      const allowedFields = ['port', 'host', 'verbose', 'requestTimeout', 'healthCheckInterval'];
+      const allowedFields = ['port', 'host', 'logging', 'requestTimeout', 'healthCheckInterval'];
       const invalidFields = Object.keys(updates).filter(key => !allowedFields.includes(key));
 
       if (invalidFields.length > 0) {
@@ -1097,7 +1232,8 @@ class AdminServer {
       }
 
       // Apply updates
-      const needsRestart = updates.port !== undefined || updates.host !== undefined;
+      // Restart needed for: port, host (changes plist), or logging (changes router behavior)
+      const needsRestart = updates.port !== undefined || updates.host !== undefined || updates.logging !== undefined;
       await routerManager.updateConfig(updates);
 
       // Regenerate plist if needed
@@ -1115,6 +1251,138 @@ class AdminServer {
       });
     } catch (error) {
       this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROUTER_UPDATE_ERROR');
+    }
+  }
+
+  /**
+   * Get admin log information
+   */
+  private async handleGetAdminLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const allLogs = await logManagementService.scanAllLogs();
+
+      // Include log management config
+      const logConfig = this.config.logManagement || {
+        autoRotate: { enabled: true, intervalHours: 24, thresholdMB: 100 },
+        autoDelete: { enabled: true, intervalHours: 24, afterDays: 30 },
+      };
+
+      // Include worker status
+      const workerStatus = {
+        autoRotate: {
+          enabled: logConfig.autoRotate.enabled,
+          running: this.autoRotateWorker?.isRunning() || false,
+          lastRun: this.autoRotateWorker?.getLastRun()?.toISOString(),
+        },
+        autoDelete: {
+          enabled: logConfig.autoDelete.enabled,
+          running: this.autoDeleteWorker?.isRunning() || false,
+          lastRun: this.autoDeleteWorker?.getLastRun()?.toISOString(),
+        },
+      };
+
+      this.sendJson(res, 200, {
+        ...allLogs,
+        config: logConfig,
+        workers: workerStatus,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ADMIN_LOGS_ERROR');
+    }
+  }
+
+
+  /**
+   * Rotate log files
+   */
+  private async handleRotateLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.readBody(req);
+      const { type, serverId, streams } = JSON.parse(body);
+
+      // Validate request
+      if (!type || !streams || !Array.isArray(streams)) {
+        this.sendError(res, 400, 'Bad Request', 'Missing or invalid type/streams', 'INVALID_REQUEST');
+        return;
+      }
+
+      if (type === 'server' && !serverId) {
+        this.sendError(res, 400, 'Bad Request', 'Missing serverId for server type', 'INVALID_REQUEST');
+        return;
+      }
+
+      const archivedFiles = await logManagementService.rotateLogs(type, serverId, streams);
+
+      this.sendJson(res, 200, {
+        success: true,
+        message: `Rotated ${archivedFiles.length} log file(s)`,
+        archivedFiles,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'ROTATE_LOGS_ERROR');
+    }
+  }
+
+  /**
+   * Clear archived logs
+   */
+  private async handleClearArchivedLogs(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.readBody(req);
+      const { serverId } = JSON.parse(body);
+
+      const result = await logManagementService.clearArchivedLogs(serverId);
+
+      this.sendJson(res, 200, {
+        success: true,
+        count: result.count,
+        totalSize: result.totalSize,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'CLEAR_ARCHIVED_ERROR');
+    }
+  }
+
+
+  /**
+   * Update log management configuration
+   */
+  private async handleUpdateLogConfig(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    try {
+      const body = await this.readBody(req);
+      const updates: Partial<LogManagementConfig> = JSON.parse(body);
+
+      // Load current admin config
+      const configPath = path.join(getConfigDir(), 'admin.json');
+      const currentConfig = await readJson<AdminConfig>(configPath);
+
+      // Merge updates into existing config
+      const newLogConfig: LogManagementConfig = {
+        autoRotate: {
+          ...currentConfig.logManagement?.autoRotate || { enabled: true, intervalHours: 24, thresholdMB: 100 },
+          ...updates.autoRotate,
+        },
+        autoDelete: {
+          ...currentConfig.logManagement?.autoDelete || { enabled: true, intervalHours: 24, afterDays: 30 },
+          ...updates.autoDelete,
+        },
+      };
+
+      // Update admin config
+      currentConfig.logManagement = newLogConfig;
+      await writeJsonAtomic(configPath, currentConfig);
+
+      // Restart workers with new configuration
+      await this.stopWorkers();
+      this.config = currentConfig; // Update in-memory config
+      await this.startWorkers();
+
+      this.sendJson(res, 200, {
+        success: true,
+        config: newLogConfig,
+      });
+    } catch (error) {
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'UPDATE_LOG_CONFIG_ERROR');
     }
   }
 
@@ -1169,6 +1437,93 @@ class AdminServer {
   /**
    * Serve static files from web/dist directory
    */
+  /**
+   * Serve Swagger UI for API documentation
+   */
+  private async handleSwaggerUI(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
+    try {
+      // Get swagger-ui-dist directory
+      const swaggerUiPath = require.resolve('swagger-ui-dist');
+      const swaggerDistDir = path.dirname(swaggerUiPath);
+
+      // Handle /api-docs -> redirect to /api-docs/
+      if (pathname === '/api-docs') {
+        res.writeHead(302, { Location: '/api-docs/' });
+        res.end();
+        return;
+      }
+
+      // Handle swagger-initializer.js with custom config
+      if (pathname === '/api-docs/swagger-initializer.js') {
+        const customInitializer = `
+window.onload = function() {
+  window.ui = SwaggerUIBundle({
+    url: '/api-docs.json',
+    dom_id: '#swagger-ui',
+    deepLinking: true,
+    presets: [
+      SwaggerUIBundle.presets.apis,
+      SwaggerUIStandalonePreset
+    ],
+    plugins: [
+      SwaggerUIBundle.plugins.DownloadUrl
+    ],
+    layout: "StandaloneLayout"
+  });
+};
+        `;
+
+        res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+        res.end(customInitializer);
+        return;
+      }
+
+      // Determine which file to serve
+      let filePath: string;
+      if (pathname === '/api-docs/' || pathname === '/api-docs/index.html') {
+        filePath = path.join(swaggerDistDir, 'index.html');
+      } else {
+        // Serve other swagger-ui assets
+        const assetPath = pathname.replace('/api-docs/', '');
+        filePath = path.join(swaggerDistDir, assetPath);
+      }
+
+      // Security: Ensure file is within swagger dist directory
+      const resolvedPath = path.resolve(filePath);
+      if (!resolvedPath.startsWith(swaggerDistDir)) {
+        this.sendError(res, 403, 'Forbidden', 'Access denied', 'FORBIDDEN');
+        return;
+      }
+
+      // Check if file exists
+      if (!(await fileExists(resolvedPath))) {
+        this.sendError(res, 404, 'Not Found', `Swagger UI file not found: ${pathname}`, 'SWAGGER_NOT_FOUND');
+        return;
+      }
+
+      // Determine content type
+      const ext = path.extname(resolvedPath);
+      const contentTypes: Record<string, string> = {
+        '.html': 'text/html; charset=utf-8',
+        '.js': 'application/javascript; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.png': 'image/png',
+        '.svg': 'image/svg+xml',
+        '.map': 'application/json',
+      };
+      const contentType = contentTypes[ext] || 'application/octet-stream';
+
+      // Read and serve file
+      const content = await fs.readFile(resolvedPath);
+      res.writeHead(200, { 'Content-Type': contentType });
+      res.end(content);
+    } catch (error) {
+      console.error('[Admin] Error serving Swagger UI:', error);
+      this.sendError(res, 500, 'Internal Server Error', (error as Error).message, 'SWAGGER_ERROR');
+    }
+  }
+
   private async handleStaticFile(req: http.IncomingMessage, res: http.ServerResponse, pathname: string): Promise<void> {
     try {
       // Resolve web/dist directory relative to project root
@@ -1247,7 +1602,7 @@ class AdminServer {
    * Log request
    */
   private logRequest(method: string, pathname: string): void {
-    if (this.config.verbose) {
+    if (this.config.logging) {
       console.log(`[Admin] ${method} ${pathname}`);
     }
   }
@@ -1256,7 +1611,7 @@ class AdminServer {
    * Log response
    */
   private logResponse(method: string, pathname: string, statusCode: number, durationMs: number): void {
-    if (this.config.verbose) {
+    if (this.config.logging) {
       console.log(`[Admin] ${method} ${pathname} ${statusCode} ${durationMs}ms`);
     }
   }

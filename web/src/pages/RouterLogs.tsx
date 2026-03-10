@@ -1,22 +1,24 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2, ChevronDown } from 'lucide-react';
-import { useRouterLogs } from '../hooks/useApi';
+import { useRouterLogs, useRouter } from '../hooks/useApi';
+import { renderAnsiLine, stripAnsiCodes } from '../utils/ansi-parser';
 
-type LogType = 'stdout' | 'stderr' | 'both';
+type LogType = 'activity' | 'system';
 type LogSort = 'newest' | 'oldest';
 
 export function RouterLogs() {
   const navigate = useNavigate();
 
-  const [logType, setLogType] = useState<LogType>('stdout');
+  const [logType, setLogType] = useState<LogType>('activity');
   const [sortOrder, setSortOrder] = useState<LogSort>('newest');
   const [showSortDropdown, setShowSortDropdown] = useState(false);
-  const [autoScroll, setAutoScroll] = useState(true);
+  const [autoScroll, setAutoScroll] = useState(false);
 
   const logContainerRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const { data: routerData } = useRouter();
   const { data: logsData, isLoading: logsLoading } = useRouterLogs(50000);
 
   // Auto-scroll to bottom when new logs arrive
@@ -40,19 +42,34 @@ export function RouterLogs() {
   const getFilteredLogs = (): string[] => {
     if (!logsData) return [];
 
+    // Debug: log the data lengths
+    console.log('[RouterLogs] Data lengths:', {
+      stdout: logsData.stdout?.length || 0,
+      stderr: logsData.stderr?.length || 0,
+      logType,
+    });
+
     let logs: string;
-    if (logType === 'stdout') {
+    if (logType === 'activity') {
+      // Activity = stdout (router activity logs)
       logs = logsData.stdout || '';
-    } else if (logType === 'stderr') {
-      logs = logsData.stderr || '';
     } else {
-      // Combine both
-      const stdout = logsData.stdout || '';
-      const stderr = logsData.stderr || '';
-      logs = [stderr, stdout].filter(l => l.trim()).join('\n');
+      // System = stderr (system/diagnostic logs)
+      logs = logsData.stderr || '';
     }
 
-    const lines = logs.split('\n').filter(line => line.trim());
+    const lines = logs.split('\n').filter(line => {
+      // Remove lines that are empty or only contain ANSI codes
+      const stripped = stripAnsiCodes(line).trim();
+      return stripped.length > 0;
+    });
+
+    console.log('[RouterLogs] After filtering:', {
+      logType,
+      totalLines: logs.split('\n').length,
+      filteredLines: lines.length,
+      firstLine: lines[0]?.substring(0, 100),
+    });
 
     // Apply sort
     if (sortOrder === 'oldest') {
@@ -70,7 +87,7 @@ export function RouterLogs() {
       <div className="flex items-center px-4 py-3 border-b border-gray-200 bg-white">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate('/router')}
+            onClick={() => navigate('/manage')}
             className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -82,15 +99,24 @@ export function RouterLogs() {
         </div>
       </div>
 
+      {/* Logging Warning */}
+      {routerData?.config && !routerData.config.logging && (
+        <div className="px-4 py-2 bg-yellow-50 border-b border-yellow-200">
+          <p className="text-sm text-yellow-800">
+            ℹ️ Logging is disabled. Enable logging in router configuration to view activity logs.
+          </p>
+        </div>
+      )}
+
       {/* Filter Bar */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
         {/* Log Type Toggle */}
         <div className="flex items-center gap-2">
           <div className="flex items-center bg-white border border-gray-200 rounded-lg overflow-hidden">
             <button
-              onClick={() => setLogType('stdout')}
+              onClick={() => setLogType('activity')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                logType === 'stdout'
+                logType === 'activity'
                   ? 'bg-gray-100 text-gray-900'
                   : 'text-gray-600 hover:bg-gray-50'
               }`}
@@ -98,24 +124,14 @@ export function RouterLogs() {
               Activity
             </button>
             <button
-              onClick={() => setLogType('stderr')}
+              onClick={() => setLogType('system')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                logType === 'stderr'
+                logType === 'system'
                   ? 'bg-gray-100 text-gray-900'
                   : 'text-gray-600 hover:bg-gray-50'
               }`}
             >
               System
-            </button>
-            <button
-              onClick={() => setLogType('both')}
-              className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                logType === 'both'
-                  ? 'bg-gray-100 text-gray-900'
-                  : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              Both
             </button>
           </div>
         </div>
@@ -177,9 +193,9 @@ export function RouterLogs() {
             {filteredLogs.map((line, index) => (
               <div
                 key={index}
-                className="text-gray-300 break-all whitespace-pre-wrap leading-relaxed"
+                className="break-all whitespace-pre-wrap leading-relaxed"
               >
-                {line}
+                {renderAnsiLine(line, index)}
               </div>
             ))}
           </div>
@@ -187,13 +203,9 @@ export function RouterLogs() {
       </div>
 
       {/* Footer with stats */}
-      <div className="flex items-center justify-between px-4 py-2 border-t border-gray-200 bg-gray-50 text-sm text-gray-500">
+      <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 text-sm text-gray-500">
         <span>
           {filteredLogs.length} {filteredLogs.length === 1 ? 'line' : 'lines'}
-        </span>
-        <span className="flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${autoScroll ? 'bg-green-500' : 'bg-gray-300'}`} />
-          {autoScroll ? 'Auto-scroll on' : 'Auto-scroll off'}
         </span>
       </div>
     </div>

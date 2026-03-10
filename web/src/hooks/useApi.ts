@@ -1,6 +1,14 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import type { CreateServerRequest, UpdateServerRequest, UpdateRouterRequest } from '../types/api';
+import type {
+  CreateServerRequest,
+  UpdateServerRequest,
+  UpdateRouterRequest,
+  RotateLogsRequest,
+  ClearArchivedLogsRequest,
+  UpdateLogConfigRequest,
+} from '../types/api';
 
 // System
 export function useSystemStatus() {
@@ -104,9 +112,19 @@ export function useRestartServer() {
 export function useServerLogs(serverId: string | null, lines = 500) {
   return useQuery({
     queryKey: ['serverLogs', serverId, lines],
-    queryFn: () => api.getServerLogs(serverId!, 'both', lines),
+    queryFn: () => api.getServerLogs(serverId!, 'all', lines),
     enabled: !!serverId,
     refetchInterval: 2000, // Auto-refresh every 2s
+  });
+}
+
+export function useServerSlots(serverId: string | null) {
+  return useQuery({
+    queryKey: ['serverSlots', serverId],
+    queryFn: () => api.getServerSlots(serverId!),
+    enabled: !!serverId,
+    refetchInterval: 3000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -256,4 +274,128 @@ export function useUpdateRouter() {
       queryClient.invalidateQueries({ queryKey: ['router'] });
     },
   });
+}
+
+// Admin
+export function useAdmin() {
+  return useQuery({
+    queryKey: ['admin'],
+    queryFn: () => api.getAdmin(),
+    refetchInterval: 5000, // Auto-refresh every 5s
+    placeholderData: keepPreviousData,
+  });
+}
+
+// Admin Log Management
+export function useAdminLogs() {
+  return useQuery({
+    queryKey: ['adminLogs'],
+    queryFn: () => api.getAdminLogs(),
+    refetchInterval: 10000, // Auto-refresh every 10s
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useAdminServiceLogs(lines = 500) {
+  return useQuery({
+    queryKey: ['adminServiceLogs', lines],
+    queryFn: () => api.getAdminServiceLogs('both', lines),
+    refetchInterval: 2000, // Auto-refresh every 2s
+    placeholderData: keepPreviousData, // Keep previous data during refetch to prevent flash
+  });
+}
+
+
+export function useRotateLogs() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: RotateLogsRequest) => api.rotateLogs(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminLogs'] });
+    },
+  });
+}
+
+export function useClearArchivedLogs() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: ClearArchivedLogsRequest) => api.clearArchivedLogs(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminLogs'] });
+    },
+  });
+}
+
+
+export function useUpdateLogConfig() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (data: UpdateLogConfigRequest) => api.updateLogConfig(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adminLogs'] });
+    },
+  });
+}
+
+// Chat - Streaming hook
+export function useStreamingChat(modelName: string) {
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [tokensPerSecond, setTokensPerSecond] = useState<number | null>(null);
+
+  const sendMessage = async (
+    userMessage: string,
+    options?: { max_tokens?: number; temperature?: number }
+  ) => {
+    setError(null);
+    setIsStreaming(true);
+    setTokensPerSecond(null);
+
+    // Add user message to history
+    const newMessages = [...messages, { role: 'user' as const, content: userMessage }];
+    setMessages(newMessages);
+
+    try {
+      // Start streaming assistant response
+      let assistantMessage = '';
+      let tokenCount = 0;
+      const startTime = Date.now();
+      const stream = api.streamChatMessage(modelName, newMessages, options);
+
+      for await (const chunk of stream) {
+        if (chunk.type === 'content_block_delta') {
+          // Append text delta
+          const delta = chunk.delta?.text || '';
+          assistantMessage += delta;
+          tokenCount++;
+
+          // Calculate tokens per second
+          const elapsed = (Date.now() - startTime) / 1000;
+          const tps = elapsed > 0 ? tokenCount / elapsed : 0;
+          setTokensPerSecond(tps);
+
+          // Update messages with streaming content
+          setMessages([...newMessages, { role: 'assistant', content: assistantMessage }]);
+        }
+      }
+
+      // Finalize assistant message
+      if (assistantMessage) {
+        setMessages([...newMessages, { role: 'assistant', content: assistantMessage }]);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+      // Keep user message, don't add assistant message
+      setMessages(newMessages);
+    } finally {
+      setIsStreaming(false);
+      setTokensPerSecond(null);
+    }
+  };
+
+  return { messages, setMessages, isStreaming, error, sendMessage, tokensPerSecond };
 }

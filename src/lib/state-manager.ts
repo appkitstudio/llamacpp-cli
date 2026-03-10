@@ -70,7 +70,16 @@ export class StateManager {
     if (!(await fileExists(configPath))) {
       return null;
     }
-    return await readJson<ServerConfig>(configPath);
+    const config = await readJson<ServerConfig>(configPath);
+
+    // Migration: Add httpLogPath if missing (for configs created before this feature)
+    if (!config.httpLogPath) {
+      config.httpLogPath = path.join(this.logsDir, `${config.id}.http`);
+      // Save the migrated config
+      await this.saveServerConfig(config);
+    }
+
+    return config;
   }
 
   /**
@@ -204,6 +213,28 @@ export class StateManager {
   async serverExistsForModel(modelPath: string): Promise<boolean> {
     const servers = await this.getAllServers();
     return servers.some((s) => s.modelPath === modelPath);
+  }
+
+  /**
+   * Generate a unique server ID
+   * If the base ID is already taken, appends a counter (-2, -3, etc.)
+   */
+  async generateUniqueServerId(baseId: string): Promise<string> {
+    const servers = await this.getAllServers();
+    const existingIds = new Set(servers.map(s => s.id));
+
+    // If base ID is available, use it
+    if (!existingIds.has(baseId)) {
+      return baseId;
+    }
+
+    // Otherwise, find the next available counter
+    let counter = 2;
+    while (existingIds.has(`${baseId}-${counter}`)) {
+      counter++;
+    }
+
+    return `${baseId}-${counter}`;
   }
 
   /**

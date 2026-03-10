@@ -1,0 +1,189 @@
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Loader2, ChevronDown } from 'lucide-react';
+import { useAdminServiceLogs } from '../hooks/useApi';
+import { renderAnsiLine, stripAnsiCodes } from '../utils/ansi-parser';
+
+type LogType = 'activity' | 'system';
+type LogSort = 'newest' | 'oldest';
+
+export function AdminLogs() {
+  const navigate = useNavigate();
+
+  const [logType, setLogType] = useState<LogType>('activity');
+  const [sortOrder, setSortOrder] = useState<LogSort>('newest');
+  const [showSortDropdown, setShowSortDropdown] = useState(false);
+  const [autoScroll, setAutoScroll] = useState(false);
+
+  const logContainerRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const { data: logsData, isLoading: logsLoading } = useAdminServiceLogs(50000);
+
+  // Auto-scroll to bottom when new logs arrive
+  useEffect(() => {
+    if (autoScroll && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [logsData, autoScroll, sortOrder]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowSortDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const getFilteredLogs = (): string[] => {
+    if (!logsData) return [];
+
+    let logs: string;
+    if (logType === 'activity') {
+      // Activity = stdout (admin activity logs)
+      logs = logsData.stdout || '';
+    } else {
+      // System = stderr (system/diagnostic logs)
+      logs = logsData.stderr || '';
+    }
+
+    const lines = logs.split('\n').filter(line => {
+      // Remove lines that are empty or only contain ANSI codes
+      const stripped = stripAnsiCodes(line).trim();
+      return stripped.length > 0;
+    });
+
+    // Apply sort
+    if (sortOrder === 'oldest') {
+      return lines;
+    }
+
+    return [...lines].reverse();
+  };
+
+  const filteredLogs = getFilteredLogs();
+
+  return (
+    <div className="h-[calc(100vh-56px)] flex flex-col">
+      {/* Header */}
+      <div className="flex items-center px-4 py-3 border-b border-gray-200 bg-white">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/manage')}
+            className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <h1 className="text-lg font-semibold text-gray-900">Admin Logs</h1>
+            <p className="text-sm text-gray-500">Admin API service logs</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter Bar */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 bg-gray-50">
+        {/* Log Type Toggle */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <button
+              onClick={() => setLogType('activity')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
+                logType === 'activity'
+                  ? 'bg-gray-100 text-gray-900'
+                  : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              Activity
+            </button>
+            <button
+              onClick={() => setLogType('system')}
+              className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
+                logType === 'system'
+                  ? 'bg-gray-100 text-gray-900'
+                  : 'text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              System
+            </button>
+          </div>
+        </div>
+
+        {/* Sort Dropdown */}
+        <div className="relative" ref={dropdownRef}>
+          <button
+            onClick={() => setShowSortDropdown(!showSortDropdown)}
+            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:border-gray-300 transition-colors cursor-pointer"
+          >
+            {sortOrder === 'newest' ? 'Newest' : 'Oldest'}
+            <ChevronDown className="w-4 h-4" />
+          </button>
+
+          {showSortDropdown && (
+            <div className="absolute right-0 top-full mt-1 w-32 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+              <button
+                onClick={() => { setSortOrder('newest'); setShowSortDropdown(false); }}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${
+                  sortOrder === 'newest' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Newest
+              </button>
+              <button
+                onClick={() => { setSortOrder('oldest'); setShowSortDropdown(false); }}
+                className={`w-full text-left px-3 py-2 text-sm transition-colors cursor-pointer ${
+                  sortOrder === 'oldest' ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Oldest
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Log Content */}
+      <div
+        ref={logContainerRef}
+        className="flex-1 overflow-y-auto bg-gray-900 p-4 font-mono text-sm"
+        onScroll={(e) => {
+          const target = e.target as HTMLDivElement;
+          const isAtBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 50;
+          setAutoScroll(isAtBottom);
+        }}
+      >
+        {logsLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+          </div>
+        ) : filteredLogs.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-gray-500">
+            <p>No logs found</p>
+            <p className="text-sm mt-1">Admin service may not be running or has no activity yet</p>
+          </div>
+        ) : (
+          <div className="space-y-0.5">
+            {filteredLogs.map((line, index) => (
+              <div
+                key={index}
+                className="break-all whitespace-pre-wrap leading-relaxed"
+              >
+                {renderAnsiLine(line, index)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer with stats */}
+      <div className="px-4 py-2 border-t border-gray-200 bg-gray-50 text-sm text-gray-500">
+        <span>
+          {filteredLogs.length} {filteredLogs.length === 1 ? 'line' : 'lines'}
+        </span>
+      </div>
+    </div>
+  );
+}

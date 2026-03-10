@@ -5,7 +5,7 @@ interface ConfigOptions {
   port?: number;
   host?: string;
   regenerateKey?: boolean;
-  verbose?: boolean;
+  logging?: boolean;
   restart?: boolean;
 }
 
@@ -22,14 +22,14 @@ export async function adminConfigCommand(options: ConfigOptions): Promise<void> 
     const { config, status } = result;
 
     // Check if any options were provided
-    const hasChanges = options.port || options.host || options.regenerateKey !== undefined || options.verbose !== undefined;
+    const hasChanges = options.port || options.host || options.regenerateKey !== undefined || options.logging !== undefined;
     if (!hasChanges) {
       console.error(chalk.red('✗ No configuration options provided'));
       console.log(chalk.gray('\nAvailable options:'));
       console.log(chalk.gray('  --port <port>         Change port'));
       console.log(chalk.gray('  --host <host>         Change host'));
       console.log(chalk.gray('  --regenerate-key      Generate new API key'));
-      console.log(chalk.gray('  --verbose             Enable verbose logging'));
+      console.log(chalk.gray('  --logging             Enable logging'));
       console.log(chalk.gray('  --restart             Restart after config change'));
       process.exit(1);
     }
@@ -57,9 +57,9 @@ export async function adminConfigCommand(options: ConfigOptions): Promise<void> 
       }
     }
 
-    if (options.verbose !== undefined) {
-      console.log(chalk.bold('  Verbose: '), chalk.gray(config.verbose ? 'enabled' : 'disabled'), chalk.gray('→'), chalk.cyan(options.verbose ? 'enabled' : 'disabled'));
-      updates.verbose = options.verbose;
+    if (options.logging !== undefined) {
+      console.log(chalk.bold('  Logging: '), chalk.gray(config.logging ? 'enabled' : 'disabled'), chalk.gray('→'), chalk.cyan(options.logging ? 'enabled' : 'disabled'));
+      updates.logging = options.logging;
     }
 
     let newApiKey: string | undefined;

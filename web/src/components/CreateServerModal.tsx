@@ -59,8 +59,23 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
   });
 
   const [error, setError] = useState<string | null>(null);
+  const [gpuLayersInput, setGpuLayersInput] = useState('60');
+  const [threadsInput, setThreadsInput] = useState('4');
 
   const models = modelsData?.models || [];
+
+  // Helper to get the correct model identifier
+  const getModelIdentifier = (model: typeof models[0]): string => {
+    return model.isSharded && model.baseModelName
+      ? model.baseModelName
+      : model.filename;
+  };
+
+  // Helper to get display name for a model
+  const getModelDisplayName = (model: typeof models[0]): string => {
+    const identifier = getModelIdentifier(model);
+    return identifier.replace('.gguf', '');
+  };
 
   // Reset form when modal opens
   useEffect(() => {
@@ -76,6 +91,8 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
         verbose: false,
         customFlags: '',
       });
+      setGpuLayersInput('60');
+      setThreadsInput('4');
       setError(null);
     }
   }, [isOpen]);
@@ -83,7 +100,7 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
   // Update defaults when model changes
   useEffect(() => {
     if (formData.model) {
-      const selectedModel = models.find(m => m.filename === formData.model);
+      const selectedModel = models.find(m => getModelIdentifier(m) === formData.model);
       if (selectedModel) {
         const defaults = getSmartDefaults(selectedModel.size);
         setFormData(prev => ({
@@ -92,6 +109,8 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
           ctxSize: defaults.ctxSize,
           gpuLayers: defaults.gpuLayers,
         }));
+        setGpuLayersInput(defaults.gpuLayers.toString());
+        setThreadsInput(defaults.threads.toString());
       }
     }
   }, [formData.model, models]);
@@ -118,7 +137,7 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
         host: formData.host,
         threads: formData.threads,
         ctxSize: formData.ctxSize,
-        gpuLayers: formData.gpuLayers,
+        gpuLayers: isNaN(formData.gpuLayers) ? 60 : formData.gpuLayers,
         verbose: formData.verbose,
         customFlags: customFlags.length > 0 ? customFlags : undefined,
       });
@@ -141,7 +160,7 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
     return `${size} tokens`;
   };
 
-  const selectedModel = models.find(m => m.filename === formData.model);
+  const selectedModel = models.find(m => getModelIdentifier(m) === formData.model);
 
   if (!isOpen) return null;
 
@@ -178,17 +197,16 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
               <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-lg">
                 {models.map((model) => {
                   const hasServer = model.serversUsing > 0;
+                  const modelIdentifier = getModelIdentifier(model);
+                  const displayName = getModelDisplayName(model);
                   return (
                     <button
                       key={model.filename}
                       type="button"
-                      onClick={() => !hasServer && setFormData({ ...formData, model: model.filename })}
-                      disabled={hasServer}
+                      onClick={() => setFormData({ ...formData, model: modelIdentifier })}
                       className={`w-full text-left px-3 py-2 transition-colors ${
-                        formData.model === model.filename
+                        formData.model === modelIdentifier
                           ? 'bg-gray-100 cursor-pointer'
-                          : hasServer
-                          ? 'bg-gray-50 opacity-50 cursor-not-allowed'
                           : 'hover:bg-gray-50 cursor-pointer'
                       }`}
                     >
@@ -196,13 +214,13 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           <HardDrive className="w-4 h-4 text-gray-400 flex-shrink-0" />
                           <span className="text-sm text-gray-900 truncate">
-                            {model.filename.replace('.gguf', '')}
+                            {displayName}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 ml-2">
                           <span className="text-xs text-gray-500">{formatSize(model.size)}</span>
                           {hasServer && (
-                            <span className="text-xs text-orange-600">in use</span>
+                            <span className="text-xs text-gray-500">({model.serversUsing} server{model.serversUsing > 1 ? 's' : ''})</span>
                           )}
                         </div>
                       </div>
@@ -274,12 +292,52 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
             </label>
             <input
               type="number"
-              value={formData.threads}
-              onChange={(e) => setFormData({ ...formData, threads: parseInt(e.target.value) || 1 })}
-              min={1}
+              value={threadsInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                setThreadsInput(value);
+                // Only update formData if it's a valid number
+                if (value !== '' && value !== '-') {
+                  const num = parseInt(value);
+                  if (!isNaN(num)) {
+                    setFormData({ ...formData, threads: num });
+                  }
+                }
+              }}
+              onBlur={() => {
+                // On blur, ensure we have a valid number
+                const num = parseInt(threadsInput);
+                if (isNaN(num) || threadsInput === '' || threadsInput === '-' || num < -1 || num > 256) {
+                  setThreadsInput('4');
+                  setFormData({ ...formData, threads: 4 });
+                }
+              }}
+              min={-1}
               max={256}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent"
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent ${
+                (() => {
+                  const num = parseInt(threadsInput);
+                  const isComplete = threadsInput !== '' && threadsInput !== '-' && !isNaN(num);
+                  const isInvalid = isComplete && (num < -1 || num > 256);
+                  return isInvalid
+                    ? 'border-red-500 focus:ring-red-200'
+                    : 'border-gray-200 focus:ring-gray-200';
+                })()
+              }`}
             />
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, threads: -1 });
+                  setThreadsInput('-1');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                Auto (-1)
+              </button>
+              <span className="text-xs text-gray-500">Number of CPU threads for inference</span>
+            </div>
           </div>
 
           {/* Context Size */}
@@ -346,13 +404,71 @@ export function CreateServerModal({ isOpen, onClose }: CreateServerModalProps) {
             </label>
             <input
               type="number"
-              value={formData.gpuLayers}
-              onChange={(e) => setFormData({ ...formData, gpuLayers: parseInt(e.target.value) || 0 })}
-              min={0}
+              value={gpuLayersInput}
+              onChange={(e) => {
+                const value = e.target.value;
+                setGpuLayersInput(value);
+                // Only update formData if it's a valid number
+                if (value !== '' && value !== '-') {
+                  const num = parseInt(value);
+                  if (!isNaN(num)) {
+                    setFormData({ ...formData, gpuLayers: num });
+                  }
+                }
+              }}
+              onBlur={() => {
+                // On blur, ensure we have a valid number
+                const num = parseInt(gpuLayersInput);
+                if (isNaN(num) || gpuLayersInput === '' || gpuLayersInput === '-' || num < -1 || num > 999) {
+                  setGpuLayersInput('60');
+                  setFormData({ ...formData, gpuLayers: 60 });
+                }
+              }}
+              min={-1}
               max={999}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-transparent"
+              className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:border-transparent ${
+                (() => {
+                  const num = parseInt(gpuLayersInput);
+                  const isComplete = gpuLayersInput !== '' && gpuLayersInput !== '-' && !isNaN(num);
+                  const isInvalid = isComplete && (num < -1 || num > 999);
+                  return isInvalid
+                    ? 'border-red-500 focus:ring-red-200'
+                    : 'border-gray-200 focus:ring-gray-200';
+                })()
+              }`}
             />
-            <p className="text-xs text-gray-500 mt-1">Layers to offload to GPU (0 = CPU only)</p>
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, gpuLayers: -1 });
+                  setGpuLayersInput('-1');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                All (-1)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, gpuLayers: 60 });
+                  setGpuLayersInput('60');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                Recommended (60)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormData({ ...formData, gpuLayers: 0 });
+                  setGpuLayersInput('0');
+                }}
+                className="text-xs text-gray-600 hover:text-gray-900 hover:underline cursor-pointer"
+              >
+                CPU only (0)
+              </button>
+            </div>
           </div>
 
           {/* Verbose */}

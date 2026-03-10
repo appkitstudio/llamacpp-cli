@@ -14,12 +14,12 @@ export interface RouterConfig {
 
   // launchctl metadata
   plistPath: string;
-  label: 'com.llama.router';
+  label: 'studio.appkit.llamacpp-cli.router';
   stdoutPath: string;
   stderrPath: string;
 
   // Router settings
   healthCheckInterval: number;  // ms between health checks (default: 5000)
   requestTimeout: number;        // ms for backend requests (default: 120000)
-  verbose: boolean;              // Enable verbose logging to file (default: false)
+  logging: boolean;              // Enable logging to file (default: false)
 }

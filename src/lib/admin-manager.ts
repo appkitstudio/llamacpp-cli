@@ -59,15 +59,38 @@ export class AdminManager {
       port: 9200,
       host: '127.0.0.1',
       apiKey: this.generateApiKey(),
-      label: 'com.llama.admin',
-      plistPath: path.join(this.launchAgentsDir, 'com.llama.admin.plist'),
+      label: 'studio.appkit.llamacpp-cli.admin',
+      plistPath: path.join(this.launchAgentsDir, 'studio.appkit.llamacpp-cli.admin.plist'),
       stdoutPath: path.join(this.logsDir, 'admin.stdout'),
       stderrPath: path.join(this.logsDir, 'admin.stderr'),
       requestTimeout: 30000,
-      verbose: false,
+      logging: false,
       status: 'stopped',
       createdAt: new Date().toISOString(),
+      logManagement: {
+        autoRotate: {
+          enabled: true,
+          intervalHours: 24,
+          thresholdMB: 100,
+        },
+        autoDelete: {
+          enabled: true,
+          intervalHours: 24,
+          afterDays: 30,
+        },
+      },
     };
+  }
+
+  /**
+   * Migrate old config format (verbose → logging)
+   */
+  private migrateConfig(config: any): AdminConfig {
+    if ('verbose' in config && !('logging' in config)) {
+      config.logging = config.verbose;
+      delete config.verbose;
+    }
+    return config as AdminConfig;
   }
 
   /**
@@ -77,7 +100,8 @@ export class AdminManager {
     if (!(await fileExists(this.configPath))) {
       return null;
     }
-    return await readJson<AdminConfig>(this.configPath);
+    const config = await readJson<any>(this.configPath);
+    return this.migrateConfig(config);
   }
 
   /**
@@ -125,26 +149,25 @@ export class AdminManager {
    * Generate plist XML content for the admin service
    */
   generatePlist(config: AdminConfig): string {
-    // Find the compiled admin-server.js file
-    // In dev mode (tsx), __dirname is src/lib/
-    // In production, __dirname is dist/lib/
-    // Always use the compiled dist version for launchctl
-    let adminServerPath: string;
-    if (__dirname.includes('/src/')) {
-      // Dev mode - point to dist/lib/admin-server.js
-      const projectRoot = path.resolve(__dirname, '../..');
-      adminServerPath = path.join(projectRoot, 'dist/lib/admin-server.js');
-    } else {
-      // Production mode - already in dist/lib/
-      adminServerPath = path.join(__dirname, 'admin-server.js');
+    // Find the wrapper script
+    // Try relative to current module location (works for both dev and prod)
+    let wrapperPath = path.join(__dirname, '..', 'launchers', 'llamacpp-admin');
+    if (!require('fs').existsSync(wrapperPath)) {
+      // Try from the CLI binary location (global install)
+      const binPath = process.argv[1];
+      wrapperPath = path.join(path.dirname(binPath), '..', 'launchers', 'llamacpp-admin');
+      if (!require('fs').existsSync(wrapperPath)) {
+        throw new Error(`Admin wrapper script not found at ${wrapperPath}`);
+      }
     }
 
     // Use the current Node.js executable path (resolves symlinks)
     const nodePath = process.execPath;
 
+    // Build arguments: wrapper receives node path, then config path
     const args = [
+      wrapperPath,
       nodePath,
-      adminServerPath,
       '--config', this.configPath,
     ];
 
@@ -185,6 +208,9 @@ ${argsXml}
 
     <key>ThrottleInterval</key>
     <integer>10</integer>
+
+    <key>ProcessType</key>
+    <string>Background</string>
   </dict>
 </plist>
 `;

@@ -3,11 +3,45 @@ import { launchctlManager, ServiceStatus } from './launchctl-manager';
 import { isPortInUse, isProcessRunning } from '../utils/process-utils';
 import { stateManager } from './state-manager';
 
+export interface ServerHealthCheck extends ServiceStatus {
+  portListening: boolean;
+  healthy: boolean;
+}
+
 export class StatusChecker {
+  private timeout: number = 5000; // 5 second timeout for health checks
+
   /**
-   * Check the real-time status of a server
+   * Check the /health endpoint of a server
    */
-  async checkServer(config: ServerConfig): Promise<ServiceStatus & { portListening: boolean }> {
+  private async checkHealthEndpoint(config: ServerConfig): Promise<boolean> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
+      const host = config.host || '127.0.0.1';
+      const response = await fetch(`http://${host}:${config.port}/health`, {
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        return false;
+      }
+
+      const data: any = await response.json();
+      return data !== null && data.status === 'ok';
+    } catch (err) {
+      // Network error, timeout, or parse error
+      return false;
+    }
+  }
+
+  /**
+   * Check the real-time status of a server (including health endpoint)
+   */
+  async checkServer(config: ServerConfig): Promise<ServerHealthCheck> {
     // Get launchctl status
     const launchStatus = await launchctlManager.getServiceStatus(config.label);
 
@@ -23,13 +57,21 @@ export class StatusChecker {
           ...launchStatus,
           isRunning: false,
           portListening,
+          healthy: false,
         };
       }
+    }
+
+    // Check health endpoint if server is running and port is listening
+    let healthy = false;
+    if (launchStatus.isRunning && portListening) {
+      healthy = await this.checkHealthEndpoint(config);
     }
 
     return {
       ...launchStatus,
       portListening,
+      healthy,
     };
   }
 
