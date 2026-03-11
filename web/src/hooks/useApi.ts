@@ -340,9 +340,11 @@ export function useUpdateLogConfig() {
   });
 }
 
+export type ChatMessage = { role: 'user' | 'assistant'; content: string; thinking?: string };
+
 // Chat - Streaming hook
 export function useStreamingChat(modelName: string) {
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tokensPerSecond, setTokensPerSecond] = useState<number | null>(null);
@@ -356,40 +358,43 @@ export function useStreamingChat(modelName: string) {
     setTokensPerSecond(null);
 
     // Add user message to history
-    const newMessages = [...messages, { role: 'user' as const, content: userMessage }];
+    const newMessages: ChatMessage[] = [...messages, { role: 'user', content: userMessage }];
     setMessages(newMessages);
 
     try {
-      // Start streaming assistant response
       let assistantMessage = '';
+      let thinkingContent = '';
       let tokenCount = 0;
       const startTime = Date.now();
       const stream = api.streamChatMessage(modelName, newMessages, options);
 
       for await (const chunk of stream) {
         if (chunk.type === 'content_block_delta') {
-          // Append text delta
-          const delta = chunk.delta?.text || '';
-          assistantMessage += delta;
-          tokenCount++;
-
-          // Calculate tokens per second
-          const elapsed = (Date.now() - startTime) / 1000;
-          const tps = elapsed > 0 ? tokenCount / elapsed : 0;
-          setTokensPerSecond(tps);
-
-          // Update messages with streaming content
-          setMessages([...newMessages, { role: 'assistant', content: assistantMessage }]);
+          if (chunk.delta?.type === 'thinking_delta') {
+            thinkingContent += chunk.delta.thinking || '';
+          } else {
+            assistantMessage += chunk.delta?.text || '';
+            tokenCount++;
+            const elapsed = (Date.now() - startTime) / 1000;
+            setTokensPerSecond(elapsed > 0 ? tokenCount / elapsed : 0);
+          }
+          setMessages([...newMessages, {
+            role: 'assistant',
+            content: assistantMessage,
+            thinking: thinkingContent || undefined,
+          }]);
         }
       }
 
-      // Finalize assistant message
-      if (assistantMessage) {
-        setMessages([...newMessages, { role: 'assistant', content: assistantMessage }]);
+      if (assistantMessage || thinkingContent) {
+        setMessages([...newMessages, {
+          role: 'assistant',
+          content: assistantMessage,
+          thinking: thinkingContent || undefined,
+        }]);
       }
     } catch (err) {
       setError((err as Error).message);
-      // Keep user message, don't add assistant message
       setMessages(newMessages);
     } finally {
       setIsStreaming(false);

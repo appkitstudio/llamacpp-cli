@@ -2,8 +2,31 @@ import { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useStreamingChat, useServers } from '../hooks/useApi';
-import { ArrowLeft, Send, Loader2, Trash2, AlertCircle } from 'lucide-react';
+import { useStreamingChat, useServers, type ChatMessage } from '../hooks/useApi';
+import { ArrowLeft, Send, Loader2, Trash2, AlertCircle, ChevronDown, ChevronRight, Brain } from 'lucide-react';
+
+function ThinkingBlock({ thinking, isStreaming }: { thinking: string; isStreaming: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-3 border border-violet-200 rounded-md bg-violet-50 text-xs">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 w-full px-3 py-2 text-violet-700 hover:bg-violet-100 rounded-md transition-colors"
+      >
+        <Brain className="w-3.5 h-3.5 flex-shrink-0" />
+        <span className="font-medium">
+          {isStreaming && !open ? 'Thinking...' : 'Thinking'}
+        </span>
+        {open ? <ChevronDown className="w-3.5 h-3.5 ml-auto" /> : <ChevronRight className="w-3.5 h-3.5 ml-auto" />}
+      </button>
+      {open && (
+        <div className="px-3 pb-3 text-violet-800 whitespace-pre-wrap leading-relaxed border-t border-violet-200 pt-2">
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ServerChat() {
   const { port } = useParams<{ port: string }>();
@@ -26,7 +49,7 @@ export function ServerChat() {
     const stored = localStorage.getItem(storageKey);
     if (stored) {
       try {
-        const parsed = JSON.parse(stored);
+        const parsed = JSON.parse(stored) as ChatMessage[];
         setMessages(parsed);
       } catch (e) {
         console.error('Failed to parse stored messages:', e);
@@ -148,11 +171,16 @@ export function ServerChat() {
                   </p>
                   <div className="text-sm">
                     {msg.role === 'assistant' ? (
-                      <div className="prose prose-sm max-w-none prose-neutral prose-p:my-2 prose-headings:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0 prose-pre:my-2 prose-code:text-xs prose-code:bg-neutral-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-strong:font-semibold prose-strong:text-neutral-900">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {msg.content}
-                        </ReactMarkdown>
-                      </div>
+                      <>
+                        {msg.thinking && (
+                          <ThinkingBlock thinking={msg.thinking} isStreaming={isStreaming && idx === messages.length - 1} />
+                        )}
+                        <div className="prose prose-sm max-w-none prose-neutral prose-p:my-2 prose-headings:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0 prose-pre:my-2 prose-code:text-xs prose-code:bg-neutral-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-strong:font-semibold prose-strong:text-neutral-900">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      </>
                     ) : (
                       <div className="whitespace-pre-wrap break-words">{msg.content}</div>
                     )}
