@@ -30,6 +30,248 @@ interface ModelsResponse {
   data: ModelInfo[];
 }
 
+// ---------------------------------------------------------------------------
+// Helpers for Qwen3-Coder model quirk fixes
+// ---------------------------------------------------------------------------
+
+interface ParsedBlock {
+  type: string;      // 'text' | 'thinking' | 'tool_use'
+  content: string;   // accumulated text / thinking
+  name?: string;     // tool_use: tool name
+  id?: string;       // tool_use: id
+  input?: Record<string, string>; // tool_use: parsed parameters
+}
+
+interface ParsedToolCall {
+  name: string;
+  input: Record<string, string>;
+}
+
+/**
+ * Parse Qwen3-Coder XML tool calls from text content.
+ * Handles: <tool_call><function=NAME\n<parameter=P>V</parameter></function></tool_call>
+ * Returns extracted tool calls and cleaned text (XML removed).
+ */
+function parseXmlToolCalls(text: string): { toolCalls: ParsedToolCall[]; cleanText: string; skippedNames: string[] } {
+  const toolCalls: ParsedToolCall[] = [];
+  const skippedNames: string[] = [];
+  const toolCallRegex = /<tool_call>([\s\S]*?)<\/tool_call>/g;
+  let match;
+  while ((match = toolCallRegex.exec(text)) !== null) {
+    const inner = match[1];
+    const funcMatch = /<function=(\w+)/.exec(inner);
+    if (!funcMatch) continue;
+    const name = funcMatch[1];
+    const input: Record<string, string> = {};
+    const paramRegex = /<parameter=(\w+)>([\s\S]*?)<\/parameter>/g;
+    let paramMatch;
+    while ((paramMatch = paramRegex.exec(inner)) !== null) {
+      input[paramMatch[1]] = paramMatch[2].trim();
+    }
+    // Skip malformed tool calls with no parameters (model generation failure)
+    if (Object.keys(input).length === 0) {
+      skippedNames.push(name);
+      continue;
+    }
+    toolCalls.push({ name, input });
+  }
+  const cleanText = text.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '').trim();
+  return { toolCalls, cleanText, skippedNames };
+}
+
+function generateToolUseId(): string {
+  return 'toolu_' + Array.from({ length: 16 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+}
+
+/**
+ * Count how many consecutive recent user messages contained only error tool_results.
+ * Used to detect infinite error-feedback loops: if >= 2, stop sending error feedback and strip.
+ */
+function countConsecutiveErrorCycles(requestBody: string): number {
+  try {
+    const body = JSON.parse(requestBody);
+    const messages: any[] = body.messages ?? [];
+    let count = 0;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role === 'assistant') continue; // skip assistant turns
+      if (msg.role !== 'user') break;
+      const content: any[] = Array.isArray(msg.content) ? msg.content : [];
+      const toolResults = content.filter((c: any) => c.type === 'tool_result');
+      if (toolResults.length === 0) break; // non-tool user message, stop
+      if (toolResults.every((c: any) => c.is_error)) {
+        count++;
+      } else {
+        break; // mixed or all-success results, stop counting
+      }
+    }
+    return count;
+  } catch {
+    return 0;
+  }
+}
+
+function emitSseEvent(res: http.ServerResponse, eventType: string, data: object): void {
+  res.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+/**
+ * Emit a fully reconstructed SSE stream from parsed block state.
+ * Used when the original stream needs modification (XML tool calls or thinking-only).
+ */
+function emitReconstructedSseStream(
+  res: http.ServerResponse,
+  messageStartData: any,
+  blocks: ParsedBlock[],
+  stopReason: string,
+  outputTokens: number
+): void {
+  if (messageStartData) {
+    emitSseEvent(res, 'message_start', messageStartData);
+  }
+  let idx = 0;
+  for (const block of blocks) {
+    if (block.type === 'text') {
+      if (!block.content) continue;
+      emitSseEvent(res, 'content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'text', text: '' } });
+      emitSseEvent(res, 'content_block_delta', { type: 'content_block_delta', index: idx, delta: { type: 'text_delta', text: block.content } });
+      emitSseEvent(res, 'content_block_stop', { type: 'content_block_stop', index: idx });
+    } else if (block.type === 'thinking') {
+      if (!block.content) continue;
+      emitSseEvent(res, 'content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'thinking', thinking: '' } });
+      emitSseEvent(res, 'content_block_delta', { type: 'content_block_delta', index: idx, delta: { type: 'thinking_delta', thinking: block.content } });
+      emitSseEvent(res, 'content_block_stop', { type: 'content_block_stop', index: idx });
+    } else if (block.type === 'tool_use') {
+      emitSseEvent(res, 'content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'tool_use', id: block.id, name: block.name, input: {} } });
+      emitSseEvent(res, 'content_block_delta', { type: 'content_block_delta', index: idx, delta: { type: 'input_json_delta', partial_json: JSON.stringify(block.input ?? {}) } });
+      emitSseEvent(res, 'content_block_stop', { type: 'content_block_stop', index: idx });
+    }
+    idx++;
+  }
+  emitSseEvent(res, 'message_delta', { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: outputTokens } });
+  emitSseEvent(res, 'message_stop', { type: 'message_stop' });
+}
+
+interface BufferedSseResult {
+  rawEvents: string[];
+  messageStartData: any;
+  stopReason: string;
+  blocks: ParsedBlock[];
+  outputTokens: number;
+}
+
+/**
+ * Make a backend HTTP request, buffer the full SSE stream, and return parsed state.
+ * Used for the initial request AND for retries when the model generates malformed output.
+ */
+function bufferSseRequest(options: http.RequestOptions, requestBody: string): Promise<BufferedSseResult> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(options, (res) => {
+      let sseBuffer = '';
+      const rawEvents: string[] = [];
+      let messageStartData: any = null;
+      let messageDeltaData: any = null;
+      const parsedBlocks: Record<number, ParsedBlock> = {};
+      let outputTokens = 0;
+
+      res.on('data', (chunk: Buffer) => {
+        sseBuffer += chunk.toString();
+        const parts = sseBuffer.split('\n\n');
+        sseBuffer = parts.pop() ?? '';
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          rawEvents.push(part);
+          let dataStr = '';
+          for (const line of part.split('\n')) {
+            if (line.startsWith('data: ')) dataStr = line.slice(6);
+          }
+          try {
+            const data = JSON.parse(dataStr);
+            if (data.type === 'message_start') messageStartData = data;
+            else if (data.type === 'content_block_start') {
+              const idx: number = data.index ?? 0;
+              parsedBlocks[idx] = { type: data.content_block?.type ?? 'text', content: '', name: data.content_block?.name, id: data.content_block?.id };
+            } else if (data.type === 'content_block_delta') {
+              const block = parsedBlocks[data.index];
+              if (block) {
+                if (data.delta?.type === 'text_delta') block.content += data.delta.text ?? '';
+                else if (data.delta?.type === 'thinking_delta') block.content += data.delta.thinking ?? '';
+              }
+            } else if (data.type === 'message_delta') {
+              messageDeltaData = data;
+              outputTokens = data.usage?.output_tokens ?? 0;
+            }
+          } catch { /* non-JSON SSE (ping etc.) */ }
+        }
+      });
+
+      res.on('end', () => {
+        if (sseBuffer.trim()) rawEvents.push(sseBuffer);
+        resolve({
+          rawEvents,
+          messageStartData,
+          stopReason: messageDeltaData?.delta?.stop_reason ?? 'end_turn',
+          blocks: Object.values(parsedBlocks),
+          outputTokens,
+        });
+      });
+
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.write(requestBody);
+    req.end();
+  });
+}
+
+/**
+ * Apply Qwen3 model quirk fixes to a buffered SSE result.
+ * Returns the action to take (what to emit) without actually emitting anything.
+ */
+function classifyBufferedResult(result: BufferedSseResult): {
+  action: 'fix1' | 'fix2' | 'fix3' | 'fix4' | 'raw';
+  newBlocks?: ParsedBlock[];
+  stopReason?: string;
+  skippedNames?: string[];
+} {
+  const { blocks, stopReason } = result;
+  const textBlocks = blocks.filter(b => b.type === 'text');
+  const thinkingBlocks = blocks.filter(b => b.type === 'thinking');
+  const allText = textBlocks.map(b => b.content).join('');
+  const { toolCalls, cleanText, skippedNames } = parseXmlToolCalls(allText);
+
+  if (toolCalls.length > 0) {
+    const newBlocks: ParsedBlock[] = [
+      ...blocks.filter(b => b.type !== 'text'),
+      ...(cleanText ? [{ type: 'text', content: cleanText }] : []),
+      ...toolCalls.map(tc => ({ type: 'tool_use', content: '', id: generateToolUseId(), name: tc.name, input: tc.input })),
+    ];
+    return { action: 'fix1', newBlocks, stopReason: 'tool_use' };
+  }
+
+  if (allText && !cleanText) {
+    return { action: 'fix3', skippedNames };
+  }
+
+  // fix4: text + malformed tool calls — emit text and empty tool_use blocks for error feedback
+  if (cleanText && skippedNames.length > 0) {
+    const newBlocks: ParsedBlock[] = [
+      ...blocks.filter(b => b.type !== 'text'),
+      { type: 'text', content: cleanText },
+      ...skippedNames.map(name => ({ type: 'tool_use', content: '', id: generateToolUseId(), name, input: {} })),
+    ];
+    return { action: 'fix4', newBlocks, stopReason: 'tool_use', skippedNames };
+  }
+
+  if (stopReason === 'end_turn' && thinkingBlocks.length > 0 && !textBlocks.some(b => b.content)) {
+    const thinkingText = thinkingBlocks.map(b => b.content).join('\n');
+    const newBlocks: ParsedBlock[] = [...thinkingBlocks, { type: 'text', content: thinkingText }];
+    return { action: 'fix2', newBlocks, stopReason: 'end_turn' };
+  }
+
+  return { action: 'raw' };
+}
+
 /**
  * Router HTTP server - proxies requests to backend llama.cpp servers
  */
@@ -290,6 +532,19 @@ class RouterServer {
         return;
       }
 
+      // Inject tool call guidance when tools are present (Qwen3-Coder workaround:
+      // the model sometimes generates tool calls with no parameters when context is long)
+      if (anthropicRequest.tools && anthropicRequest.tools.length > 0) {
+        const guidance = 'When using tools, always include ALL required parameters with their complete values. Never omit parameters from tool calls.';
+        if (typeof anthropicRequest.system === 'string' && anthropicRequest.system) {
+          anthropicRequest.system = guidance + '\n\n' + anthropicRequest.system;
+        } else if (Array.isArray(anthropicRequest.system)) {
+          anthropicRequest.system = [{ type: 'text', text: guidance }, ...anthropicRequest.system];
+        } else {
+          anthropicRequest.system = guidance;
+        }
+      }
+
       // Find server for model
       const server = await this.findServerForModel(modelName);
       if (!server) {
@@ -368,22 +623,159 @@ class RouterServer {
       const backendReq = http.request(options, (backendRes) => {
         // Handle streaming vs non-streaming
         if (anthropicRequest.stream) {
-          // For streaming, set SSE headers and pipe response
           res.writeHead(backendRes.statusCode || 200, {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
           });
 
-          // Pipe response directly (llama.cpp sends correct Anthropic SSE format)
-          backendRes.pipe(res);
+          // Buffer the full SSE stream so we can detect and fix Qwen3 model quirks before
+          // forwarding to the client. Headers are sent above but NO events are emitted until
+          // we've finished processing (enabling transparent retry for Fix 3).
+          let sseBuffer = '';
+          const rawEvents: string[] = [];
+          let messageStartData: any = null;
+          let messageDeltaData: any = null;
+          const parsedBlocks: Record<number, ParsedBlock> = {};
+          let outputTokens = 0;
+
+          backendRes.on('data', (chunk: Buffer) => {
+            sseBuffer += chunk.toString();
+            const parts = sseBuffer.split('\n\n');
+            sseBuffer = parts.pop() ?? '';
+
+            for (const part of parts) {
+              if (!part.trim()) continue;
+              rawEvents.push(part);
+
+              let dataStr = '';
+              for (const line of part.split('\n')) {
+                if (line.startsWith('data: ')) dataStr = line.slice(6);
+              }
+
+              try {
+                const data = JSON.parse(dataStr);
+                if (data.type === 'message_start') {
+                  messageStartData = data;
+                } else if (data.type === 'content_block_start') {
+                  const idx: number = data.index ?? 0;
+                  parsedBlocks[idx] = {
+                    type: data.content_block?.type ?? 'text',
+                    content: '',
+                    name: data.content_block?.name,
+                    id: data.content_block?.id,
+                  };
+                } else if (data.type === 'content_block_delta') {
+                  const block = parsedBlocks[data.index];
+                  if (block) {
+                    if (data.delta?.type === 'text_delta') block.content += data.delta.text ?? '';
+                    else if (data.delta?.type === 'thinking_delta') block.content += data.delta.thinking ?? '';
+                  }
+                } else if (data.type === 'message_delta') {
+                  messageDeltaData = data;
+                  outputTokens = data.usage?.output_tokens ?? 0;
+                }
+              } catch {
+                // Non-JSON SSE data (e.g. ping) — still buffered in rawEvents
+              }
+            }
+          });
 
           backendRes.on('end', async () => {
+            if (sseBuffer.trim()) rawEvents.push(sseBuffer);
+
+            const firstResult: BufferedSseResult = {
+              rawEvents,
+              messageStartData,
+              stopReason: messageDeltaData?.delta?.stop_reason ?? 'end_turn',
+              blocks: Object.values(parsedBlocks),
+              outputTokens,
+            };
+
+            let classified = classifyBufferedResult(firstResult);
+            let finalResult = firstResult;
+
+            if (classified.action === 'fix3') {
+              const skipped = classified.skippedNames ?? [];
+              // Only retry for single empty call glitches (random sampling failure).
+              // If 2+ empty calls were generated the model is in a stuck pattern — retry
+              // would just double the wait time with the same degenerate result.
+              if (skipped.length === 1) {
+                console.error(`[Router] Retrying single malformed XML call (attempted: ${skipped.join(', ')})`);
+                try {
+                  const retryResult = await bufferSseRequest(options, requestBody);
+                  const retryClassified = classifyBufferedResult(retryResult);
+                  if (retryClassified.action !== 'fix3') {
+                    classified = retryClassified;
+                    finalResult = retryResult;
+                    console.error(`[Router] Retry succeeded (action: ${retryClassified.action})`);
+                  } else {
+                    console.error(`[Router] Retry also malformed, giving up`);
+                  }
+                } catch (err) {
+                  console.error('[Router] Retry request failed:', err);
+                }
+              } else {
+                console.error(`[Router] Skipping retry — model stuck generating ${skipped.length} malformed calls (${skipped.join(', ')})`);
+              }
+            }
+
+            if (classified.action === 'fix1') {
+              console.error(`[Router] Converting ${classified.newBlocks!.filter(b => b.type === 'tool_use').length} XML tool call(s) to tool_use blocks`);
+              emitReconstructedSseStream(res, finalResult.messageStartData, classified.newBlocks!, classified.stopReason!, finalResult.outputTokens);
+            } else if (classified.action === 'fix2') {
+              console.error('[Router] Injecting fallback text block (thinking-only response detected)');
+              emitReconstructedSseStream(res, finalResult.messageStartData, classified.newBlocks!, classified.stopReason!, finalResult.outputTokens);
+            } else if (classified.action === 'fix3') {
+              const skipped = classified.skippedNames ?? [];
+              const errorCycles = countConsecutiveErrorCycles(requestBody);
+              if (errorCycles >= 2) {
+                // Already tried error feedback twice — model is stuck, strip to avoid infinite loop
+                console.error(`[Router] Stripping fix3 after ${errorCycles} error cycles (${skipped.join(', ')})`);
+                const newBlocks: ParsedBlock[] = finalResult.blocks.filter(b => b.type === 'thinking');
+                emitReconstructedSseStream(res, finalResult.messageStartData, newBlocks, finalResult.stopReason, finalResult.outputTokens);
+              } else {
+                // Send empty tool_use blocks so Claude Code returns parameter errors for model self-correction
+                console.error(`[Router] Forwarding ${skipped.length} empty tool_use block(s) for error feedback [cycle ${errorCycles + 1}] (${skipped.join(', ')})`);
+                const emptyToolBlocks: ParsedBlock[] = skipped.map(name => ({
+                  type: 'tool_use',
+                  content: '',
+                  name,
+                  id: generateToolUseId(),
+                  input: {},
+                }));
+                const newBlocks: ParsedBlock[] = [
+                  ...finalResult.blocks.filter(b => b.type === 'thinking'),
+                  ...emptyToolBlocks,
+                ];
+                emitReconstructedSseStream(res, finalResult.messageStartData, newBlocks, 'tool_use', finalResult.outputTokens);
+              }
+            } else if (classified.action === 'fix4') {
+              // Text + malformed tool calls
+              const skipped = classified.skippedNames ?? [];
+              const errorCycles = countConsecutiveErrorCycles(requestBody);
+              if (errorCycles >= 2) {
+                // Already tried error feedback twice — strip malformed calls, return just the text
+                console.error(`[Router] Stripping fix4 malformed call(s) after ${errorCycles} error cycles (${skipped.join(', ')})`);
+                const textOnlyBlocks = classified.newBlocks!.filter(b => b.type !== 'tool_use');
+                emitReconstructedSseStream(res, finalResult.messageStartData, textOnlyBlocks, 'end_turn', finalResult.outputTokens);
+              } else {
+                console.error(`[Router] Text + ${skipped.length} malformed tool call(s), forwarding empty tool_use for error feedback [cycle ${errorCycles + 1}] (${skipped.join(', ')})`);
+                emitReconstructedSseStream(res, finalResult.messageStartData, classified.newBlocks!, 'tool_use', finalResult.outputTokens);
+              }
+            } else {
+              // Raw passthrough
+              for (const event of finalResult.rawEvents) {
+                res.write(event + '\n\n');
+              }
+            }
+
+            res.end();
             await this.logRequest(modelName, '/v1/messages', backendRes.statusCode || 200, timer.elapsed(), undefined, `${server.host}:${server.port}`, promptPreview);
             resolve();
           });
         } else {
-          // For non-streaming, collect response and forward
+          // Non-streaming: collect full response then apply fixes
           let responseData = '';
 
           backendRes.on('data', (chunk) => {
@@ -391,11 +783,92 @@ class RouterServer {
           });
 
           backendRes.on('end', async () => {
-            res.writeHead(backendRes.statusCode || 200, {
-              'Content-Type': 'application/json',
-            });
-            res.end(responseData);
+            let finalResponse = responseData;
 
+            try {
+              const responseObj = JSON.parse(responseData);
+              if (Array.isArray(responseObj.content)) {
+                const textBlocks = responseObj.content.filter((c: any) => c.type === 'text');
+                const allText = textBlocks.map((c: any) => c.text ?? '').join('');
+                const { toolCalls, cleanText, skippedNames } = parseXmlToolCalls(allText);
+
+                if (toolCalls.length > 0) {
+                  // Fix 1: XML tool calls
+                  console.error(`[Router] Converting ${toolCalls.length} XML tool call(s) to tool_use blocks`);
+                  const newContent: any[] = responseObj.content.filter((c: any) => c.type !== 'text');
+                  if (cleanText) newContent.push({ type: 'text', text: cleanText });
+                  for (const tc of toolCalls) {
+                    newContent.push({ type: 'tool_use', id: generateToolUseId(), name: tc.name, input: tc.input });
+                  }
+                  responseObj.content = newContent;
+                  responseObj.stop_reason = 'tool_use';
+                  finalResponse = JSON.stringify(responseObj);
+                } else if (allText && !cleanText) {
+                  const errorCycles = countConsecutiveErrorCycles(requestBody);
+                  // Fix 3: error feedback with loop detection
+                  if (errorCycles >= 2) {
+                    console.error(`[Router] Stripping fix3 after ${errorCycles} error cycles (${skippedNames.join(', ')})`);
+                    responseObj.content = responseObj.content.filter((c: any) => c.type !== 'text');
+                    finalResponse = JSON.stringify(responseObj);
+                  } else {
+                    console.error(`[Router] Forwarding ${skippedNames.length} empty tool_use block(s) for error feedback [cycle ${errorCycles + 1}] (${skippedNames.join(', ')})`);
+                    const emptyToolUseBlocks = skippedNames.map(name => ({
+                      type: 'tool_use',
+                      id: generateToolUseId(),
+                      name,
+                      input: {},
+                    }));
+                    responseObj.content = [
+                      ...responseObj.content.filter((c: any) => c.type !== 'text'),
+                      ...emptyToolUseBlocks,
+                    ];
+                    responseObj.stop_reason = 'tool_use';
+                    finalResponse = JSON.stringify(responseObj);
+                  }
+                } else if (cleanText && skippedNames.length > 0) {
+                  const errorCycles = countConsecutiveErrorCycles(requestBody);
+                  // Fix 4: text + malformed tool calls with loop detection
+                  if (errorCycles >= 2) {
+                    console.error(`[Router] Stripping fix4 malformed call(s) after ${errorCycles} error cycles (${skippedNames.join(', ')})`);
+                    responseObj.content = [
+                      ...responseObj.content.filter((c: any) => c.type !== 'text'),
+                      { type: 'text', text: cleanText },
+                    ];
+                    finalResponse = JSON.stringify(responseObj);
+                  } else {
+                    console.error(`[Router] Text + ${skippedNames.length} malformed tool call(s), forwarding empty tool_use for error feedback [cycle ${errorCycles + 1}] (${skippedNames.join(', ')})`);
+                    const emptyToolUseBlocks = skippedNames.map(name => ({
+                      type: 'tool_use',
+                      id: generateToolUseId(),
+                      name,
+                      input: {},
+                    }));
+                    responseObj.content = [
+                      ...responseObj.content.filter((c: any) => c.type !== 'text'),
+                      { type: 'text', text: cleanText },
+                      ...emptyToolUseBlocks,
+                    ];
+                    responseObj.stop_reason = 'tool_use';
+                    finalResponse = JSON.stringify(responseObj);
+                  }
+                } else {
+                  // Fix 2: Thinking-only
+                  const hasText = responseObj.content.some((c: any) => c.type === 'text' && c.text);
+                  const thinkingBlocks = responseObj.content.filter((c: any) => c.type === 'thinking');
+                  if (!hasText && thinkingBlocks.length > 0) {
+                    console.error('[Router] Injecting fallback text block (thinking-only response detected)');
+                    const thinkingText = thinkingBlocks.map((c: any) => c.thinking ?? '').join('\n');
+                    responseObj.content.push({ type: 'text', text: thinkingText });
+                    finalResponse = JSON.stringify(responseObj);
+                  }
+                }
+              }
+            } catch {
+              // Not valid JSON or unexpected shape — forward original
+            }
+
+            res.writeHead(backendRes.statusCode || 200, { 'Content-Type': 'application/json' });
+            res.end(finalResponse);
             await this.logRequest(modelName, '/v1/messages', backendRes.statusCode || 200, timer.elapsed(), undefined, `${server.host}:${server.port}`, promptPreview);
             resolve();
           });

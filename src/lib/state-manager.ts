@@ -219,9 +219,9 @@ export class StateManager {
    * Generate a unique server ID
    * If the base ID is already taken, appends a counter (-2, -3, etc.)
    */
-  async generateUniqueServerId(baseId: string): Promise<string> {
+  async generateUniqueServerId(baseId: string, excludeId?: string): Promise<string> {
     const servers = await this.getAllServers();
-    const existingIds = new Set(servers.map(s => s.id));
+    const existingIds = new Set(servers.filter(s => s.id !== excludeId).map(s => s.id));
 
     // If base ID is available, use it
     if (!existingIds.has(baseId)) {

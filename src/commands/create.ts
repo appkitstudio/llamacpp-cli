@@ -40,7 +40,18 @@ export async function createCommand(model: string, options: CreateCommandOptions
   // Parse custom flags if provided
   let customFlags: string[] | undefined;
   if (options.flags) {
-    customFlags = options.flags.split(',').map(f => f.trim()).filter(f => f.length > 0);
+    customFlags = options.flags
+      .split(',')
+      .map(f => f.trim())
+      .filter(f => f.length > 0)
+      .flatMap(f => {
+        // Split "--flag value" pairs into separate elements
+        if (f.startsWith('--') && f.includes(' ')) {
+          const spaceIdx = f.indexOf(' ');
+          return [f.slice(0, spaceIdx), f.slice(spaceIdx + 1)];
+        }
+        return [f];
+      });
   }
 
   // Security warning for 0.0.0.0

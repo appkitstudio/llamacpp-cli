@@ -68,6 +68,7 @@ describe('ServerConfigService', () => {
     mockState.updateServerConfig.mockResolvedValue(undefined);
     mockState.deleteServerConfig.mockResolvedValue(undefined);
     mockState.isAliasAvailable.mockResolvedValue(null);
+    mockState.generateUniqueServerId.mockImplementation((baseId: string) => Promise.resolve(baseId));
 
     mockScanner.resolveModelPath.mockResolvedValue(null);
 
@@ -423,22 +424,23 @@ describe('ServerConfigService', () => {
       expect(mockLaunchctl.startService).toHaveBeenCalled();
     });
 
-    it('should reject migration if new ID conflicts with existing server', async () => {
+    it('should use unique ID when migration target ID conflicts with existing server', async () => {
       const oldServer = createServerConfig({ id: 'old-model' });
-      const conflictingServer = createServerConfig({ id: 'new-model' });
 
       mockState.findServer.mockResolvedValue(oldServer);
       mockScanner.resolveModelPath.mockResolvedValue('/test/models/new-model.gguf');
-      mockState.loadServerConfig.mockResolvedValue(conflictingServer); // Conflict!
+      // generateUniqueServerId returns new-model-2 because new-model is taken
+      mockState.generateUniqueServerId.mockResolvedValue('new-model-2');
 
       const result = await service.updateConfig({
         serverId: 'old-model',
         updates: { model: 'new-model.gguf' },
       });
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('A server with ID "new-model" already exists');
-      expect(mockState.deleteServerConfig).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.migrated).toBe(true);
+      expect(result.server.id).toBe('new-model-2');
+      expect(mockState.generateUniqueServerId).toHaveBeenCalledWith('new-model', 'old-model');
     });
 
     it('should not migrate if model name sanitizes to same ID', async () => {

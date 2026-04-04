@@ -183,7 +183,17 @@ export class ServerConfigService {
       if (typeof updates.customFlags === 'string') {
         validated.customFlags = updates.customFlags === ''
           ? undefined
-          : updates.customFlags.split(',').map(f => f.trim()).filter(f => f.length > 0);
+          : updates.customFlags
+              .split(',')
+              .map(f => f.trim())
+              .filter(f => f.length > 0)
+              .flatMap(f => {
+                if (f.startsWith('--') && f.includes(' ')) {
+                  const spaceIdx = f.indexOf(' ');
+                  return [f.slice(0, spaceIdx), f.slice(spaceIdx + 1)];
+                }
+                return [f];
+              });
       } else {
         validated.customFlags = updates.customFlags;
       }
@@ -209,17 +219,10 @@ export class ServerConfigService {
       return { isMigration: false };
     }
 
-    // Check for ID conflict
-    const existingServer = await stateManager.loadServerConfig(newServerId);
-    if (existingServer) {
-      throw new Error(
-        `A server with ID "${newServerId}" already exists. ` +
-        `Changing the model would create this server ID, but it conflicts with an existing server. ` +
-        `Delete the existing server first.`
-      );
-    }
+    // Generate a unique ID, excluding the current server (which is being replaced)
+    const uniqueServerId = await stateManager.generateUniqueServerId(newServerId, server.id);
 
-    return { isMigration: true, newServerId };
+    return { isMigration: true, newServerId: uniqueServerId };
   }
 
   /**
@@ -276,6 +279,7 @@ export class ServerConfigService {
       plistPath: path.join(plistDir, `studio.appkit.llamacpp-cli.${newServerId}.plist`),
       stdoutPath: path.join(logsDir, `${newServerId}.stdout`),
       stderrPath: path.join(logsDir, `${newServerId}.stderr`),
+      httpLogPath: path.join(logsDir, `${newServerId}.http`),
       status: 'stopped' as const,
       pid: undefined,
       lastStopped: new Date().toISOString(),
@@ -324,6 +328,18 @@ export class ServerConfigService {
       onProgress?.('Stopping server', 2, 3);
       await launchctlManager.unloadService(server.plistPath);
       await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    // Clear logs if the model changed
+    const modelChanged = updates.modelName !== undefined && updates.modelName !== server.modelName;
+    if (modelChanged) {
+      for (const logPath of [server.stdoutPath, server.stderrPath, server.httpLogPath]) {
+        try {
+          await fs.truncate(logPath, 0);
+        } catch {
+          // File may not exist yet, ignore
+        }
+      }
     }
 
     // Apply updates

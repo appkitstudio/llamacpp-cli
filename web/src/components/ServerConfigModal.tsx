@@ -200,7 +200,6 @@ export function ServerConfigModal({ server, isOpen, onClose, onUpdateStart }: Se
                   const serverModel = findServerModel(server.modelName);
                   const isCurrentModel = serverModel && getModelIdentifier(serverModel) === modelIdentifier;
                   const hasOtherServer = model.serversUsing > 0 && !isCurrentModel;
-                  const canSelect = isCurrentModel || !hasOtherServer;
 
                   let label = getModelDisplayName(model);
                   if (isCurrentModel) {
@@ -214,7 +213,6 @@ export function ServerConfigModal({ server, isOpen, onClose, onUpdateStart }: Se
                     <option
                       key={model.filename}
                       value={modelIdentifier}
-                      disabled={!canSelect}
                     >
                       {label}
                     </option>
