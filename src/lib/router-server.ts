@@ -353,6 +353,8 @@ class RouterServer {
         res.end(JSON.stringify({ status: 'ok', service: 'llamacpp-router' }));
       } else if (url === '/health' && method === 'GET') {
         await this.handleHealth(req, res);
+      } else if (url.startsWith('/props') && method === 'GET') {
+        await this.handleProps(req, res, url);
       } else if (url === '/v1/models' && method === 'GET') {
         await this.handleModels(req, res);
       } else if (url.startsWith('/v1/models/') && method === 'GET') {
@@ -385,6 +387,60 @@ class RouterServer {
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
     }));
+  }
+
+  /**
+   * Proxy llama.cpp's /props to a backend server. Pass ?model=<name> to
+   * select which backend; otherwise picks the first running server.
+   * Used by clients (e.g. lcode) to discover the loaded n_ctx.
+   */
+  private async handleProps(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    url: string,
+  ): Promise<void> {
+    const query = new URL(url, 'http://localhost').searchParams;
+    const requestedModel = query.get('model');
+
+    const servers = await this.getAllServers();
+    const running = servers.filter((s) => s.status === 'running');
+    const target = requestedModel
+      ? await this.findServerForModel(requestedModel)
+      : running[0] ?? null;
+
+    if (!target || target.status !== 'running') {
+      this.sendError(res, 404, 'Not Found',
+        requestedModel
+          ? `No running server for model: ${requestedModel}`
+          : 'No running servers');
+      return;
+    }
+
+    const host = target.host === '0.0.0.0' ? '127.0.0.1' : target.host;
+    const backendReq = http.request({
+      hostname: host,
+      port: target.port,
+      path: '/props',
+      method: 'GET',
+      timeout: this.config.requestTimeout,
+    }, (backendRes) => {
+      res.writeHead(backendRes.statusCode || 200, {
+        'Content-Type': backendRes.headers['content-type'] ?? 'application/json',
+      });
+      backendRes.pipe(res);
+    });
+    backendReq.on('error', (err) => {
+      if (!res.headersSent) {
+        this.sendError(res, 502, 'Bad Gateway', `Backend /props failed: ${err.message}`);
+      }
+    });
+    backendReq.on('timeout', () => {
+      backendReq.destroy();
+      if (!res.headersSent) {
+        this.sendError(res, 504, 'Gateway Timeout', 'Backend /props did not respond in time');
+      }
+    });
+    backendReq.end();
   }
 
   /**
