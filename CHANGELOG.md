@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [2.2.0](https://github.com/appkitstudio/llamacpp-cli/compare/v2.1.0...v2.2.0) (2026-05-09)
+
+
+### Features
+
+* add /props endpoint to router for backend metadata discovery ([21b153e](https://github.com/appkitstudio/llamacpp-cli/commit/21b153e26b9fd8a06b81e96ae612f7c611ed66f8))
+* enhance chat functionality with thinking messages and refactor message handling ([4f5774f](https://github.com/appkitstudio/llamacpp-cli/commit/4f5774f58abbb68e90d4950ed215ebd4dcb69642))
+* enhance flag parsing and server ID generation for unique server configurations ([dda222c](https://github.com/appkitstudio/llamacpp-cli/commit/dda222c215d58d7a21b21aec9842735dd624ee4d))
+
 ## [2.1.0](https://github.com/appkitstudio/llamacpp-cli/compare/v2.1.0-beta.1...v2.1.0) (2026-03-10)
 
 
